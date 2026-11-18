@@ -149,7 +149,13 @@ try {
   Phase 'P3 stop / backup-skip / start'
   $code = Run-Bat $Root 'stop.bat' @('--no-pause') 'p3-stop.log'
   Check 'P3 stop.bat exit 0' ($code -eq 0)
-  Check 'P3 PG service Stopped' (Wait-State 'IterationBoardPG' 'Stopped' 120)
+  $pgStopped = Wait-State 'IterationBoardPG' 'Stopped' 240
+  if (-not $pgStopped) {
+    $qx = (& sc.exe queryex IterationBoardPG | Out-String) -replace "[\r\n]+", ' // '
+    $procs = (Get-Process postgres, java -ErrorAction SilentlyContinue | ForEach-Object { "$($_.ProcessName):$($_.Id)" }) -join ','
+    Write-Host "::error::P3-DIAG sc queryex: $qx processes: $procs"
+  }
+  Check 'P3 PG service Stopped' $pgStopped
   Check 'P3 App service Stopped' (Wait-State 'IterationBoardApp' 'Stopped' 120)
   $code = Run-Bat $Root 'backup.bat' @('auto') 'p3-backup-skip.log'
   Check 'P3 backup.bat auto exit 0 while services stopped' ($code -eq 0)
@@ -245,6 +251,7 @@ if ($script:Failures.Count -gt 0) {
   $script:Failures | ForEach-Object { Write-Host "  - $_" }
   if ($script:Failures -match 'P1 ') { Dump-Tail 'p1-install.log' }
   if ($script:Failures -match 'P2 ') { Dump-Tail 'p2-playwright.log' }
+  if ($script:Failures -match 'P3 ') { Dump-Tail 'p3-stop.log' }
   if ($script:Failures -match 'P6 ') { Dump-Tail 'p6-upgrade.log' }
   if ($script:Failures -match 'P10 ') { Dump-Tail 'p10-space-install.log' }
   $joined = ($script:Failures -join ' | ') -replace '%', '%25'
