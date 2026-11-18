@@ -4,17 +4,35 @@ rem ============================================================
 rem  Iteration Board - offline installer (Windows 10/11/Server)
 rem  Run as Administrator from the extracted package folder.
 rem  All messages are ASCII-only on purpose (cmd codepage safe).
+rem
+rem  Usage: install.bat [port] [--autostart] [--no-pause]
+rem    port         application port, default 18080
+rem    --autostart  register both services to start automatically
+rem                 at boot. Default is MANUAL start.
+rem    --no-pause   never wait for a key press (used by CI runs).
 rem ============================================================
 set "ROOT=%~dp0"
 if "%ROOT:~-1%"=="\" set "ROOT=%ROOT:~0,-1%"
-set "APP_PORT=8080"
-if not "%~1"=="" set "APP_PORT=%~1"
+set "APP_PORT=18080"
+set "NOPAUSE=0"
+set "AUTOSTART=0"
+:parse_args
+if "%~1"=="" goto :args_done
+if /i "%~1"=="--no-pause" set "NOPAUSE=1"
+if /i "%~1"=="--autostart" set "AUTOSTART=1"
+if /i "%~1"=="--yes" set "NOPAUSE=1"
+if /i not "%~1"=="--no-pause" if /i not "%~1"=="--autostart" if /i not "%~1"=="--yes" set "APP_PORT=%~1"
+shift
+goto :parse_args
+:args_done
+set "PG_START_TYPE=demand"
+if "%AUTOSTART%"=="1" set "PG_START_TYPE=auto"
 
 rem --- 1. Administrator check --------------------------------
 net session >nul 2>&1
 if errorlevel 1 (
   echo [ERROR] Please right-click install.bat and choose "Run as administrator".
-  pause
+  call :ib_pause
   exit /b 1
 )
 
@@ -26,9 +44,33 @@ rem against itself with all spaces removed instead.
 if not "%ROOT%"=="%ROOT: =%" (
   echo [WARN] Install path contains a space: %ROOT%
   echo [WARN] A path without spaces and without non-ASCII characters is recommended, e.g. D:\iteration-board
-  choice /C YN /M "Continue anyway"
-  if errorlevel 2 exit /b 1
+  if "%NOPAUSE%"=="1" (
+    echo [WARN] Continuing anyway because --no-pause was given.
+  ) else (
+    choice /C YN /M "Continue anyway"
+    if errorlevel 2 exit /b 1
+  )
 )
+
+rem --- 2b. The application port must be free ------------------
+rem Detect a busy port BEFORE installing, name the process that
+rem owns it, and let the user pick another port.
+:check_port
+call :port_listening %APP_PORT%
+if "%PORT_BUSY%"=="0" goto :port_ok
+echo [WARN] Port %APP_PORT% is already in use by:
+for /f "tokens=5" %%P in ('netstat -ano ^| findstr /R /C:":%APP_PORT% .*LISTENING"') do (
+  for /f "usebackq delims=" %%N in (`powershell -NoProfile -Command "(Get-Process -Id %%P -ErrorAction SilentlyContinue).ProcessName"`) do echo [WARN]   PID %%P - %%N
+)
+if "%NOPAUSE%"=="1" (
+  echo [ERROR] Port %APP_PORT% is busy and --no-pause was given.
+  echo [ERROR] Free the port, or pass another one, e.g. install.bat 18081
+  call :ib_pause
+  exit /b 1
+)
+set /p "APP_PORT=Type another port and press Enter, or press Ctrl+C to abort: "
+goto :check_port
+:port_ok
 
 rem --- 3. VC++ 2015-2022 x64 runtime (app-local DLLs) ----------
 rem PostgreSQL is built with MSVC and needs the VC++ 2015-2022
@@ -49,51 +91,74 @@ if not "%VC_MISSING%"=="" (
   echo [ERROR] Bundled VC++ runtime DLLs are missing from this package:
   for %%F in (%VC_MISSING%) do echo [ERROR]   - %%F
   echo [ERROR] The package is incomplete or was not fully extracted.
-  echo [ERROR] Re-extract the full package ^(or re-apply the patch^),
+  echo [ERROR] Re-extract the full package or re-apply the patch,
   echo [ERROR] then run install.bat again.
-  pause
+  call :ib_pause
   exit /b 1
 )
-echo [INFO] VC++ runtime DLLs are bundled in the package (app-local), nothing to install.
+echo [INFO] VC++ runtime DLLs are bundled in the package - app-local, nothing to install.
 
 rem --- 4. Generate random DB password, write config ----------
 set "CFG=%ROOT%\config\application.yml"
+set "DBPWD="
 if exist "%ROOT%\config\.installed" (
-  echo [INFO] Existing config detected (.installed marker). Keeping current config and database.
-  goto :initdb_done
+  echo [INFO] Existing config detected - .installed marker present. Keeping current config and database.
+  goto :config_done
 )
 for /f "usebackq delims=" %%P in (`powershell -NoProfile -Command "[guid]::NewGuid().ToString('N') + [guid]::NewGuid().ToString('N').Substring(0,16)"`) do set "DBPWD=%%P"
 if "%DBPWD%"=="" (
   echo [ERROR] Failed to generate a random database password.
-  pause
+  call :ib_pause
   exit /b 1
 )
 powershell -NoProfile -Command "(Get-Content '%CFG%') -replace '__DB_PASSWORD__','%DBPWD%' -replace '__APP_PORT__','%APP_PORT%' | Set-Content -Encoding ASCII '%CFG%'"
 if errorlevel 1 (
   echo [ERROR] Failed to write config\application.yml.
-  pause
+  call :ib_pause
+  exit /b 1
+)
+findstr /C:"__DB_PASSWORD__" /C:"__APP_PORT__" "%CFG%" >nul 2>&1
+if not errorlevel 1 (
+  echo [ERROR] config\application.yml still contains unreplaced placeholders.
+  call :ib_pause
   exit /b 1
 )
 echo installed %DATE% %TIME% > "%ROOT%\config\.installed"
-echo [INFO] config\application.yml written (random DB password generated).
+echo [INFO] config\application.yml written - random DB password generated.
+:config_done
+rem The effective port comes from the config file: an existing
+rem install may already use a different port than the argument.
+for /f "usebackq delims=" %%P in (`powershell -NoProfile -Command "$c = Get-Content '%CFG%' -Raw; if ($c -match 'port:\s*(\d+)') { $Matches[1] }"`) do set "APP_PORT=%%P"
+echo [INFO] Application port: %APP_PORT%
 
-rem --- 5. initdb (UTF8) --------------------------------------
+rem --- 5. initdb (UTF8, ICU locale zh-CN) ----------------------
+rem Encoding is fixed to UTF8 and the locale is pinned to the
+rem ICU provider with zh-CN (PostgreSQL 18 built-in ICU), so
+rem Chinese sorting is correct and nothing depends on the OS
+rem locale - an OS-default Chinese GBK locale made initdb pick
+rem "Chinese (Simplified)_China.936" and miss a text search
+rem configuration (field round 2).
 if exist "%ROOT%\data\pgdata\PG_VERSION" goto :initdb_done
-echo [INFO] Initializing PostgreSQL data directory (UTF8) ...
+if "%DBPWD%"=="" (
+  for /f "tokens=1,2" %%A in ('findstr /C:"password:" "%CFG%"') do set "DBPWD=%%B"
+)
+echo [INFO] Initializing PostgreSQL data directory - UTF8, ICU locale zh-CN ...
 if not exist "%ROOT%\data\pgdata" mkdir "%ROOT%\data\pgdata"
 if not exist "%ROOT%\logs" mkdir "%ROOT%\logs"
 echo %DBPWD%> "%TEMP%\ib-pw.txt"
-"%ROOT%\runtime\pgsql\bin\initdb.exe" -D "%ROOT%\data\pgdata" -U postgres -E UTF8 --auth=scram-sha-256 --pwfile="%TEMP%\ib-pw.txt"
+"%ROOT%\runtime\pgsql\bin\initdb.exe" -D "%ROOT%\data\pgdata" -U postgres -E UTF8 --locale-provider=icu --icu-locale=zh-CN --auth=scram-sha-256 --pwfile="%TEMP%\ib-pw.txt"
 set "IBRC=%ERRORLEVEL%"
 del "%TEMP%\ib-pw.txt" >nul 2>&1
 if not "%IBRC%"=="0" (
   echo [ERROR] initdb failed with code %IBRC%. See the initdb output above.
   if "%IBRC%"=="-1073741515" (
-    echo [ERROR] Code -1073741515 ^(0xC0000135^) means a required DLL was not found.
+    echo [ERROR] Code -1073741515 - 0xC0000135 - means a required DLL was not found.
     echo [ERROR] Check that vcruntime140.dll, vcruntime140_1.dll and msvcp140.dll
     echo [ERROR] exist in runtime\pgsql\bin, then run install.bat again.
   )
-  pause
+  echo [ERROR] If data\pgdata has no PG_VERSION file, it is a half-initialized
+  echo [ERROR] leftover: delete the data\pgdata folder and run install.bat again.
+  call :ib_pause
   exit /b 1
 )
 >>"%ROOT%\data\pgdata\postgresql.conf" echo port = 15432
@@ -102,7 +167,7 @@ echo [INFO] Starting PostgreSQL temporarily to create the database ...
 "%ROOT%\runtime\pgsql\bin\pg_ctl.exe" -D "%ROOT%\data\pgdata" -l "%ROOT%\logs\pg-init.log" -o "-p 15432" -w -t 60 start
 if errorlevel 1 (
   echo [ERROR] Temporary PostgreSQL start failed. See logs\pg-init.log.
-  pause
+  call :ib_pause
   exit /b 1
 )
 set "PGPASSWORD=%DBPWD%"
@@ -112,41 +177,146 @@ set "PGPASSWORD="
 "%ROOT%\runtime\pgsql\bin\pg_ctl.exe" -D "%ROOT%\data\pgdata" -m fast -w -t 60 stop >nul 2>&1
 if not "%IBRC%"=="0" (
   echo [ERROR] createdb failed with code %IBRC%.
-  pause
+  call :ib_pause
   exit /b 1
 )
 echo [INFO] Database iteration_board created.
 :initdb_done
 
-rem --- 6. Register services with WinSW ------------------------
+rem --- 6. Register services ------------------------------------
 echo [INFO] Registering Windows services ...
-copy /Y "%ROOT%\runtime\winsw\WinSW-x64.exe" "%ROOT%\app\IterationBoardApp.exe" >nul
-copy /Y "%ROOT%\runtime\winsw\WinSW-x64.exe" "%ROOT%\app\IterationBoardPG.exe" >nul
-copy /Y "%ROOT%\service\IterationBoardApp.xml" "%ROOT%\app\IterationBoardApp.xml" >nul
-copy /Y "%ROOT%\service\IterationBoardPG.xml" "%ROOT%\app\IterationBoardPG.xml" >nul
-set "IB_ROOT=%ROOT%"
-powershell -NoProfile -Command "Get-Content '%ROOT%\app\IterationBoardApp.xml' | ForEach-Object { $_.Replace('__INSTALL_DIR__', $env:IB_ROOT) } | Set-Content -Encoding ASCII '%ROOT%\app\IterationBoardApp.xml'"
-powershell -NoProfile -Command "Get-Content '%ROOT%\app\IterationBoardPG.xml' | ForEach-Object { $_.Replace('__INSTALL_DIR__', $env:IB_ROOT) } | Set-Content -Encoding ASCII '%ROOT%\app\IterationBoardPG.xml'"
-"%ROOT%\app\IterationBoardPG.exe" install
-if errorlevel 1 ( echo [ERROR] Failed to register IterationBoardPG service. & pause & exit /b 1 )
-"%ROOT%\app\IterationBoardApp.exe" install
-if errorlevel 1 ( echo [ERROR] Failed to register IterationBoardApp service. & pause & exit /b 1 )
 
-rem --- 7. Daily backup task at 02:00 --------------------------
-schtasks /Create /TN "IterationBoardBackup" /TR "\"%ROOT%\backup.bat\"" /SC DAILY /ST 02:00 /RU SYSTEM /F >nul 2>&1
+rem PostgreSQL: official pg_ctl registration, NOT WinSW.
+rem postgres.exe refuses to run with an administrator token, so
+rem a WinSW wrapper running as LocalSystem could never start it:
+rem the wrapper reported "started" while postgres exited at once
+rem and the failure action restarted it forever (field round 3).
+rem A service created by pg_ctl register runs
+rem postgres with a restricted token and works under LocalSystem.
+rem Start type: -S demand (manual) by default, -S auto only when
+rem --autostart was given.
+if exist "%ROOT%\app\IterationBoardPG.exe" (
+  echo [INFO] Removing the old WinSW-based PostgreSQL service ...
+  "%ROOT%\app\IterationBoardPG.exe" stop >nul 2>&1
+  "%ROOT%\app\IterationBoardPG.exe" uninstall >nul 2>&1
+  del /Q "%ROOT%\app\IterationBoardPG.exe" >nul 2>&1
+  del /Q "%ROOT%\app\IterationBoardPG.xml" >nul 2>&1
+)
+sc qc IterationBoardPG 2>nul | findstr /C:"app\IterationBoardPG.exe" >nul 2>&1
+if not errorlevel 1 (
+  net stop IterationBoardPG >nul 2>&1
+  sc delete IterationBoardPG >nul 2>&1
+  echo [INFO] Removed a leftover WinSW-based PostgreSQL service registration.
+)
+sc query IterationBoardPG >nul 2>&1
+if errorlevel 1 (
+  "%ROOT%\runtime\pgsql\bin\pg_ctl.exe" register -N IterationBoardPG -D "%ROOT%\data\pgdata" -S %PG_START_TYPE%
+  if errorlevel 1 (
+    echo [ERROR] Failed to register the IterationBoardPG service with pg_ctl.
+    call :ib_pause
+    exit /b 1
+  )
+  echo [INFO] IterationBoardPG registered with pg_ctl - start type %PG_START_TYPE%.
+) else (
+  sc config IterationBoardPG start= %PG_START_TYPE% >nul 2>&1
+  echo [INFO] IterationBoardPG was already registered; start type set to %PG_START_TYPE%.
+)
+rem Cap restart-on-failure at 3 tries, 30 s apart, per day: a
+rem broken service must not spin forever and flood the logs.
+sc failure IterationBoardPG reset= 86400 actions= restart/30000/restart/30000/restart/30000 >nul 2>&1
+
+rem Application service: WinSW wrapper around the JVM. It depends
+rem on IterationBoardPG (see service\IterationBoardApp.xml).
+sc query IterationBoardApp >nul 2>&1
+if not errorlevel 1 (
+  if exist "%ROOT%\app\IterationBoardApp.exe" "%ROOT%\app\IterationBoardApp.exe" stop >nul 2>&1
+  if exist "%ROOT%\app\IterationBoardApp.exe" "%ROOT%\app\IterationBoardApp.exe" uninstall >nul 2>&1
+)
+copy /Y "%ROOT%\runtime\winsw\WinSW-x64.exe" "%ROOT%\app\IterationBoardApp.exe" >nul
+copy /Y "%ROOT%\service\IterationBoardApp.xml" "%ROOT%\app\IterationBoardApp.xml" >nul
+set "IB_ROOT=%ROOT%"
+rem Read the whole file first, then write it back: piping
+rem Get-Content into Set-Content on the SAME file fails with
+rem "file in use" and silently leaves the placeholder in place
+rem (field round 2). [IO.File] read/write avoids it.
+powershell -NoProfile -Command "$p = '%ROOT%\app\IterationBoardApp.xml'; $c = [IO.File]::ReadAllText($p); [IO.File]::WriteAllText($p, $c.Replace('__INSTALL_DIR__', $env:IB_ROOT), [Text.Encoding]::ASCII)"
+if errorlevel 1 (
+  echo [ERROR] Failed to write the installation path into app\IterationBoardApp.xml.
+  call :ib_pause
+  exit /b 1
+)
+findstr /C:"__INSTALL_DIR__" "%ROOT%\app\IterationBoardApp.xml" >nul 2>&1
+if not errorlevel 1 (
+  echo [ERROR] app\IterationBoardApp.xml still contains the __INSTALL_DIR__ placeholder.
+  call :ib_pause
+  exit /b 1
+)
+if "%AUTOSTART%"=="1" (
+  powershell -NoProfile -Command "$p = '%ROOT%\app\IterationBoardApp.xml'; $c = [IO.File]::ReadAllText($p); [IO.File]::WriteAllText($p, $c.Replace('<startmode>Manual</startmode>', '<startmode>Automatic</startmode>'), [Text.Encoding]::ASCII)"
+)
+"%ROOT%\app\IterationBoardApp.exe" install
+if errorlevel 1 (
+  echo [ERROR] Failed to register the IterationBoardApp service.
+  call :ib_pause
+  exit /b 1
+)
+echo [INFO] Services registered: IterationBoardPG via pg_ctl - start type %PG_START_TYPE%; IterationBoardApp via WinSW, depends on IterationBoardPG.
+
+rem --- 7. Daily backup task at 02:00 ---------------------------
+schtasks /Create /TN "IterationBoardBackup" /TR "\"%ROOT%\backup.bat\" auto" /SC DAILY /ST 02:00 /RU SYSTEM /F >nul 2>&1
 if errorlevel 1 (
   echo [WARN] Could not create the daily 02:00 backup scheduled task. You can create it later in Task Scheduler.
 ) else (
-  echo [INFO] Daily backup task created (02:00, keeps 30 days).
+  echo [INFO] Daily backup task created - every day at 02:00, keeps 30 days.
 )
 
-rem --- 8. Start services --------------------------------------
-call "%ROOT%\start.bat" --no-pause
+rem --- 8. Start services and verify they really work -----------
+rem A service reporting "Running" is not proof: verify the
+rem postgres process exists, port 15432 answers pg_isready, and
+rem the application answers HTTP 200 (field rounds 2 and 3).
+echo [INFO] Starting PostgreSQL service ...
+net start IterationBoardPG >nul 2>&1
+sc query IterationBoardPG | findstr /C:"RUNNING" >nul 2>&1
 if errorlevel 1 (
-  echo [ERROR] Service start failed. Check the logs folder.
-  pause
+  echo [ERROR] IterationBoardPG did not reach the RUNNING state.
+  call :show_pg_log
+  call :ib_pause
   exit /b 1
 )
+tasklist /FI "IMAGENAME eq postgres.exe" /NH | findstr /I /C:"postgres.exe" >nul 2>&1
+if errorlevel 1 (
+  echo [ERROR] No postgres.exe process is running although the service reports RUNNING.
+  call :ib_pause
+  exit /b 1
+)
+powershell -NoProfile -Command "$ok=$false; for($i=0;$i -lt 30;$i++){ & '%ROOT%\runtime\pgsql\bin\pg_isready.exe' -h 127.0.0.1 -p 15432 | Out-Null; if($LASTEXITCODE -eq 0){$ok=$true;break}; Start-Sleep -Seconds 2 }; if(-not $ok){exit 1}"
+if errorlevel 1 (
+  echo [ERROR] PostgreSQL is not accepting connections on port 15432 after 60 seconds.
+  call :show_pg_log
+  call :ib_pause
+  exit /b 1
+)
+echo [INFO] PostgreSQL verified: process running, port 15432 listening, pg_isready OK.
+
+echo [INFO] Starting application service ...
+net start IterationBoardApp >nul 2>&1
+sc query IterationBoardApp | findstr /C:"RUNNING" >nul 2>&1
+if errorlevel 1 (
+  echo [ERROR] IterationBoardApp did not reach the RUNNING state. See the logs folder.
+  call :ib_pause
+  exit /b 1
+)
+powershell -NoProfile -Command "$ok=$false; for($i=0;$i -lt 45;$i++){ try { $r=Invoke-WebRequest -UseBasicParsing -Uri 'http://127.0.0.1:%APP_PORT%/api/v1/meta' -TimeoutSec 4; if($r.StatusCode -eq 200){$ok=$true;break} } catch {}; Start-Sleep -Seconds 2 }; if(-not $ok){exit 1}"
+if errorlevel 1 (
+  echo [ERROR] The application did not answer on http://127.0.0.1:%APP_PORT%/ within 90 seconds.
+  echo [ERROR] Last 50 lines of logs\app.log:
+  powershell -NoProfile -Command "Get-Content '%ROOT%\logs\app.log' -Tail 50 -ErrorAction SilentlyContinue"
+  echo [ERROR] Last 50 lines of logs\IterationBoardApp.out.log:
+  powershell -NoProfile -Command "Get-Content '%ROOT%\logs\IterationBoardApp.out.log' -Tail 50 -ErrorAction SilentlyContinue"
+  call :ib_pause
+  exit /b 1
+)
+echo [INFO] Application verified: http://127.0.0.1:%APP_PORT%/ answers 200.
 
 echo.
 echo ============================================================
@@ -155,7 +325,34 @@ echo  Open in a browser:  http://localhost:%APP_PORT%/
 echo  From other PCs on the LAN:  http://^<this-PC-IP^>:%APP_PORT%/
 echo  IMPORTANT: the FIRST account registered becomes the
 echo  administrator. Register it right away.
+if "%AUTOSTART%"=="1" (
+  echo  Both services start automatically at boot.
+) else (
+  echo  Both services are set to MANUAL start: they will NOT
+  echo  start automatically when the PC reboots. Run start.bat
+  echo  to start them, or reinstall with --autostart.
+)
+echo  The daily 02:00 backup only runs while the services are
+echo  up; when they are stopped it logs a skip line and does
+echo  nothing. Run backup.bat manually after starting them.
 echo ============================================================
-pause
+call :ib_pause
 exit /b 0
 
+rem --- subroutines ----------------------------------------------
+:ib_pause
+if "%NOPAUSE%"=="0" pause
+exit /b 0
+
+:port_listening
+set "PORT_BUSY=0"
+netstat -ano | findstr /R /C:":%~1 .*LISTENING" >nul 2>&1
+if not errorlevel 1 set "PORT_BUSY=1"
+exit /b 0
+
+:show_pg_log
+if exist "%ROOT%\data\pgdata\log" (
+  echo [ERROR] Last 50 lines of the newest PostgreSQL log file:
+  powershell -NoProfile -Command "$f = Get-ChildItem '%ROOT%\data\pgdata\log' -File -ErrorAction SilentlyContinue | Sort-Object LastWriteTime | Select-Object -Last 1; if ($f) { Get-Content $f.FullName -Tail 50 }"
+)
+exit /b 0

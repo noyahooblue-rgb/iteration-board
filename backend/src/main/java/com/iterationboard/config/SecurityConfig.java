@@ -6,7 +6,6 @@ import com.iterationboard.repo.*;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
 import org.springframework.http.HttpStatus;
-import org.springframework.http.MediaType;
 import org.springframework.security.config.annotation.web.builders.HttpSecurity;
 import org.springframework.security.config.http.SessionCreationPolicy;
 import org.springframework.security.core.userdetails.User;
@@ -78,25 +77,42 @@ public class SecurityConfig {
             .authorizeHttpRequests(auth -> auth
                     .requestMatchers("/api/v1/meta", "/api/v1/auth/captcha", "/api/v1/auth/register", "/api/v1/auth/login").permitAll()
                     .requestMatchers("/v3/api-docs/**", "/v3/api-docs.yaml", "/swagger-ui/**", "/swagger-ui.html", "/openapi.yaml").permitAll()
-                    .anyRequest().authenticated())
+                    // 1.0.3 修复（实测第四轮）：只对 /api/** 要求认证；/api/** 以外是
+                    // 前端静态资源与 SPA 路由，全部放行（否则未登录打开首页直接 401
+                    // JSON，永远看不到登录页）。SPA 路由的 index.html 回退见 SpaController。
+                    .requestMatchers("/api/**").authenticated()
+                    .anyRequest().permitAll())
             .exceptionHandling(ex -> ex
+                    // 401/403 的 JSON 只用于 /api/**；非 API 路径走容器默认状态码。
+                    // 字符集必须显式 UTF-8：getWriter() 默认按 ISO-8859-1 输出，
+                    // 中文消息会变问号（实测第四轮缺陷 2）。
                     .authenticationEntryPoint((req, res, e) -> {
-                        res.setStatus(HttpStatus.UNAUTHORIZED.value());
-                        res.setContentType(MediaType.APPLICATION_JSON_VALUE);
-                        Map<String, Object> m = new LinkedHashMap<>();
-                        m.put("code", "UNAUTHORIZED");
-                        m.put("message", "未登录或会话已过期");
-                        m.put("detail", null);
-                        res.getWriter().write(objectMapper.writeValueAsString(m));
+                        if (req.getRequestURI().startsWith("/api/")) {
+                            res.setStatus(HttpStatus.UNAUTHORIZED.value());
+                            res.setCharacterEncoding("UTF-8");
+                            res.setContentType("application/json;charset=UTF-8");
+                            Map<String, Object> m = new LinkedHashMap<>();
+                            m.put("code", "UNAUTHORIZED");
+                            m.put("message", "未登录或会话已过期");
+                            m.put("detail", null);
+                            res.getWriter().write(objectMapper.writeValueAsString(m));
+                        } else {
+                            res.sendError(HttpStatus.UNAUTHORIZED.value());
+                        }
                     })
                     .accessDeniedHandler((req, res, e) -> {
-                        res.setStatus(HttpStatus.FORBIDDEN.value());
-                        res.setContentType(MediaType.APPLICATION_JSON_VALUE);
-                        Map<String, Object> m = new LinkedHashMap<>();
-                        m.put("code", "FORBIDDEN");
-                        m.put("message", "无权限执行此操作");
-                        m.put("detail", null);
-                        res.getWriter().write(objectMapper.writeValueAsString(m));
+                        if (req.getRequestURI().startsWith("/api/")) {
+                            res.setStatus(HttpStatus.FORBIDDEN.value());
+                            res.setCharacterEncoding("UTF-8");
+                            res.setContentType("application/json;charset=UTF-8");
+                            Map<String, Object> m = new LinkedHashMap<>();
+                            m.put("code", "FORBIDDEN");
+                            m.put("message", "无权限执行此操作");
+                            m.put("detail", null);
+                            res.getWriter().write(objectMapper.writeValueAsString(m));
+                        } else {
+                            res.sendError(HttpStatus.FORBIDDEN.value());
+                        }
                     }))
             .formLogin(f -> f.disable())
             .httpBasic(b -> b.disable())

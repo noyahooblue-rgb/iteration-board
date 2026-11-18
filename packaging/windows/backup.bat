@@ -17,6 +17,26 @@ if "%ROOT:~-1%"=="\" set "ROOT=%ROOT:~0,-1%"
 if not exist "%ROOT%\backup" mkdir "%ROOT%\backup"
 if not exist "%ROOT%\logs" mkdir "%ROOT%\logs"
 
+rem --- the services must be running ----------------------------
+rem Since 1.0.3 both services default to MANUAL start, so at
+rem 02:00 they may well be stopped. The scheduled run must never
+rem start services on its own and must not end with an error
+rem code: log a skip line and exit 0. A manual run
+rem tells the user to start the services first.
+sc query IterationBoardPG >nul 2>&1
+if errorlevel 1 goto :svc_skip
+sc query IterationBoardPG | findstr /C:"RUNNING" >nul 2>&1
+if errorlevel 1 goto :svc_skip
+goto :svc_ok
+:svc_skip
+echo %DATE% %TIME% [SKIP] PostgreSQL service is not running; backup skipped. >> "%ROOT%\logs\backup.log"
+if "%~1"=="auto" exit /b 0
+echo [INFO] The PostgreSQL service is not running, so there is nothing to back up.
+echo [INFO] Start the services first - run start.bat - then run backup.bat again.
+pause
+exit /b 0
+:svc_ok
+
 rem --- read DB password from config\application.yml -----------
 set "DBPWD="
 for /f "tokens=1,2" %%A in ('findstr /C:"password:" "%ROOT%\config\application.yml"') do set "DBPWD=%%B"
@@ -39,7 +59,10 @@ if not "%IBRC%"=="0" (
 )
 if exist "%ROOT%\data\uploads" (
   robocopy "%ROOT%\data\uploads" "%DEST%\uploads" /E /NFL /NDL /NJH /NJS >nul
-  if errorlevel 8 ( echo [ERROR] uploads copy failed. >> "%ROOT%\logs\backup.log" & exit /b 1 )
+  if errorlevel 8 (
+    echo [ERROR] uploads copy failed. >> "%ROOT%\logs\backup.log"
+    exit /b 1
+  )
 )
 copy /Y "%ROOT%\config\application.yml" "%DEST%\application.yml" >nul
 echo %DATE% %TIME% backup OK: %DEST% >> "%ROOT%\logs\backup.log"

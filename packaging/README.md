@@ -8,7 +8,7 @@
 | --- | --- |
 | `build-package.sh` | 打包主脚本（在 Linux 构建机运行） |
 | `windows/*.bat` | 随包交付的 Windows 脚本：install / start / stop / uninstall / backup / restore / upgrade |
-| `windows/IterationBoardApp.xml`、`windows/IterationBoardPG.xml` | WinSW 服务定义模板（包内组装到 `service/` 目录，安装时复制到 `app/` 并替换安装路径占位符） |
+| `windows/IterationBoardApp.xml` | 应用服务的 WinSW 定义模板（包内组装到 `service/` 目录，安装时复制到 `app/` 并替换安装路径占位符）。数据库服务自 1.0.3 起不用 WinSW，改由 install.bat 用 `pg_ctl register` 注册（postgres 拒绝在管理员令牌下运行，WinSW 包装必然失败），故不再有 IterationBoardPG.xml |
 | `config/application.yml` | 应用配置模板（占位符 `__DB_PASSWORD__`、`__APP_PORT__` 由 install.bat 在安装时替换） |
 
 ## 打包步骤
@@ -23,7 +23,7 @@ bash packaging/build-package.sh --skip-downloads   # 仅用 cache/ 已有组件�
 1. 用仓库内 Maven 包装脚本离线构建后端 jar；
 2. `npm run build` 构建真实前端，并把 `frontend/dist` 注入 jar 的 `BOOT-INF/classes/static/`（后端工程自身的 `static/` 只有 openapi.yaml，jar 默认不含前端——组装只发生在打包环节，不改仓库源码）；
 3. 下载/复用运行时组件（官方直链，见下表），解压进 staging；
-4. 按交付结构组装目录树：`app/`（jar）、`runtime/`（pgsql、jre、winsw；VC++ 运行库 DLL 以 app-local 形式放进 pgsql\bin、pgsql\lib；JRE 自带其运行库 DLL，无需处理）、`config/`（application.yml + prompts）、`data/`、`backup/`、`logs/`、`docs/`（部署手册、用户手册）、`service/`（WinSW 模板）、根目录 7 个 .bat；
+4. 按交付结构组装目录树：`app/`（jar）、`runtime/`（pgsql、jre、winsw；VC++ 运行库 DLL 以 app-local 形式放进 pgsql\bin、pgsql\lib；JRE 自带其运行库 DLL，无需处理）、`config/`（application.yml + prompts）、`data/`、`backup/`、`logs/`、`docs/`（部署手册、用户手册）、`service/`（应用服务 WinSW 模板）、根目录 7 个 .bat；
 5. 打成 `packaging/dist/iteration-board-offline-<版本>.zip`。
 
 ## 运行时组件官方来源
@@ -39,6 +39,7 @@ bash packaging/build-package.sh --skip-downloads   # 仅用 cache/ 已有组件�
 
 ## 交付前检查
 
-- 解压 zip，核对目录树与 7 个 .bat、2 个服务 XML 齐全；
+- 解压 zip，核对目录树与 7 个 .bat、1 个服务 XML（IterationBoardApp.xml）齐全；
+- 改过任何 .bat 后，先跑静态检查 `python3 tools/check-bat.py packaging/windows`（CI 同步执行），再在 GitHub 的 Windows 运行器作业（windows-install）全绿后才可交付——安装脚本的缺陷（括号未转义、& 串联、边读边写等）已全部沉淀为该脚本的规则；
 - 在 Windows 机器上按同目录 `WINDOWS-实测清单.md` 逐项实测并签字；
 - 部署操作见 `docs/部署手册.md`，使用说明见 `docs/用户手册.md`（两份手册也会随包放入 `docs/`）。

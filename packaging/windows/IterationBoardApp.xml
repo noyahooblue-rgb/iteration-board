@@ -5,7 +5,14 @@
        IterationBoardApp.xml) - install.bat copies both into app\.
        Paths are relative to the service executable location (%BASE%,
        supported by v2); install.bat rewrites <workingdirectory> to
-       the absolute install path. -->
+       the absolute install path.
+       Start mode is Manual by default (services must not
+       start automatically at boot unless the user asks); install.bat
+       --autostart rewrites <startmode> to Automatic at install time.
+       PostgreSQL is NOT wrapped by WinSW anymore (1.0.3):
+       it is registered with pg_ctl register, because postgres.exe
+       refuses to run with an administrator token. This service only
+       depends on it by name. -->
   <id>IterationBoardApp</id>
   <name>Iteration Board - Application</name>
   <description>Iteration Board web application (Spring Boot).</description>
@@ -17,8 +24,15 @@
     <sizeThreshold>10240</sizeThreshold>
     <keepFiles>8</keepFiles>
   </log>
-  <startmode>Automatic</startmode>
+  <startmode>Manual</startmode>
   <depend>IterationBoardPG</depend>
   <stoptimeout>30sec</stoptimeout>
-  <onfailure action="restart" delay="10 sec"/>
+  <!-- Restart on failure at most 3 times, 30 s apart, then stop
+       trying: an uncapped restart loop flooded the logs in the
+       field. WinSW consumes one <onfailure> entry per
+       failure; the final "none" ends the sequence. -->
+  <onfailure action="restart" delay="30 sec"/>
+  <onfailure action="restart" delay="30 sec"/>
+  <onfailure action="restart" delay="30 sec"/>
+  <onfailure action="none"/>
 </service>
