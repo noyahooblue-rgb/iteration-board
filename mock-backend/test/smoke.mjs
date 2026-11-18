@@ -203,6 +203,14 @@ const closeBody = { decisions: [], improvements: ['冒烟改进项'], createNext
 r = await req('POST', `/teams/${T}/iterations/1/close`, closeBody)
 check('M3 结束迭代：默认结转到迭代 13 + 生成总结', r.status === 200 && r.data.iteration.status === 'FINISHED' && r.data.movedToNext > 0 && !!r.data.reportId, JSON.stringify(r.data))
 r = await req('GET', `/teams/${T}/iterations/2/planning`); check('M3 结转后迭代 13 含改进项', r.data.groups.flatMap(g => g.items).some(i => i.labels.includes('改进项')))
+// ---------- 0.5.3 结论 1：规划页默认迭代 + 已结束迭代拒绝排入 ----------
+await login('leader')
+r = await req('GET', `/teams/${T}/iterations/planning-target`); check('0.5.3 planning-target 优先规划中迭代', r.status === 200 && r.data.id === 2 && r.data.status === 'PLANNING', JSON.stringify(r.data))
+r = await req('POST', `/teams/${T}/items`, { type: 'STORY', title: '0.5.3 排期冒烟故事', storyCategory: 'DEV', parentId: 1, destination: 'POOL' }); const planStory = r.data
+check('0.5.3 排期冒烟故事创建', r.status === 201 && !!planStory?.id, JSON.stringify(r.data))
+r = await req('PATCH', `/teams/${T}/items/${planStory.id}`, { version: planStory.version, iterationId: 1 }); check('0.5.3 已结束迭代拒绝排入 400', r.status === 400, JSON.stringify(r.data))
+r = await req('PATCH', `/teams/${T}/items/${planStory.id}`, { version: planStory.version, iterationId: 2 }); check('0.5.3 规划中迭代可排入 200', r.status === 200 && r.data.iterationId === 2, JSON.stringify(r.data))
+r = await req('PATCH', `/teams/${T}/items/${planStory.id}`, { version: r.data.version, iterationId: null }); check('0.5.3 排入后可移出迭代', r.status === 200 && r.data.iterationId === null)
 
 // ---------- 修订二：报告 / 幂等 / 认领池 ----------
 await login('leader')
@@ -377,6 +385,7 @@ r = await req('GET', `/admin/audit-logs`); check('M5 管理员全部审计 200',
 r = await req('GET', `/admin/audit-logs?teamId=${T}`); check('M5 管理员按小组筛选审计', r.status === 200 && r.data.content.every(l => l.teamId === T))
 r = await req('GET', `/teams/${T}/audit-logs`); check('M5 管理员（非成员）看本组审计 200', r.status === 200)
 await login('leader')
+r = await req('GET', `/teams/999/audit-logs`); check('M5 审计日志非成员 404（0.5.3 结论 2）', r.status === 404, JSON.stringify(r.data))
 
 // yefqkvf3 待问 1：同步连败通知所有组长（含触发者本人）。mock 失败口径：HTTP 适配器未配置 url 必失败（对齐真实后端 fetch 抛错）
 r = await req('PATCH', `/teams/${T}/members/3/role`, { role: 'LEADER' }); check('连败通知前置：成员 3 升任第二组长', r.status === 204)

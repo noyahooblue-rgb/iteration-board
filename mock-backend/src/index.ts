@@ -329,6 +329,8 @@ function teams(method: string, seg: string[], body: any, q: URLSearchParams) {
   if (seg[2] === 'iterations') {
     requireMember(teamId)
     if (seg[3] === 'current' && method === 'GET') { const cur = iterations.find(i => i.teamId === teamId && i.status === 'ACTIVE'); if (!cur) throw err(404, 'NOT_FOUND', '当前没有进行中的迭代'); return { status: 200, data: cur } }
+    // 契约 0.5.3 结论 1：规划页默认迭代——优先 PLANNING，否则 ACTIVE，两者皆无 404
+    if (seg[3] === 'planning-target' && method === 'GET') { const t = iterations.find(i => i.teamId === teamId && i.status === 'PLANNING') ?? iterations.find(i => i.teamId === teamId && i.status === 'ACTIVE'); if (!t) throw err(404, 'NOT_FOUND', '当前没有规划中或进行中的迭代'); return { status: 200, data: t } }
     if (seg[4] === 'planning' && method === 'GET') return { status: 200, data: planning(teamId, Number(seg[3])) }
     return iterationRoute(method, teamId, seg, body)
   }
@@ -653,6 +655,8 @@ function createItemCore(teamId: number, creator: StoredUser, role: string, body:
   const ownerIds: number[] = body.ownerIds ?? (body.assigneeId ? [body.assigneeId] : [])
   if (dest === 'ASSIGN' && body.type !== 'TASK' && !ownerIds.length) throw err(400, 'VALIDATION', '直接指派时必须选择负责人')
   if (body.type === 'TASK' && body.iterationId) throw err(400, 'VALIDATION', '任务没有迭代归属')
+  // 契约 0.5.3 结论 1：新建时指定迭代同样只允许 PLANNING / ACTIVE
+  if (body.iterationId) { const tgt = iterations.find(x => x.id === body.iterationId && x.teamId === teamId); if (!tgt) throw err(400, 'VALIDATION', '迭代不存在'); if (tgt.status !== 'PLANNING' && tgt.status !== 'ACTIVE') throw err(400, 'VALIDATION', '已结束的迭代不能再排入事项') }
   const it: Item = {
     id: nextItemId, code: `SKY-${nextItemId}`, type: body.type, title: body.title, description: body.description ?? '',
     status: body.type === 'TASK' ? 'NOT_STARTED' : dest === 'ASSIGN' ? 'NOT_STARTED' : 'UNCLAIMED',
@@ -757,6 +761,8 @@ function itemsRoute(method: string, teamId: number, seg: string[], body: any, q:
       const parent = items.find(i => i.id === body.parentId && !i.deletedAt); if (!parent || parent.type !== 'TASK') throw err(400, 'VALIDATION', '所属任务不存在或不是任务')
     }
     if (it.type === 'TASK' && 'iterationId' in body && body.iterationId != null) throw err(400, 'VALIDATION', '任务没有迭代归属')
+    // 契约 0.5.3 结论 1：目标迭代须为 PLANNING 或 ACTIVE，已结束迭代拒绝排入（与真实后端一致）
+    if ('iterationId' in body && body.iterationId != null) { const tgt = iterations.find(x => x.id === body.iterationId && x.teamId === teamId); if (!tgt) throw err(400, 'VALIDATION', '迭代不存在'); if (tgt.status !== 'PLANNING' && tgt.status !== 'ACTIVE') throw err(400, 'VALIDATION', '已结束的迭代不能再排入事项') }
     for (const k of ['title', 'description', 'priority', 'acceptorId', 'dueDate', 'estimate', 'iterationId', 'parentId', 'storyCategory', 'poId'] as const) if (k in body) (it as any)[k] = body[k]
     if ('ownerIds' in body) { if (!Array.isArray(body.ownerIds)) throw err(400, 'VALIDATION', 'ownerIds 须为数组'); it.ownerIds = body.ownerIds }
     if ('labelNames' in body) { if (!Array.isArray(body.labelNames)) throw err(400, 'VALIDATION', 'labelNames 须为数组'); it.labels = body.labelNames }

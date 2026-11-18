@@ -70,6 +70,21 @@ public class IterationController {
                 .orElseThrow(() -> ApiException.notFound("当前没有进行中的迭代"));
     }
 
+    /**
+     * 规划页默认迭代（契约 0.5.3，M5 验收结论 1）：有「规划中」迭代时返回它，
+     * 否则返回「进行中」迭代；两者都没有时 404。规划页顶部选择器据此定默认选中项，
+     * 选中后走 GET /{iterationId}/planning 拉取该迭代的规划数据。
+     */
+    @GetMapping("/planning-target")
+    public Dtos.IterationDto planningTarget(@PathVariable Long teamId) {
+        AppUser u = currentUser.require();
+        teamService.requireMember(teamId, u);
+        return iterationRepo.findFirstByTeamIdAndStatus(teamId, "PLANNING")
+                .or(() -> iterationRepo.findFirstByTeamIdAndStatus(teamId, "ACTIVE"))
+                .map(Dtos.IterationDto::of)
+                .orElseThrow(() -> ApiException.notFound("当前没有规划中或进行中的迭代"));
+    }
+
     @GetMapping("/{iterationId}")
     public Dtos.IterationDto get(@PathVariable Long teamId, @PathVariable Long iterationId) {
         AppUser u = currentUser.require();

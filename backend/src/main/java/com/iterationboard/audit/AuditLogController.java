@@ -21,7 +21,8 @@ import java.util.Map;
 
 /**
  * 审计日志读取侧（Q6，M5 落地；写入侧见 common/AuditService）。只读，无写接口。
- * 权限：小组接口——本组组长（LEADER）或平台管理员；普通成员/PO/非成员一律 403。
+ * 权限：小组接口——本组组长（LEADER）或平台管理员可读；普通成员/PO 403；
+ * 非成员 404（契约 0.5.3，M5 验收结论 2：与全仓「不存在或无权访问」返回 404 的约定一致，不泄露小组是否存在）。
  * 管理接口——仅平台管理员，非管理员 403。
  */
 @RestController
@@ -49,7 +50,11 @@ public class AuditLogController {
         AppUser me = currentUser.require();
         if (!me.isPlatformAdmin()) {
             var member = memberRepo.findByTeamIdAndUserId(teamId, me.getId());
-            if (member.isEmpty() || member.get().getRole() != Role.LEADER) {
+            if (member.isEmpty()) {
+                // 结论 2（0.5.3）：非成员返回 404，与全仓约定一致，不泄露小组是否存在
+                throw ApiException.notFound("小组不存在或无权访问");
+            }
+            if (member.get().getRole() != Role.LEADER) {
                 throw ApiException.forbidden("仅本组组长或平台管理员可查看审计日志");
             }
         }

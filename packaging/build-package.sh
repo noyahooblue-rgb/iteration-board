@@ -4,7 +4,7 @@
 #
 # Usage:  bash packaging/build-package.sh [--skip-downloads]
 #
-# Output: packaging/dist/iteration-board-offline-1.0.0.zip
+# Output: packaging/dist/iteration-board-offline-1.0.1.zip
 #
 # What it does:
 #   1. Builds the backend jar (offline Maven wrapper).
@@ -25,7 +25,7 @@
 # ============================================================
 set -euo pipefail
 
-VERSION="1.0.0"
+VERSION="1.0.1"
 PKG_NAME="iteration-board-offline-${VERSION}"
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_ROOT="$(cd "${SCRIPT_DIR}/.." && pwd)"
@@ -36,15 +36,18 @@ SKIP_DOWNLOADS=0
 [ "${1:-}" = "--skip-downloads" ] && SKIP_DOWNLOADS=1
 
 # --- Official runtime component sources ----------------------
-# PostgreSQL 18.x Windows x64 binaries zip (EnterpriseDB archive)
-PG_URL="https://get.enterprisedb.com/postgresql/postgresql-18.1-1-windows-x64-binaries.zip"
+# PostgreSQL 18.7 Windows x64 binaries zip (EnterpriseDB archive;
+# same version as the dev/test lock, per M5 acceptance fix 1)
+PG_URL="https://get.enterprisedb.com/postgresql/postgresql-18.7-1-windows-x64-binaries.zip"
 # Eclipse Temurin JRE 17 Windows x64 (Adoptium official API)
 JRE_URL="https://api.adoptium.net/v3/binary/latest/17/ga/windows/x64/jre/hotspot/normal/eclipse"
 # Microsoft VC++ 2015-2022 x64 redistributable (Microsoft aka.ms)
 VC_URL="https://aka.ms/vs/17/release/vc_redist.x64.exe"
-# WinSW 3.x x64 (GitHub releases; upstream 3.x is published as
-# v3.0.0-alpha.11 - the only 3.x line available)
-WINSW_URL="https://github.com/winsw/winsw/releases/download/v3.0.0-alpha.11/WinSW-x64.exe"
+# WinSW v2.12.0 x64 (GitHub releases; stable line, MIT. The 3.x
+# alpha line is NOT used for long-running deployments, per M5
+# acceptance fix 2. v2 requires .NET Framework 4.6.1+, which
+# Windows 10/11 ship by default.)
+WINSW_URL="https://github.com/winsw/winsw/releases/download/v2.12.0/WinSW-x64.exe"
 
 mkdir -p "${CACHE_DIR}" "${DIST_DIR}"
 MISSING=()
@@ -96,10 +99,10 @@ rm -rf "${EMBED_DIR}"
 echo "[ok] frontend embedded into jar (BOOT-INF/classes/static/)"
 
 echo "=== 3/5 Runtime components ==="
-fetch "postgresql-win-x64.zip" "${PG_URL}" || MISSING+=("PostgreSQL 18.1 Windows x64 zip | ${PG_URL}")
+fetch "postgresql-win-x64.zip" "${PG_URL}" || MISSING+=("PostgreSQL 18.7 Windows x64 zip | ${PG_URL}")
 fetch "temurin-jre17-win-x64.zip" "${JRE_URL}" || MISSING+=("Temurin JRE 17 Windows x64 zip | ${JRE_URL}")
 fetch "vc_redist.x64.exe" "${VC_URL}" || MISSING+=("VC++ 2015-2022 x64 redist | ${VC_URL}")
-fetch "WinSW-x64.exe" "${WINSW_URL}" || MISSING+=("WinSW 3.x x64 exe | ${WINSW_URL}")
+fetch "WinSW-x64.exe" "${WINSW_URL}" || MISSING+=("WinSW v2.12.0 x64 exe | ${WINSW_URL}")
 
 echo "=== 4/5 Assemble package tree ==="
 rm -rf "${STAGING_DIR}"

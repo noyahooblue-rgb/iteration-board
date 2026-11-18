@@ -1,9 +1,10 @@
 <service>
-  <!-- WinSW service definition for the bundled PostgreSQL.
-       install.bat copies this file next to IterationBoardPG.exe
-       (the renamed WinSW binary) in the runtime\pgsql\bin folder
-       area (service folder). install.bat rewrites the absolute
-       paths below to the actual install path. -->
+  <!-- WinSW v2.12.0 service definition for the bundled PostgreSQL.
+       WinSW v2 convention: the XML must sit next to the service exe
+       with the SAME base name (IterationBoardPG.exe /
+       IterationBoardPG.xml) - install.bat copies both into app\.
+       install.bat rewrites the absolute paths below (__INSTALL_DIR__)
+       to the actual install path. -->
   <id>IterationBoardPG</id>
   <name>Iteration Board - PostgreSQL</name>
   <description>Iteration Board bundled PostgreSQL database (localhost only, port 15432).</description>

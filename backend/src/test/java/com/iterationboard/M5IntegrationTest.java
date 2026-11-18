@@ -25,6 +25,7 @@ import java.util.regex.Pattern;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.springframework.security.test.web.servlet.request.SecurityMockMvcRequestPostProcessors.csrf;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
+import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.patch;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
@@ -148,6 +149,10 @@ class M5IntegrationTest {
         // 跨组：leader 在乙组只是普通成员 → 403；且对甲组日志不可见于乙组
         mvc.perform(get("/api/v1/teams/" + teamB + "/audit-logs").session(leaderS))
                 .andExpect(status().isForbidden());
+        // 0.5.3 结论 2：完全非成员 → 404（不泄露小组是否存在），与全仓约定一致
+        MockHttpSession outsiderS = register("m5outsider", "局外人");
+        mvc.perform(get("/api/v1/teams/" + teamA + "/audit-logs").session(outsiderS))
+                .andExpect(status().isNotFound());
         // 平台管理员读小组 200；管理端读全部 200（3 条），按 teamId 筛选生效
         mvc.perform(get("/api/v1/teams/" + teamA + "/audit-logs").session(adminS))
                 .andExpect(status().isOk())
@@ -190,6 +195,94 @@ class M5IntegrationTest {
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.totalElements").value(1))
                 .andExpect(jsonPath("$.content[0].action").value("OLD_ACTION"));
+    }
+
+    // ---------- 0.5.3 结论 1：规划页支持规划中迭代 ----------
+
+    private long createIteration(MockHttpSession s, long teamId, String name, String start, String end) throws Exception {
+        MvcResult r = mvc.perform(post("/api/v1/teams/" + teamId + "/iterations").session(s).with(csrf())
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"name\":\"" + name + "\",\"startDate\":\"" + start + "\",\"endDate\":\"" + end + "\"}"))
+                .andExpect(status().isCreated()).andReturn();
+        return ((Number) JsonPath.read(r.getResponse().getContentAsString(), "$.id")).longValue();
+    }
+
+    private long createStory(MockHttpSession s, long teamId, String title) throws Exception {
+        // 任务与故事仅 PO 可创建（修订一）；先建任务再挂故事
+        MvcResult t = mvc.perform(post("/api/v1/teams/" + teamId + "/items").session(s).with(csrf())
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"type\":\"TASK\",\"title\":\"排期验证任务\"}"))
+                .andExpect(status().isCreated()).andReturn();
+        long taskId = ((Number) JsonPath.read(t.getResponse().getContentAsString(), "$.id")).longValue();
+        MvcResult r = mvc.perform(post("/api/v1/teams/" + teamId + "/items").session(s).with(csrf())
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"type\":\"STORY\",\"title\":\"" + title + "\",\"storyCategory\":\"DEV\",\"destination\":\"POOL\",\"parentId\":" + taskId + "}"))
+                .andExpect(status().isCreated()).andReturn();
+        return ((Number) JsonPath.read(r.getResponse().getContentAsString(), "$.id")).longValue();
+    }
+
+    private int itemVersion(MockHttpSession s, long teamId, long itemId) throws Exception {
+        MvcResult r = mvc.perform(get("/api/v1/teams/" + teamId + "/items/" + itemId).session(s))
+                .andExpect(status().isOk()).andReturn();
+        return ((Number) JsonPath.read(r.getResponse().getContentAsString(), "$.version")).intValue();
+    }
+
+    private void patchIterationOf(MockHttpSession s, long teamId, long itemId, int version, String iterationJson, int expect) throws Exception {
+        mvc.perform(patch("/api/v1/teams/" + teamId + "/items/" + itemId).session(s).with(csrf())
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"version\":" + version + ",\"iterationId\":" + iterationJson + "}"))
+                .andExpect(status().is(expect));
+    }
+
+    @Test
+    void planningTarget_prefersPlanningIteration_andPlanningAssignment() throws Exception {
+        MockHttpSession leaderS = register("m53leader", "规划组长");
+        long teamId = createTeam(leaderS, "规划验证组", "GHZ");
+        MockHttpSession poS = register("m53po", "规划PO");
+        addMember(teamId, myId(poS), Enums.Role.PO);
+        String today = java.time.LocalDate.now().toString();
+        String plus13 = java.time.LocalDate.now().plusDays(13).toString();
+        String plus14 = java.time.LocalDate.now().plusDays(14).toString();
+        String plus27 = java.time.LocalDate.now().plusDays(27).toString();
+
+        // 无任何迭代 → planning-target 404
+        mvc.perform(get("/api/v1/teams/" + teamId + "/iterations/planning-target").session(leaderS))
+                .andExpect(status().isNotFound());
+
+        // 只有进行中迭代 → 返回进行中；故事可放入
+        long activeId = createIteration(leaderS, teamId, "当前迭代", today, plus13);
+        mvc.perform(post("/api/v1/teams/" + teamId + "/iterations/" + activeId + "/start").session(leaderS).with(csrf()))
+                .andExpect(status().isOk());
+        mvc.perform(get("/api/v1/teams/" + teamId + "/iterations/planning-target").session(leaderS))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.id").value((int) activeId))
+                .andExpect(jsonPath("$.status").value("ACTIVE"));
+        long storyId = createStory(poS, teamId, "待排期故事");
+        patchIterationOf(poS, teamId, storyId, itemVersion(poS, teamId, storyId), String.valueOf(activeId), 200);
+        patchIterationOf(poS, teamId, storyId, itemVersion(poS, teamId, storyId), "null", 200);
+
+        // 新建规划中迭代后，planning-target 优先规划中；故事可放入规划中、可移出
+        long planId = createIteration(leaderS, teamId, "下一迭代", plus14, plus27);
+        mvc.perform(get("/api/v1/teams/" + teamId + "/iterations/planning-target").session(leaderS))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.id").value((int) planId))
+                .andExpect(jsonPath("$.status").value("PLANNING"));
+        patchIterationOf(poS, teamId, storyId, itemVersion(poS, teamId, storyId), String.valueOf(planId), 200);
+        mvc.perform(get("/api/v1/teams/" + teamId + "/iterations/" + planId + "/planning").session(leaderS))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.groups[0].items[0].id").value((int) storyId));
+        patchIterationOf(poS, teamId, storyId, itemVersion(poS, teamId, storyId), "null", 200);
+        // 故事也可放入进行中迭代（为下一步结束迭代做准备）
+        patchIterationOf(poS, teamId, storyId, itemVersion(poS, teamId, storyId), String.valueOf(activeId), 200);
+
+        // 结束进行中迭代后：已结束迭代不可再排入（400）；planning-target 仍是规划中
+        mvc.perform(post("/api/v1/teams/" + teamId + "/iterations/" + activeId + "/close").session(leaderS).with(csrf())
+                        .contentType(MediaType.APPLICATION_JSON).content("{\"decisions\":[],\"improvements\":[]}"))
+                .andExpect(status().isOk());
+        patchIterationOf(poS, teamId, storyId, itemVersion(poS, teamId, storyId), String.valueOf(activeId), 400);
+        mvc.perform(get("/api/v1/teams/" + teamId + "/iterations/planning-target").session(leaderS))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.id").value((int) planId));
     }
 
     // ---------- Q4：留存物理清理 ----------

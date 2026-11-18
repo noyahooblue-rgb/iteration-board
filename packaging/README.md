@@ -30,10 +30,10 @@ bash packaging/build-package.sh --skip-downloads   # 仅用 cache/ 已有组件�
 
 | 组件 | 版本 | 官方地址 |
 | --- | --- | --- |
-| PostgreSQL Windows x64 二进制 zip | 18.1 | https://get.enterprisedb.com/postgresql/postgresql-18.1-1-windows-x64-binaries.zip（EnterpriseDB 官方归档） |
+| PostgreSQL Windows x64 二进制 zip | 18.7（与开发/测试锁定版本一致，1.0.1 起） | https://get.enterprisedb.com/postgresql/postgresql-18.7-1-windows-x64-binaries.zip（EnterpriseDB 官方归档） |
 | Eclipse Temurin JRE Windows x64 zip | 17（最新 17.x） | https://api.adoptium.net/v3/binary/latest/17/ga/windows/x64/jre/hotspot/normal/eclipse（Adoptium 官方 API） |
 | VC++ 2015-2022 x64 运行库 | 最新 | https://aka.ms/vs/17/release/vc_redist.x64.exe（微软官方直链） |
-| WinSW x64 | v3.0.0-alpha.11（上游 3.x 仅发布 alpha 线） | https://github.com/winsw/winsw/releases/download/v3.0.0-alpha.11/WinSW-x64.exe（WinSW 官方 GitHub 发布） |
+| WinSW x64 | v2.12.0（稳定版，MIT；1.0.1 起弃用 3.x alpha 线） | https://github.com/winsw/winsw/releases/download/v2.12.0/WinSW-x64.exe（WinSW 官方 GitHub 发布；需 .NET Framework 4.6.1+，Win10/11 自带） |
 
 某个组件下载失败时，脚本会继续完成其余组装并在结尾醒目列出缺失组件与官方 URL；交付前必须补齐，不得使用来源不明的二进制替代。
 

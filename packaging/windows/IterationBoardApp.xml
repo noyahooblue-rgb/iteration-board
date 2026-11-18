@@ -1,9 +1,11 @@
 <service>
-  <!-- WinSW service definition for the iteration-board application.
-       install.bat copies this file next to IterationBoardApp.exe
-       (the renamed WinSW binary) in the app folder. Paths are
-       relative to the service executable location; install.bat
-       rewrites <workingdirectory> to the absolute install path. -->
+  <!-- WinSW v2.12.0 service definition for the iteration-board
+       application. WinSW v2 convention: the XML must sit next to the
+       service exe with the SAME base name (IterationBoardApp.exe /
+       IterationBoardApp.xml) - install.bat copies both into app\.
+       Paths are relative to the service executable location (%BASE%,
+       supported by v2); install.bat rewrites <workingdirectory> to
+       the absolute install path. -->
   <id>IterationBoardApp</id>
   <name>Iteration Board - Application</name>
   <description>Iteration Board web application (Spring Boot).</description>

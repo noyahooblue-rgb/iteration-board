@@ -75,6 +75,20 @@ public class ItemService {
                 .orElseThrow(() -> ApiException.notFound("事项不存在"));
     }
 
+    /**
+     * 可排期迭代（契约 0.5.3，M5 验收结论 1）：只有「规划中」或「进行中」的迭代能放入事项；
+     * 已结束的迭代不可再排期。迭代不存在或不属于本组时按校验错误处理（与原口径一致）。
+     */
+    public Iteration requirePlannableIteration(Long teamId, Long iterationId) {
+        Iteration it = iterationRepo.findById(iterationId)
+                .filter(i -> i.getTeam().getId().equals(teamId))
+                .orElseThrow(() -> ApiException.validation("迭代不存在"));
+        if (!"PLANNING".equals(it.getStatus()) && !"ACTIVE".equals(it.getStatus())) {
+            throw ApiException.validation("已结束的迭代不能再排入事项");
+        }
+        return it;
+    }
+
     private AppUser requireTeamUser(Long teamId, Long userId, String what) {
         return userRepo.findById(userId)
                 .filter(u -> memberRepo.findByTeamIdAndUserId(teamId, u.getId()).isPresent())
@@ -135,9 +149,7 @@ public class ItemService {
             item.setProgressPercent(0);
         } else {
             if (cmd.iterationId() != null) {
-                item.setIteration(iterationRepo.findById(cmd.iterationId())
-                        .filter(i -> i.getTeam().getId().equals(teamId))
-                        .orElseThrow(() -> ApiException.validation("迭代不存在")));
+                item.setIteration(requirePlannableIteration(teamId, cmd.iterationId()));
             }
             item.setAcceptor(cmd.acceptorId() != null
                     ? requireTeamUser(teamId, cmd.acceptorId(), "验收人")
@@ -248,8 +260,7 @@ public class ItemService {
         if (cmd.dueDatePresent()) item.setDueDate(cmd.dueDate());
         if (cmd.estimatePresent()) item.setEstimate(cmd.estimate());
         if (cmd.iterationPresent()) item.setIteration(cmd.iterationId() == null ? null
-                : iterationRepo.findById(cmd.iterationId()).filter(i -> i.getTeam().getId().equals(teamId))
-                        .orElseThrow(() -> ApiException.validation("迭代不存在")));
+                : requirePlannableIteration(teamId, cmd.iterationId()));
         if (cmd.parentPresent()) {
             if (item.getType() != ItemType.STORY) throw ApiException.validation("只有故事可以挂父任务");
             Item p = cmd.parentId() == null ? null : requireItem(teamId, cmd.parentId());

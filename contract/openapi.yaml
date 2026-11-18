@@ -1,9 +1,14 @@
 openapi: 3.0.3
 info:
   title: 迭代小组平台 API（M4 契约）
-  version: 0.5.2
+  version: 0.5.3
   description: >
     真实后端（Spring Boot）与浏览器模拟后端共同遵循的唯一契约。
+    0.5.3（M5 验收结论落地）：①新增 GET /teams/{teamId}/iterations/planning-target
+    （规划页默认迭代：有规划中迭代返回规划中，否则返回进行中，两者皆无 404）；
+    规划页可对规划中与进行中迭代放入/移出故事（事项的 iterationId 目标迭代须为
+    PLANNING 或 ACTIVE，已结束迭代拒绝排入）；②GET /teams/{teamId}/audit-logs
+    对非成员由 403 改为 404（与全仓「不存在或无权访问」约定一致），成员非组长仍 403。
     0.5.2（M5）：Q6 审计日志读取侧落地（小组组长/平台管理员读本组、平台管理员读全部，只读）；
     Q4 数据留存口径入后端配置（回收站 30 天物理清理、通知 90 天、审计日志 180 天，app.retention.* 可配，无新增接口）。
     0.5.0（M4）：Q1–Q15 待问结论落地（Q4/Q6 读取侧除外）+ AI 服务层与六项功能正式定义 + 导入批次 + 外部对接适配器；
@@ -1505,6 +1510,17 @@ paths:
                 type: array
                 items: { $ref: '#/components/schemas/SyncLog' }
         '403': { $ref: '#/components/responses/Error' }
+  /teams/{teamId}/iterations/planning-target:
+    get:
+      summary: 规划页默认迭代（0.5.3 新增）——有规划中（PLANNING）迭代时返回它，否则返回进行中（ACTIVE）迭代；两者皆无 404
+      parameters: [{ $ref: '#/components/parameters/TeamId' }]
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Iteration' }
+        '404': { $ref: '#/components/responses/Error' }
   /teams/{teamId}/iterations/current:
     get:
       summary: 当前进行中的迭代（看板范围切换用；无则 404）
@@ -2482,7 +2498,7 @@ paths:
               schema: { $ref: '#/components/schemas/NotificationPrefs' }
   /teams/{teamId}/audit-logs:
     get:
-      summary: 审计日志（本组，只读；M5/Q6）——本组组长（LEADER）或平台管理员可读；普通成员/PO/非成员 403
+      summary: 审计日志（本组，只读；M5/Q6）——本组组长（LEADER）或平台管理员可读；普通成员/PO 403；非成员 404（0.5.3 起，与全仓约定一致）
       parameters:
         - { name: teamId, in: path, required: true, schema: { type: integer, format: int64 } }
         - { name: actorId, in: query, required: false, schema: { type: integer, format: int64 }, description: 按操作者筛选 }
@@ -2498,6 +2514,7 @@ paths:
             application/json:
               schema: { $ref: '#/components/schemas/AuditLogPage' }
         '403': { $ref: '#/components/responses/Error' }
+        '404': { $ref: '#/components/responses/Error', description: 非成员（0.5.3 起） }
   /admin/audit-logs:
     get:
       summary: 审计日志（全部小组，只读；M5/Q6）——仅平台管理员，非管理员 403；teamId 不传=全部小组

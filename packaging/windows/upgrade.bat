@@ -55,7 +55,13 @@ timeout /T 3 /NOBREAK >nul
 "%TARGET%\app\IterationBoardApp.exe" start
 if errorlevel 1 ( echo [ERROR] Application failed to start. & goto :rollback )
 timeout /T 10 /NOBREAK >nul
-powershell -NoProfile -Command "try { $r = Invoke-WebRequest -UseBasicParsing -Uri 'http://127.0.0.1:8080/' -TimeoutSec 10; exit 0 } catch { if ($_.Exception.Response) { exit 0 } else { exit 1 } }"
+rem --- Health check: read the app port from the target config ---
+rem (config\application.yml, server.port; default 8080 if unreadable.
+rem  The port is NOT hardcoded - the installed config is the source of truth.)
+set "APP_PORT=8080"
+for /f "usebackq delims=" %%P in (`powershell -NoProfile -Command "$c = Get-Content '%TARGET%\config\application.yml' -Raw; if ($c -match 'port:\s*(\d+)') { $Matches[1] }"`) do set "APP_PORT=%%P"
+echo [INFO] Health check on http://127.0.0.1:%APP_PORT%/ (port read from config\application.yml) ...
+powershell -NoProfile -Command "try { $r = Invoke-WebRequest -UseBasicParsing -Uri 'http://127.0.0.1:%APP_PORT%/' -TimeoutSec 10; exit 0 } catch { if ($_.Exception.Response) { exit 0 } else { exit 1 } }"
 if errorlevel 1 (
   echo [WARN] Application service started but HTTP check did not respond.
   echo [WARN] Check %TARGET%\logs and the app port in config\application.yml,

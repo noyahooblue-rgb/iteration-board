@@ -1,5 +1,12 @@
 <template>
 <AppShell :title="planning ? `迭代规划 · ${planning.iteration.name}` : '迭代规划'" @refresh="load">
+  <div v-if="selectable.length" class="selrow">
+    <label class="small" for="plan-iter">规划迭代</label>
+    <select id="plan-iter" class="sel" :value="selectedId ?? ''" @change="onSelect($event)">
+      <option v-for="it in selectable" :key="it.id" :value="it.id">{{ it.name }}（{{ it.status === 'PLANNING' ? '规划中' : '进行中' }} · {{ it.startDate }} ～ {{ it.endDate }}）</option>
+    </select>
+    <span class="tiny">默认选中规划中的迭代（没有则进行中）；两个迭代都可以放入 / 移出故事。</span>
+  </div>
   <template v-if="planning">
     <GlassPanel class="cap">
       <div class="caprow"><b>容量（故事点口径）</b><span class="small">本迭代共认领 {{totalPoints}} {{unit}} · {{planning.iteration.startDate}} ～ {{planning.iteration.endDate}}</span></div>
@@ -36,7 +43,7 @@
       <p v-if="!candidates.length" class="small">没有可放入的故事。</p>
     </div>
   </template>
-  <p v-else-if="!loading" class="small">当前没有进行中的迭代，规划页暂无数据。</p>
+  <p v-else-if="!loading" class="small">当前没有规划中或进行中的迭代，规划页暂无数据。</p>
   <ItemDrawer :open="drawerOpen" :item-id="openId" @close="drawerOpen=false" @changed="load" @open-item="(id:number)=>{openId=id}"/>
 </AppShell>
 </template>
@@ -44,11 +51,14 @@
 import { ref, computed, onMounted } from 'vue'
 import { RouterLink } from 'vue-router'
 import AppShell from '../components/AppShell.vue'; import GlassPanel from '../components/GlassPanel.vue'; import AppButton from '../components/AppButton.vue'; import Avatar from '../components/Avatar.vue'; import AvatarStack from '../components/AvatarStack.vue'; import ProgressBar from '../components/ProgressBar.vue'; import ItemDrawer from '../components/ItemDrawer.vue'
-import { api, ApiError } from '../api/http'; import { STATUS_META, itemColor, estimateUnitLabel, type Item, type Planning } from '../api/types'
+import { api, ApiError } from '../api/http'; import { STATUS_META, itemColor, estimateUnitLabel, type Item, type Iteration, type Planning } from '../api/types'
 import { useBusy } from '../utils/busy'
 import { useTeam } from '../stores/team'; import { useAuth } from '../stores/auth'; import { useToast } from '../stores/toast'
 const team = useTeam(), auth = useAuth(), toast = useToast(), busy = useBusy()
 const planning = ref<Planning|null>(null), loading = ref(false)
+// 0.5.3 结论 1：规划页顶部迭代选择器——可选规划中 + 进行中迭代，默认 planning-target（规划中优先）
+const iterations = ref<Iteration[]>([]), selectedId = ref<number|null>(null)
+const selectable = computed(()=> iterations.value.filter(i => i.status === 'PLANNING' || i.status === 'ACTIVE'))
 const drawerOpen = ref(false), openId = ref<number|null>(null)
 const candidates = ref<Item[]>([])
 const canPlan = computed(()=> team.current?.myRole==='LEADER' || team.current?.myRole==='PO') // Q3：规划增减组长+PO
@@ -61,11 +71,19 @@ function loadOf(uid:number){ return planning.value?.loads.find(l=>l.userId===uid
 function capOf(uid:number){ return planning.value?.capacities.find(c=>c.userId===uid) ?? { availableDays: 0, claimedPoints: 0, remainingDays: 0, capacityPoints: 0, overCapacity: false } }
 function over(uid:number){ return capOf(uid).overCapacity }
 function loadPct(uid:number){ const c = capOf(uid); return c.capacityPoints ? Math.min(100, loadOf(uid).points / c.capacityPoints * 100) : (loadOf(uid).points ? 100 : 0) }
-async function load(){ if(!team.currentId || !team.iteration) return; loading.value = true
-  try { planning.value = await api.get(`/teams/${team.currentId}/iterations/${team.iteration.id}/planning`)
+async function load(){ if(!team.currentId) return; loading.value = true
+  try {
+    iterations.value = await api.get<Iteration[]>(`/teams/${team.currentId}/iterations`).catch(()=>[] as Iteration[])
+    if (selectedId.value == null || !selectable.value.some(i => i.id === selectedId.value)) {
+      const target = await api.get<Iteration>(`/teams/${team.currentId}/iterations/planning-target`).catch(()=>null)
+      selectedId.value = target?.id ?? team.iteration?.id ?? null
+    }
+    if (selectedId.value == null) { planning.value = null; return }
+    planning.value = await api.get(`/teams/${team.currentId}/iterations/${selectedId.value}/planning`)
     if (canPlan.value) { const all = await api.get<Item[]>(`/teams/${team.currentId}/items?scope=all`).catch(()=>[] as Item[]); candidates.value = all.filter(i => i.type==='STORY' && !i.iterationId) }
   } catch(e){ toast.show(e instanceof ApiError ? e.message : '加载失败') } finally { loading.value = false } }
-async function moveIn(it: Item){ if (!team.iteration) return; await busy.wrap('move' + it.id, async () => { try { await api.patch(`/teams/${team.currentId}/items/${it.id}`, { version: it.version, iterationId: team.iteration!.id }); toast.show('已放入迭代'); load() } catch(e){ toast.show(e instanceof ApiError ? e.message : '放入失败'); load() } }) }
+function onSelect(ev: Event){ selectedId.value = Number((ev.target as HTMLSelectElement).value); load() }
+async function moveIn(it: Item){ if (selectedId.value == null) return; await busy.wrap('move' + it.id, async () => { try { await api.patch(`/teams/${team.currentId}/items/${it.id}`, { version: it.version, iterationId: selectedId.value }); toast.show('已放入迭代'); load() } catch(e){ toast.show(e instanceof ApiError ? e.message : '放入失败'); load() } }) }
 async function moveOut(it: Item){ await busy.wrap('move' + it.id, async () => { try { await api.patch(`/teams/${team.currentId}/items/${it.id}`, { version: it.version, iterationId: null }); toast.show('已移出迭代'); load() } catch(e){ toast.show(e instanceof ApiError ? e.message : '移出失败'); load() } }) }
 onMounted(load)
 async function setEstimate(it: Item, ev: Event){ const v = (ev.target as HTMLInputElement).value; const est = v === '' ? null : Number(v)
@@ -75,6 +93,8 @@ function canJoin(it: Item){ return !!auth.user && it.ownerIds.length > 0 && !it.
 async function join(it: Item){ await busy.wrap('join' + it.id, async () => { try { await api.post(`/teams/${team.currentId}/items/${it.id}/join`, { version: it.version }); toast.show('已加入共同负责'); load() } catch(e){ toast.show(e instanceof ApiError ? e.message : '加入失败'); load() } }) }
 </script>
 <style scoped>
+.selrow{display:flex;gap:10px;align-items:center;flex-wrap:wrap;margin-bottom:12px}
+.sel{min-height:36px;border-radius:10px;border:1px solid var(--field-brd);background:var(--field);color:var(--text);padding:0 10px;font-size:13px;max-width:100%}
 .cap{padding:16px 18px;margin-bottom:6px}
 .caprow{display:flex;gap:12px;align-items:baseline;flex-wrap:wrap}
 .loads{display:grid;grid-template-columns:repeat(auto-fill,minmax(300px,1fr));gap:8px 18px;margin-top:6px}
