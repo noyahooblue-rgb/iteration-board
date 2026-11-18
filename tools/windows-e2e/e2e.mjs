@@ -44,7 +44,9 @@ try {
 
   // --- 2. Register the first account. Captcha code = the <text> glyphs of
   // the SVG rendered inside button.cap (same page, no external solving).
-  await page.getByRole('button', { name: '注册', exact: true }).click()
+  // The tab buttons carry role="tab", so select them by CSS + text,
+  // not getByRole('button').
+  await page.locator('.seg button', { hasText: '注册' }).click()
   await page.locator('label.field').filter({ hasText: '注册后不可改' }).locator('input').fill(LOGIN_NAME)
   await page.locator('label.field').filter({ hasText: '显示姓名' }).locator('input').fill(DISPLAY_NAME)
   await page.locator('label.field').filter({ hasText: '至少 8 位' }).locator('input').fill(PASSWORD)

@@ -245,6 +245,8 @@ if ($script:Failures.Count -gt 0) {
   $script:Failures | ForEach-Object { Write-Host "  - $_" }
   if ($script:Failures -match 'P1 ') { Dump-Tail 'p1-install.log' }
   if ($script:Failures -match 'P2 ') { Dump-Tail 'p2-playwright.log' }
+  if ($script:Failures -match 'P6 ') { Dump-Tail 'p6-upgrade.log' }
+  if ($script:Failures -match 'P10 ') { Dump-Tail 'p10-space-install.log' }
   $joined = ($script:Failures -join ' | ') -replace '%', '%25'
   Write-Host "::error::WINDOWS VERIFY RESULT: $joined"
   exit 1

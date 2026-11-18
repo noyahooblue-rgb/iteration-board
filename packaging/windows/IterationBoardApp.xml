@@ -18,7 +18,7 @@
   <name>Iteration Board - Application</name>
   <description>Iteration Board web application (Spring Boot).</description>
   <executable>%BASE%\..\runtime\jre\bin\java.exe</executable>
-  <arguments>-jar "%BASE%\iteration-board.jar" --spring.config.additional-location=file:%BASE%\..\config\application.yml</arguments>
+  <arguments>-jar "%BASE%\iteration-board.jar" --spring.config.additional-location="file:%BASE%\..\config\application.yml"</arguments>
   <workingdirectory>__INSTALL_DIR__</workingdirectory>
   <logpath>%BASE%\..\logs</logpath>
   <log mode="roll-by-size">

@@ -98,15 +98,16 @@ if errorlevel 1 (
   echo [ERROR] Application failed to start.
   goto :rollback
 )
-timeout /T 10 /NOBREAK >nul
 rem --- Health check: read the app port from the target config ---
 rem (config\application.yml, server.port; default 18080 if
 rem  unreadable. The port is NOT hardcoded - the installed
-rem  config is the source of truth.)
+rem  config is the source of truth.) Poll for up to 90 seconds:
+rem  a single attempt right after the service start is not a
+rem  real health check, the application needs its boot time.
 set "APP_PORT=18080"
 for /f "usebackq delims=" %%P in (`powershell -NoProfile -Command "$c = Get-Content '%TARGET%\config\application.yml' -Raw; if ($c -match 'port:\s*(\d+)') { $Matches[1] }"`) do set "APP_PORT=%%P"
-echo [INFO] Health check on http://127.0.0.1:%APP_PORT%/ - port read from config\application.yml ...
-powershell -NoProfile -Command "try { $r = Invoke-WebRequest -UseBasicParsing -Uri 'http://127.0.0.1:%APP_PORT%/' -TimeoutSec 10; exit 0 } catch { if ($_.Exception.Response) { exit 0 } else { exit 1 } }"
+echo [INFO] Health check on http://127.0.0.1:%APP_PORT%/ - port read from config\application.yml, polling up to 90 seconds ...
+powershell -NoProfile -Command "$deadline = (Get-Date).AddSeconds(90); $ok = $false; while ((Get-Date) -lt $deadline) { try { $r = Invoke-WebRequest -UseBasicParsing -Uri 'http://127.0.0.1:%APP_PORT%/' -TimeoutSec 5; $ok = $true; break } catch { if ($_.Exception.Response) { $ok = $true; break } else { Start-Sleep -Seconds 3 } } }; if ($ok) { exit 0 } else { exit 1 }"
 if errorlevel 1 (
   echo [WARN] Application service started but the HTTP check did not respond.
   echo [WARN] Check %TARGET%\logs and the app port in config\application.yml,
