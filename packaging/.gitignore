@@ -1,0 +1,8 @@
+# Downloaded runtime components, staging tree and built zips
+# are build outputs - never commit them. Only scripts and
+# docs in this folder belong in git.
+cache/
+staging/
+dist/
+*.zip
+.tmp/

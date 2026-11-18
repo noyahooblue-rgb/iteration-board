@@ -30,6 +30,12 @@ spring:
 app:
   registration-open: ${REGISTRATION_OPEN:true}
   demo-mode: ${DEMO_MODE:false}
+  # 数据留存：回收站物理清理 / 通知 / 审计日志保留期，均可经环境变量覆盖。
+  retention:
+    trash-days: ${RETENTION_TRASH_DAYS:30}
+    notification-days: ${RETENTION_NOTIFICATION_DAYS:90}
+    audit-days: ${RETENTION_AUDIT_DAYS:180}
+    purge-cron: ${RETENTION_PURGE_CRON:0 17 3 * * *}
 
 # AI 服务层：密钥只由环境变量注入；mode=mock 时返回结构化样例结果。
 ai:

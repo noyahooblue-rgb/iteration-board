@@ -15,14 +15,23 @@ h1{font-size:22px;font-weight:600;margin:0} h2{font-size:15px;font-weight:600;ma
   radial-gradient(54vmax 54vmax at 106% 6vmax, rgba(48,176,199,.5), transparent 68%),
   radial-gradient(48vmax 48vmax at 26vmax 126%, rgba(88,86,214,.38), transparent 70%),
   linear-gradient(160deg, #BFD9FF 0%, #DCEBFF 42%, #CFE4FF 100%)}
+:root[data-theme="dark"] .page-bg{background:
+  radial-gradient(62vmax 62vmax at -18vmax -22vmax, rgba(0,110,255,.5), transparent 68%),
+  radial-gradient(54vmax 54vmax at 106% 6vmax, rgba(30,150,180,.42), transparent 68%),
+  radial-gradient(48vmax 48vmax at 26vmax 126%, rgba(88,86,214,.4), transparent 70%),
+  linear-gradient(160deg, #0A1B38 0%, #0D2247 48%, #081630 100%)}
 @media (prefers-color-scheme: dark){
-  .page-bg{background:
+  :root:not([data-theme="light"]) .page-bg{background:
   radial-gradient(62vmax 62vmax at -18vmax -22vmax, rgba(0,110,255,.5), transparent 68%),
   radial-gradient(54vmax 54vmax at 106% 6vmax, rgba(30,150,180,.42), transparent 68%),
   radial-gradient(48vmax 48vmax at 26vmax 126%, rgba(88,86,214,.4), transparent 70%),
   linear-gradient(160deg, #0A1B38 0%, #0D2247 48%, #081630 100%)}
 }
-.glass{background:var(--glass);backdrop-filter:blur(20px) saturate(180%);-webkit-backdrop-filter:blur(20px) saturate(180%);border:1px solid var(--glass-brd);box-shadow:inset 0 1px 0 var(--glass-hi),var(--shadow)}
+.glass{background:var(--glass);backdrop-filter:blur(var(--glass-blur)) saturate(180%);-webkit-backdrop-filter:blur(var(--glass-blur)) saturate(180%);border:1px solid var(--glass-brd);box-shadow:inset 0 1px 0 var(--glass-hi),var(--shadow)}
+/* 减少透明度：玻璃改实底且关闭背景模糊 */
+:root[data-reduce-transparency] .glass{backdrop-filter:none;-webkit-backdrop-filter:none}
+/* 减少动效：动画/过渡降级为短淡入淡出；系统级 prefers-reduced-motion 同样尊重 */
+:root[data-reduce-motion] *, :root[data-reduce-motion] *::before, :root[data-reduce-motion] *::after{animation-duration:.15s !important;transition-duration:.15s !important;transition-timing-function:ease !important}
 @media (prefers-reduced-motion: reduce){
   *,*::before,*::after{animation-duration:.15s !important;transition-duration:.15s !important;transition-timing-function:ease !important}
 }

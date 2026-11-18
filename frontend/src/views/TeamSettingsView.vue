@@ -54,6 +54,32 @@
         <AppInput v-model="specialWorkText" type="textarea" label="特殊工作日（每行一个日期 YYYY-MM-DD，如周末补班）" style="margin-top:10px"/>
         <AppButton style="margin-top:14px" @click="saveSettings">保存容量与提醒设置</AppButton>
       </template>
+      <template v-else-if="tab==='audit'">
+        <h2>审计日志</h2>
+        <p class="small">记录本组关键写操作（删除事项、成员管理、生成报告等），按时间倒序。{{ isAdmin ? '平台管理员可切换查看全部小组。' : '' }}</p>
+        <div class="frow" style="align-items:flex-end">
+          <div v-if="isAdmin" class="seg" role="group" aria-label="审计范围">
+            <button class="press" :class="{on:auditScope==='team'}" @click="setScope('team')">本组</button>
+            <button class="press" :class="{on:auditScope==='all'}" @click="setScope('all')">全部小组</button>
+          </div>
+          <label class="small">动作<select v-model="auditFilter.action" class="flexin" @change="reloadAudit"><option value="">全部动作</option><option v-for="a in auditActions" :key="a" :value="a">{{auditActionLabel(a)}}</option></select></label>
+          <label class="small">操作人<select v-model="auditFilter.actorId" class="flexin" @change="reloadAudit"><option value="">全部操作人</option><option v-for="a in auditActors" :key="a.id" :value="String(a.id)">{{a.name}}</option></select></label>
+          <label class="small">起始日期<input type="date" v-model="auditFilter.from" class="flexin" @change="reloadAudit"/></label>
+          <label class="small">结束日期<input type="date" v-model="auditFilter.to" class="flexin" @change="reloadAudit"/></label>
+        </div>
+        <table class="atable">
+          <thead><tr><th>时间</th><th>操作人</th><th>动作</th><th v-if="auditScope==='all'">小组</th><th>对象</th><th>详情</th></tr></thead>
+          <tbody>
+            <tr v-for="l in auditLogs" :key="l.id"><td class="nowrap">{{fmt(l.createdAt)}}</td><td>{{l.actorName}}</td><td>{{auditActionLabel(l.action)}}</td><td v-if="auditScope==='all'">小组 #{{l.teamId}}</td><td class="nowrap">{{auditTargetLabel(l)}}</td><td>{{l.detail ?? '—'}}</td></tr>
+            <tr v-if="!auditLogs.length"><td :colspan="auditScope==='all'?6:5" class="small">暂无符合条件的审计记录。</td></tr>
+          </tbody>
+        </table>
+        <div class="pager">
+          <span class="small">共 {{auditTotal}} 条 · 第 {{auditPage}} / {{auditPages}} 页</span>
+          <AppButton variant="ghost" :disabled="auditPage<=1" @click="gotoAudit(auditPage-1)">上一页</AppButton>
+          <AppButton variant="ghost" :disabled="auditPage>=auditPages" @click="gotoAudit(auditPage+1)">下一页</AppButton>
+        </div>
+      </template>
       <template v-else-if="tab==='labels'"><LabelsPanel/></template>
       <template v-else-if="tab==='ai'"><AiPanel/></template>
       <template v-else-if="tab==='integrations'"><IntegrationsPanel/></template>
@@ -94,17 +120,42 @@
 </AppShell>
 </template>
 <script setup lang="ts">
-import { ref, computed, reactive, onMounted } from 'vue'
+import { ref, computed, reactive, onMounted, watch } from 'vue'
 import { RouterLink } from 'vue-router'
 import AppShell from '../components/AppShell.vue'; import GlassPanel from '../components/GlassPanel.vue'; import AppButton from '../components/AppButton.vue'; import Avatar from '../components/Avatar.vue'
 import AppInput from '../components/AppInput.vue'
 import LabelsPanel from '../components/settings/LabelsPanel.vue'; import AiPanel from '../components/settings/AiPanel.vue'; import IntegrationsPanel from '../components/settings/IntegrationsPanel.vue'
 import { useRouter } from 'vue-router'
-import { api, ApiError } from '../api/http'; import { MEMBER_STATUS_META, estimateUnitLabel, type JoinRequest, type Member, type TeamSettings } from '../api/types'
-import { useTeam } from '../stores/team'; import { useToast } from '../stores/toast'
-const team = useTeam(), toast = useToast(), router = useRouter()
+import { api, ApiError } from '../api/http'; import { MEMBER_STATUS_META, estimateUnitLabel, auditActionLabel, auditTargetLabel, type JoinRequest, type Member, type TeamSettings, type AuditLog } from '../api/types'
+import { useTeam } from '../stores/team'; import { useToast } from '../stores/toast'; import { useAuth } from '../stores/auth'
+const team = useTeam(), toast = useToast(), router = useRouter(), auth = useAuth()
 const tab = ref('members')
-const tabs = [{k:'members',label:'成员与角色'},{k:'basic',label:'基本设置'},{k:'remind',label:'容量与提醒'},{k:'labels',label:'标签'},{k:'ai',label:'AI'},{k:'integrations',label:'对接'},{k:'requests',label:'加入申请'},{k:'invite',label:'邀请码'},{k:'danger',label:'归档与退出'}]
+const isAdmin = computed(()=> !!auth.user?.platformAdmin)
+const canAudit = computed(()=> team.current?.myRole === 'LEADER' || isAdmin.value)
+const tabs = computed(()=> { const base = [{k:'members',label:'成员与角色'},{k:'basic',label:'基本设置'},{k:'remind',label:'容量与提醒'},{k:'labels',label:'标签'},{k:'ai',label:'AI'},{k:'integrations',label:'对接'},{k:'requests',label:'加入申请'},{k:'invite',label:'邀请码'}]
+  if (canAudit.value) base.push({k:'audit',label:'审计日志'})
+  base.push({k:'danger',label:'归档与退出'}); return base })
+// M5 Q6 审计日志：筛选（动作/操作人/起止日期）+ 分页；管理员可切「全部小组」走 /admin/audit-logs。
+const auditScope = ref<'team'|'all'>('team')
+const auditLogs = ref<AuditLog[]>([]); const auditTotal = ref(0); const auditPage = ref(1); const AUDIT_SIZE = 20
+const auditPages = computed(()=> Math.max(1, Math.ceil(auditTotal.value / AUDIT_SIZE)))
+const auditFilter = reactive({ action: '', actorId: '', from: '', to: '' })
+const auditActors = ref<{id:number;name:string}[]>([]); const auditActions = ref<string[]>([])
+async function loadAudit(){ if (!canAudit.value) return
+  const qs = new URLSearchParams({ page: String(auditPage.value - 1), size: String(AUDIT_SIZE) })
+  if (auditFilter.action) qs.set('action', auditFilter.action); if (auditFilter.actorId) qs.set('actorId', auditFilter.actorId)
+  if (auditFilter.from) qs.set('from', new Date(auditFilter.from + 'T00:00:00').toISOString()); if (auditFilter.to) qs.set('to', new Date(auditFilter.to + 'T23:59:59').toISOString())
+  try { const r = auditScope.value === 'all' && isAdmin.value ? await api.get(`/admin/audit-logs?${qs}`) : await api.get(`/teams/${team.currentId}/audit-logs?${qs}`)
+    auditLogs.value = r.content ?? []; auditTotal.value = r.totalElements ?? 0
+    // 筛选下拉取自本组数据里出现过的操作人/动作（随加载累积，避免翻页后丢失选项）
+    const am = new Map(auditActors.value.map(a => [a.id, a])); const acts = new Set(auditActions.value)
+    for (const l of auditLogs.value) { am.set(l.actorId, { id: l.actorId, name: l.actorName }); acts.add(l.action) }
+    auditActors.value = [...am.values()]; auditActions.value = [...acts]
+  } catch(e){ toast.show(e instanceof ApiError ? e.message : '审计日志加载失败') } }
+function reloadAudit(){ auditPage.value = 1; loadAudit() }
+function gotoAudit(p: number){ auditPage.value = p; loadAudit() }
+function setScope(s: 'team'|'all'){ auditScope.value = s; reloadAudit() }
+watch(tab, t => { if (t === 'audit') { auditPage.value = 1; loadAudit() } })
 const basic = reactive({ name: '', description: '', themeColor: '#0071E3', iterationWeeks: 2, joinApproval: true, estimateUnit: 'POINT' })
 const settings = reactive<TeamSettings>({ capacityPointsPerWorkday: 1, reminderThresholds: { staleInProgressWorkdays: 2, notStartedWorkdays: 2, reviewPendingWorkdays: 2, unclaimedWorkdays: 3, blockedWorkdays: 2, dueSoonWorkdays: 1 }, specialHolidays: [], specialWorkdays: [] })
 const specialOffText = ref(''), specialWorkText = ref('')
@@ -147,5 +198,13 @@ async function resetCode(){ if (!confirm('确定要重置邀请码吗？旧邀�
 .flexin{min-height:40px;border:1px solid var(--field-brd);border-radius:10px;background:var(--field);padding:6px 10px}
 .colorin{width:56px;height:36px;border:1px solid var(--field-brd);border-radius:10px;background:var(--field);padding:2px}
 .statusctl{display:flex;gap:8px;align-items:center;flex-wrap:wrap}.statusctl input[type="date"]{min-height:38px;border-radius:10px;border:1px solid var(--field-brd);background:var(--field);padding:0 8px}
+.seg{display:inline-flex;background:var(--track);border-radius:999px;padding:3px;gap:2px}
+.seg button{padding:6px 14px;border-radius:999px;font-size:13px;font-weight:500;color:var(--text-2);min-height:32px}
+.seg button.on{background:var(--card-solid);color:var(--text);box-shadow:0 1px 4px rgba(10,40,90,.18);font-weight:600}
+.atable{width:100%;border-collapse:collapse;margin-top:14px;font-size:13px}
+.atable th{text-align:left;color:var(--text-2);font-weight:600;padding:8px;border-bottom:1px solid var(--field-brd);white-space:nowrap}
+.atable td{padding:8px;border-bottom:1px solid var(--field-brd);vertical-align:top}
+.atable .nowrap{white-space:nowrap}
+.pager{display:flex;gap:10px;align-items:center;margin-top:12px}.pager .small{margin-right:auto}
 @media(max-width:820px){.layout{grid-template-columns:1fr}}
 </style>

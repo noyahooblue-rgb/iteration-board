@@ -3,7 +3,7 @@
 // 规则与真实后端一致：故事/任务仅 PO 创建、婉拒 DECLINE、共同负责 join、任务状态推算、
 // 批量下发、检查清单、搜索、回收站、保存筛选、迭代规划。
 import { MockError, type Item, type Team, type User, type Batch, type Nudge, type SavedFilter, type Notification, type ChecklistEntry, type KeyDate, type MockReport } from './types'
-import { seedUsers, seedMembers, seedIterations, seedBatches, buildItems, buildProgress, buildComments, buildActivities, seedKeyDates, seedStandupNotes, buildSeedNotifications, buildSeedReports } from './seed'
+import { seedUsers, seedMembers, seedIterations, seedBatches, buildItems, buildProgress, buildComments, buildActivities, seedKeyDates, seedStandupNotes, buildSeedNotifications, buildSeedReports, buildSeedAuditLogs } from './seed'
 
 // 演示构建开关：演示环境关闭开放注册、开启演示标识。
 export const MOCK_CONFIG = { registrationOpen: false, demoMode: true }
@@ -29,6 +29,24 @@ let notifications: Notification[] = buildSeedNotifications()
 let keyDates: KeyDate[] = seedKeyDates.map(k => ({ ...k }))
 let standupNotes = new Map<string, string>(Object.entries(seedStandupNotes))
 let reports: MockReport[] = buildSeedReports()
+// M5 审计日志（Q6）：种子预置 + 关键写操作追加；形状 {id, teamId, actorId, actorName, action, targetType, targetId, detail, createdAt}，时间倒序。
+interface AuditLog { id: number; teamId: number; actorId: number; actorName: string; action: string; targetType: string; targetId: number | null; detail: string | null; createdAt: string }
+let auditLogs: AuditLog[] = buildSeedAuditLogs()
+let auditSeq = 100
+function audit(teamId: number, actor: StoredUser, action: string, targetType: string, targetId: number | null, detail: string | null) {
+  auditLogs.unshift({ id: auditSeq++, teamId, actorId: actor.id, actorName: actor.displayName, action, targetType, targetId, detail, createdAt: new Date().toISOString() })
+}
+function auditPage(list: AuditLog[], q: URLSearchParams) {
+  let out = [...list].sort((a, b) => b.createdAt.localeCompare(a.createdAt) || b.id - a.id)
+  const actorId = q.get('actorId'); if (actorId) out = out.filter(l => l.actorId === Number(actorId))
+  const action = q.get('action'); if (action) out = out.filter(l => l.action === action)
+  // 契约 0.5.2 口径：from/to 为 ISO date-time，分页 0 起，信封 {content,page,size,totalElements,totalPages}
+  const from = q.get('from'); if (from) { const t = Date.parse(from); out = out.filter(l => Date.parse(l.createdAt.endsWith('Z') ? l.createdAt : l.createdAt + 'Z') >= t) }
+  const to = q.get('to'); if (to) { const t = Date.parse(to); out = out.filter(l => Date.parse(l.createdAt.endsWith('Z') ? l.createdAt : l.createdAt + 'Z') <= t) }
+  const totalElements = out.length
+  const page = Math.max(0, Number(q.get('page') ?? 0)), size = Math.min(200, Math.max(1, Number(q.get('size') ?? 20)))
+  return { content: out.slice(page * size, page * size + size), page, size, totalElements, totalPages: Math.max(1, Math.ceil(totalElements / size)) }
+}
 const userPrefs = new Map<number, Record<string, boolean>>()
 const reminderLog = new Set<string>()
 let nextKeyDateId = 100, nextReportId = 100
@@ -169,7 +187,17 @@ function route(method: string, rawPath: string, body: any): { status: number; da
   if (seg[0] === 'auth') return auth(method, seg[1], body)
   if (seg[0] === 'notifications') return notifRoute(method, seg, body, q)
   if (seg[0] === 'reports') return reportTopRoute(method, seg, body)
+  if (seg[0] === 'admin') return adminRoute(method, seg, body, q)
   if (seg[0] === 'teams') return teams(method, seg, body, q)
+  throw err(404, 'NOT_FOUND', '接口不存在')
+}
+// ---------------- 平台管理（M5 Q6 审计日志） ----------------
+function adminRoute(method: string, seg: string[], body: any, q: URLSearchParams) {
+  const u = me(); if (!u.platformAdmin) throw err(403, 'FORBIDDEN', '仅平台管理员可访问')
+  if (method === 'GET' && seg[1] === 'audit-logs') {
+    const tid = q.get('teamId')
+    return { status: 200, data: auditPage(tid ? auditLogs.filter(l => l.teamId === Number(tid)) : auditLogs, q) }
+  }
   throw err(404, 'NOT_FOUND', '接口不存在')
 }
 // ---------------- 通知中心（M3） ----------------
@@ -283,13 +311,14 @@ function teams(method: string, seg: string[], body: any, q: URLSearchParams) {
       if (!(m.role === 'LEADER' || target.userId === u.id)) throw err(403, 'FORBIDDEN', '只能修改自己的状态（组长可改全员）')
       if (!['NORMAL', 'LEAVE', 'TRAVEL', 'SECONDMENT'].includes(body.memberStatus)) throw err(400, 'VALIDATION', 'memberStatus 须为 NORMAL / LEAVE / TRAVEL / SECONDMENT')
       target.memberStatus = body.memberStatus; target.memberStatusStart = body.memberStatusStart ?? null; target.memberStatusEnd = body.memberStatusEnd ?? null
+      audit(teamId, u, 'UPDATE_MEMBER_STATUS', 'MEMBER', target.userId, `将 ${byId(target.userId)?.displayName ?? target.userId} 的成员状态设为 ${body.memberStatus}`)
       return { status: 200, data: { userId: target.userId, memberStatus: target.memberStatus, memberStatusStart: target.memberStatusStart, memberStatusEnd: target.memberStatusEnd } }
     }
     if (method === 'PATCH' && seg[4] === 'role') {
       const { m } = requireMember(teamId); if (m.role !== 'LEADER') throw err(403, 'FORBIDDEN', '仅组长可分配角色')
       const target = memberOf(teamId, Number(seg[3])); if (!target) throw err(404, 'NOT_FOUND', '成员不存在')
       if (target.role === 'LEADER' && body.role !== 'LEADER' && members.filter(x => x.teamId === teamId && x.role === 'LEADER').length <= 1) throw err(400, 'VALIDATION', '不能移除最后一名组长')
-      target.role = body.role; return { status: 204, data: null }
+      target.role = body.role; audit(teamId, me(), 'CHANGE_ROLE', 'MEMBER', target.userId, `将 ${byId(target.userId)?.displayName ?? target.userId} 的角色调整为 ${body.role}`); return { status: 204, data: null }
     }
   }
   if (method === 'POST' && seg[2] === 'invite-code' && seg[3] === 'reset') {
@@ -307,11 +336,19 @@ function teams(method: string, seg: string[], body: any, q: URLSearchParams) {
   if (seg[2] === 'standup') return standupRoute(method, teamId, seg, body, q)
   if (seg[2] === 'overview' && method === 'GET') { requireMember(teamId); return { status: 200, data: overview(teamId) } }
   if (seg[2] === 'reminders' && seg[3] === 'scan' && method === 'POST') { const { m } = requireMember(teamId); if (m.role !== 'LEADER') throw err(403, 'FORBIDDEN', '仅组长可手动触发提醒扫描'); return { status: 200, data: { generated: scanReminders(teamId) } } }
+  if (seg[2] === 'audit-logs' && method === 'GET') {
+    // Q6：组长或平台管理员可见；普通成员 403，非成员 404 隔离（requireMember 先行，但管理员可非成员查看本组）。
+    const u = me(); const m = memberOf(teamId, u.id)
+    if (!m && !u.platformAdmin) throw err(404, 'NOT_FOUND', '小组或事项不存在')
+    if (!(m?.role === 'LEADER' || u.platformAdmin)) throw err(403, 'FORBIDDEN', '仅组长或平台管理员可查看审计日志')
+    return { status: 200, data: auditPage(auditLogs.filter(l => l.teamId === teamId), q) }
+  }
   if (seg[2] === 'reports') return reportRoute(method, teamId, seg, body)
   if (seg[2] === 'trash' && method === 'GET') { const { u, m } = requireMember(teamId); const type = (q.get('type') ?? 'ALL').toUpperCase() // Q9 统一回收站
     const out: any[] = []
-    if (type !== 'REPORT') out.push(...items.filter(i => i.deletedAt).map(i => ({ ...view(i), entryType: 'ITEM' })))
-    if (type !== 'ITEM') out.push(...reports.filter(r => r.teamId === teamId && r.deletedAt && canViewReport(r, u, m)).map(r => ({ ...reportView(r), entryType: 'REPORT' })))
+    // 条目形状与契约 TrashEntry 对齐（kind/id/code/itemType/reportKind/title/deletedAt/deletedById/deletedByName）
+    if (type !== 'REPORT') out.push(...items.filter(i => i.deletedAt).map(i => ({ kind: 'ITEM', id: i.id, code: i.code, itemType: i.type, reportKind: null, title: i.title, deletedAt: i.deletedAt, deletedById: (i as any).deletedById ?? null, deletedByName: (i as any).deletedById ? (byId((i as any).deletedById)?.displayName ?? null) : null })))
+    if (type !== 'ITEM') out.push(...reports.filter(r => r.teamId === teamId && r.deletedAt && canViewReport(r, u, m)).map(r => ({ kind: 'REPORT', id: r.id, code: null, itemType: null, reportKind: r.kind, title: r.title, deletedAt: r.deletedAt, deletedById: (r as any).deletedById ?? null, deletedByName: (r as any).deletedById ? (byId((r as any).deletedById)?.displayName ?? null) : null })))
     return { status: 200, data: out } }
   if (seg[2] === 'backlog' && method === 'GET') {
     requireMember(teamId)
@@ -460,7 +497,7 @@ function scanReminders(teamId: number) {
     for (const uid of targets) { const mm = memberOf(teamId, uid); if (mm && awayOn(mm, today)) { const ld = leaderOf(teamId); if (ld && ld.userId !== uid) send(ld.userId, it, sig.rule + '_LEADER', `${sig.message}（负责人请假/出差，转提醒组长）`) } else send(uid, it, sig.rule, sig.message) } }
   return generated
 }
-// ---------------- 报告 ----------------
+// ---------------- 报告（） ----------------
 // kind 与真实后端 ReportService 对齐：STANDUP_SUMMARY / WEEKLY / ITERATION_SUMMARY / PERSONAL_WEEKLY / RISK_SUMMARY。
 // 可见范围服务端过滤；一个周期一份（generate 命中已有返回 existed=true）；重新生成 60 秒节流；
 // 历史版本最多 5 个（覆盖前留存，可查看/恢复）；删除为软删除进回收站并记墓碑（自动任务不再重建该周期）。
@@ -529,6 +566,7 @@ function reportRoute(method: string, teamId: number, seg: string[], body: any) {
     const existing = reports.find(r => r.teamId === teamId && !r.deletedAt && r.kind === kind && r.periodStart === ep.ps && r.periodEnd === ep.pe && (kind !== 'PERSONAL_WEEKLY' || r.ownerId === u.id))
     if (existing) return { status: 200, data: { ...reportView(existing), existed: true } }
     const r = createReport(teamId, u.id, kind, body.periodStart ?? null, body.periodEnd ?? null)
+    audit(teamId, u, 'GENERATE_REPORT', 'REPORT', r.id, `生成报告「${r.title}」`)
     return { status: 201, data: { ...reportView(r), existed: false } }
   })
   if (method === 'GET' && seg.length === 3) return { status: 200, data: reports.filter(r => r.teamId === teamId && !r.deletedAt && canViewReport(r, u, m)).map(reportView) }
@@ -706,7 +744,7 @@ function itemsRoute(method: string, teamId: number, seg: string[], body: any, q:
   if (seg.length === 4 && method === 'DELETE') {
     const { u, m } = requireMember(teamId)
     if (!(m.role !== 'MEMBER' || it.creatorId === u.id)) throw err(403, 'FORBIDDEN', '无权删除该事项')
-    it.deletedAt = new Date().toISOString(); it.version++; act(it.id, u.id, 'DELETE', it.status, it.status, '移入回收站')
+    it.deletedAt = new Date().toISOString(); it.version++; act(it.id, u.id, 'DELETE', it.status, it.status, '移入回收站'); audit(teamId, u, 'DELETE_ITEM', 'ITEM', it.id, `删除事项 ${it.code}「${it.title}」（移入回收站）`)
     if (it.parentId) { const p = items.find(x => x.id === it.parentId); if (p) deriveTask(p) }
     return { status: 204, data: null }
   }
@@ -1024,7 +1062,7 @@ function aiRoute(method: string, teamId: number, seg: string[], body: any) {
     aiLog(teamId, u.id, 'quick-update', t0); return { status: 200, data: { actions, unmatched } } }
   if (sub === 'split-stories' && method === 'POST') { const t0 = Date.now(); requireAi(teamId, 'splitStories')
     const task = items.find(i => i.id === Number(body?.itemId) && !i.deletedAt); if (!task || task.type !== 'TASK') throw err(404, 'NOT_FOUND', '任务不存在')
-    if (!(m.role === 'PO' || m.role === 'LEADER')) throw err(403, 'FORBIDDEN', '仅 PO 可使用 AI 拆故事')
+    if (m.role !== 'PO') throw err(403, 'FORBIDDEN', '仅 PO 可使用 AI 拆故事')
     const base = task.title
     const stories = [
       { title: `${base}：方案与范围确认`, storyCategory: 'ANALYSIS', estimate: 1 },

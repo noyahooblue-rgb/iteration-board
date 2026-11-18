@@ -8,7 +8,7 @@
 | --- | --- | --- |
 | Spring Boot（spring-boot-starter-parent 及 web / security / data-jpa / flyway / validation / test 等 starter） | 4.1.2 | Apache-2.0 |
 | Flyway（flyway-core、flyway-database-postgresql） | 13.12.2 | Apache-2.0 |
-| PostgreSQL JDBC Driver（org.postgresql:postgresql，版本由 Spring Boot 依赖管理） | 由 Spring Boot 4.1.2 管理 | BSD-2-Clause |
+| PostgreSQL JDBC Driver（org.postgresql:postgresql） | 42.7.14 | BSD-2-Clause |
 | springdoc-openapi（springdoc-openapi-starter-webmvc-ui） | 3.2.0 | Apache-2.0 |
 | Apache POI（poi-ooxml） | 6.0.0 | Apache-2.0 |
 | junixsocket（junixsocket-common、junixsocket-native-common，测试作用域，当前测试配置未直接使用） | 2.10.1 | Apache-2.0 |
@@ -37,5 +37,5 @@
 
 ## 待核对项
 
-- PostgreSQL JDBC Driver 的确切锁定版本由 Spring Boot 4.1.2 的依赖管理决定，本清单未在本地实际解析 Maven 依赖树，确切版本号待核对（许可证 BSD-2-Clause 已确认）。
+- PostgreSQL JDBC Driver 版本 42.7.14 已核对（以打包 jar 的 BOOT-INF/lib 与本地 Maven 仓库双证据确认，2026-11-18）。
 - 其余组件的许可证类型均已按各项目官方仓库/包元数据核对。

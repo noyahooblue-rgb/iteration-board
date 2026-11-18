@@ -7,6 +7,7 @@ import org.springframework.data.jpa.repository.Query;
 import org.springframework.data.repository.query.Param;
 
 import jakarta.persistence.LockModeType;
+import java.time.Instant;
 import java.util.List;
 import java.util.Optional;
 
@@ -19,6 +20,7 @@ public interface ItemRepo extends JpaRepository<Item, Long> {
         List<Item> findByTeamIdAndType(Long teamId, Enums.ItemType type);
         Optional<Item> findFirstByTeamIdAndExternalSystemAndExternalId(Long teamId, String externalSystem, String externalId);
         List<Item> findByTeamIdAndDeletedAtIsNotNull(Long teamId);
+        List<Item> findByDeletedAtBefore(Instant cutoff);
         long countByParentId(Long parentId);
         long countByParentIdAndStatus(Long parentId, Enums.ItemStatus status);
 }

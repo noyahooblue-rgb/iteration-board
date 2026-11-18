@@ -71,11 +71,11 @@ npm run build:mock   # 或 VITE_API_MODE=mock npm run dev
 
 ## 构建离线包
 
-离线安装包由构建脚本生成：先完成前端生产构建与后端打包（单个 jar，内嵌前端产物），再由打包脚本组装离线包。当前状态：仓库内尚无独立的离线打包脚本，离线包的组装口径为「后端 jar + 运行环境 + 安装/启停脚本」，待打包脚本落地后在此补充确切命令。在脚本落地前，可手动完成等价构建：
+离线安装包由仓库内的构建脚本生成（`packaging/build-package.sh`，在 Linux 构建机执行）：脚本完成后端打包、把前端生产构建内嵌进 jar，再组装 PostgreSQL / JRE / VC++ 运行库与 install / start / stop / uninstall / backup / restore / upgrade 脚本，产出 `packaging/dist/iteration-board-offline-1.0.0.zip`（运行时二进制经缓存目录组装，不进 Git）。部署与使用见 [docs/部署手册.md](docs/部署手册.md) 与 [docs/用户手册.md](docs/用户手册.md)；Windows 实测清单见 `packaging/WINDOWS-实测清单.md`。
 
 ```bash
-cd frontend && npm ci && npm run build
-cd ../backend && mvn package   # 产物 backend/target/iteration-board-*.jar
+bash packaging/build-package.sh            # 首次会下载官方运行时组件
+bash packaging/build-package.sh --skip-downloads   # 复用 packaging/cache 缓存
 ```
 
 ## 技术栈

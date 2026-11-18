@@ -31,14 +31,14 @@ export interface StandupData{date:string;previousWorkday:string;members:StandupM
 export interface RiskSignal{rule:string;severity:string;itemId:number|null;itemCode:string|null;userId:number|null;message:string}
 export interface OverviewMember{userId:number;memberStatus:string;memberStatusStart:string|null;memberStatusEnd:string|null;inProgressItems:Item[];lastProgressAt:string|null;staleCount:number;remainingPoints:number;remainingCapacityPoints:number|null;free:boolean}
 export interface OverviewData{members:OverviewMember[];canViewRisks:boolean;risks:RiskSignal[];iterationHealth:{iteration:Iteration;completionRate:number;remainingEstimate:number;idealRemainingEstimate:number;behind:boolean;blockedCount:number;staleCount:number}|null}
-// 报告：kind 与后端 ReportService 对齐——STANDUP_SUMMARY 站会摘要 / WEEKLY 周报 /
+// 报告（）：kind 与后端 ReportService 对齐——STANDUP_SUMMARY 站会摘要 / WEEKLY 周报 /
 // ITERATION_SUMMARY 迭代总结 / PERSONAL_WEEKLY 我的周报 / RISK_SUMMARY 风险摘要（旧前端曾把站会误写为 STANDUP，已纠正）。
 // 正文契约字段为 contentMd（兼容旧字段 content）；editedByHuman 表示被人工改过；version 为乐观锁版本；existed 表示 generate 命中已有报告。
 export interface ReportItem{allowedActions?:string[];id:number;teamId:number;kind:string;title:string;periodStart:string|null;periodEnd:string|null;ownerId:number|null;content:string;contentMd?:string;aiGenerated:boolean;edited:boolean;editedByHuman?:boolean;version?:number;deletedAt?:string|null;existed?:boolean;createdAt:string;updatedAt:string}
 export interface ReportVersion{id:number;reportId:number;title:string;contentMd?:string;content?:string;editedByHuman:boolean;createdAt:string}
 export type NotificationPrefs = Record<'ASSIGNMENT'|'NUDGE'|'MENTION'|'ITEM_UPDATE'|'REMINDER'|'SYSTEM', boolean>
 export const NOTIFICATION_CATEGORY_META:Record<string,string>={ASSIGNMENT:'指派',NUDGE:'催办',MENTION:'提及',ITEM_UPDATE:'事项动态',REMINDER:'自动提醒',SYSTEM:'系统'}
-// 分类色：任务蓝；故事按类别；缺陷粉；独立分析紫；临时橙。
+// 分类色（修订一 ）：任务蓝；故事按类别；缺陷粉；独立分析紫；临时橙。
 export const TYPE_META:Record<ItemType,{label:string;color:string}>={TASK:{label:'任务',color:'#007AFF'},STORY:{label:'故事',color:'#30B0C7'},DEFECT:{label:'缺陷',color:'#FF2D55'},ANALYSIS:{label:'分析',color:'#AF52DE'},ADHOC:{label:'临时事项',color:'#FF9500'}}
 export const STORY_CAT_META:Record<StoryCategory,{label:string;color:string}>={DEV:{label:'开发',color:'#30B0C7'},ANALYSIS:{label:'分析',color:'#AF52DE'},TEST:{label:'测试',color:'#00C7BE'},OTHER:{label:'其他',color:'#A2845E'}}
 export function itemColor(it:Pick<Item,'type'|'storyCategory'>){ return it.type==='STORY' && it.storyCategory ? STORY_CAT_META[it.storyCategory].color : TYPE_META[it.type].color }
@@ -67,3 +67,9 @@ export interface AiLog{id:number;feature:string;model:string|null;durationMs:num
 export interface QaRecord{id:number;question:string;answer:string;found:boolean;refs:string[];createdAt:string}
 export interface QaAnswer{recordId:number;found:boolean;answer:string;refs:string[]}
 export const AI_FEATURE_LABELS:Record<string,string>={pasteImport:'粘贴导入',quickUpdate:'一句话更新',splitStories:'AI 拆故事',summarize:'自动汇总',riskSummary:'风险摘要',qa:'智能问答'}
+// M5 Q6 审计日志：GET /teams/{id}/audit-logs（组长/管理员）、GET /admin/audit-logs（仅管理员）。
+export interface AuditLog{id:number;teamId:number;actorId:number;actorName:string;action:string;targetType:string;targetId:number|null;detail:string|null;createdAt:string}
+export interface AuditLogPage{items:AuditLog[];total:number;page:number;size:number}
+export const AUDIT_ACTION_LABELS:Record<string,string>={DELETE_ITEM:'删除事项',RESTORE_ITEM:'恢复事项',GENERATE_REPORT:'生成报告',DELETE_REPORT:'删除报告',REPORT_REGENERATE_FROM_TRASH:'恢复已删报告',CHANGE_ROLE:'调整角色',UPDATE_MEMBER_STATUS:'修改成员状态',REMOVE_MEMBER:'移除成员',UPDATE_TEAM_SETTINGS:'修改小组设置',RESET_INVITE_CODE:'重置邀请码',CREATE_ITEM:'新建事项',EDIT_ITEM:'编辑事项'}
+export const auditActionLabel=(a:string)=>AUDIT_ACTION_LABELS[a]??a
+export const auditTargetLabel=(l:AuditLog)=>{const t:Record<string,string>={ITEM:'事项',MEMBER:'成员',REPORT:'报告',TEAM:'小组'};return `${t[l.targetType]??l.targetType}${l.targetId!=null?' #'+l.targetId:''}`}

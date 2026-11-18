@@ -4,7 +4,7 @@
 // 大任务 SKY-3 的故事分布在迭代 12 与规划中的迭代 13；含 7 人批量下发批次、共同负责故事、独立事项。
 import type { Item, User, ProgressUpdate, Comment, Activity, Iteration, Batch, ChecklistEntry } from './types'
 
-export const DEMO_PASSWORD = (globalThis as any)?.process?.env?.DEMO_PASSWORD || 'CHANGE_ME_DEMO_PASSWORD'
+export const DEMO_PASSWORD = (import.meta as any).env?.DEMO_PASSWORD ?? (globalThis as any).process?.env?.DEMO_PASSWORD ?? 'CHANGE_ME_DEMO_PASSWORD'
 
 export const seedUsers: (User & { password: string })[] = [
   { id: 1, loginName: 'leader', displayName: '林小满', avatarColor: '#007AFF', platformAdmin: false, mustChangePassword: false, password: DEMO_PASSWORD },
@@ -16,6 +16,8 @@ export const seedUsers: (User & { password: string })[] = [
   { id: 7, loginName: 'zhoukx', displayName: '周可欣', avatarColor: '#AF52DE', platformAdmin: false, mustChangePassword: false, password: DEMO_PASSWORD },
   { id: 8, loginName: 'wutong', displayName: '吴桐', avatarColor: '#00C7BE', platformAdmin: false, mustChangePassword: false, password: DEMO_PASSWORD },
   { id: 9, loginName: 'zhengnan', displayName: '郑楠', avatarColor: '#FF6482', platformAdmin: false, mustChangePassword: false, password: DEMO_PASSWORD },
+  // 平台管理员（M5 审计日志「全部小组」范围用）：不属于任何小组，仅平台级权限。
+  { id: 10, loginName: 'admin', displayName: '平台管理员', avatarColor: '#636366', platformAdmin: true, mustChangePassword: false, password: DEMO_PASSWORD },
 ]
 export const seedMembers = [
   { userId: 1, role: 'LEADER', memberStatus: 'NORMAL' }, { userId: 2, role: 'PO', memberStatus: 'NORMAL' },
@@ -38,8 +40,21 @@ export const seedKeyDates = [
   { id: 2, teamId: 1, iterationId: 1, title: '迭代评审', date: '2026-11-20', category: 'REVIEW' },
   { id: 3, teamId: 1, iterationId: 1, title: '版本投产', date: '2026-11-21', category: 'RELEASE' },
 ]
+// 站会备注按「种子加载当天」生成键：standupOf 以今天日期取备注，写死历史日期会随日期推移失效（M5 修复）。
+function seedToday(): string { const d = new Date(); const p = (n: number) => String(n).padStart(2, '0'); return `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())}` }
 export const seedStandupNotes: Record<string, string> = {
-  '1|2026-11-17': '今天重点：SKY-14 的设计稿确认由组长跟进；封版前请把待验收事项清一清。',
+  [`1|${seedToday()}`]: '今天重点：SKY-14 的设计稿确认由组长跟进；封版前请把待验收事项清一清。',
+}
+// M5 审计日志种子（全部虚构）：覆盖删除事项 / 成员管理 / 生成报告 / 小组设置等动作。
+export function buildSeedAuditLogs() {
+  const t = (h: number, mi: number) => `${seedToday()}T${String(h).padStart(2, '0')}:${String(mi).padStart(2, '0')}:00`
+  return [
+    { id: 5, teamId: 1, actorId: 1, actorName: '林小满', action: 'UPDATE_TEAM_SETTINGS', targetType: 'TEAM', targetId: 1, detail: '修改小组设置：迭代周期 2 周', createdAt: t(9, 2) },
+    { id: 4, teamId: 1, actorId: 2, actorName: '陈一舟', action: 'GENERATE_REPORT', targetType: 'REPORT', targetId: 1, detail: '生成报告「周报（2026-11-10 ~ 2026-11-16）」', createdAt: t(9, 20) },
+    { id: 3, teamId: 1, actorId: 1, actorName: '林小满', action: 'UPDATE_MEMBER_STATUS', targetType: 'MEMBER', targetId: 9, detail: '将郑楠的成员状态设为请假（2026-11-16 ~ 2026-11-20）', createdAt: t(10, 5) },
+    { id: 2, teamId: 1, actorId: 3, actorName: '苏晴', action: 'DELETE_ITEM', targetType: 'ITEM', targetId: 38, detail: '删除事项 SKY-38「旧版首页横幅残留样式」（移入回收站）', createdAt: t(11, 30) },
+    { id: 1, teamId: 1, actorId: 1, actorName: '林小满', action: 'RESET_INVITE_CODE', targetType: 'TEAM', targetId: 1, detail: '重置小组邀请码', createdAt: t(13, 45) },
+  ]
 }
 export function buildSeedNotifications() {
   return [

@@ -14,7 +14,7 @@ let pass = 0, fail = 0
 const results = []
 function check(name, cond, extra = '') { if (cond) { pass++; results.push(`  PASS ${name}`) } else { fail++; results.push(`  FAIL ${name} ${extra}`) } }
 async function req(method, path, body, headers) { return handleRequest(method, '/api/v1' + path, body, headers) }
-const DEMO_PASSWORD = process.env.DEMO_PASSWORD || 'CHANGE_ME_DEMO_PASSWORD'
+const DEMO_PASSWORD = process.env.DEMO_PASSWORD ?? 'CHANGE_ME_DEMO_PASSWORD'
 async function login(name) { const r = await req('POST', '/auth/login', { loginName: name, password: DEMO_PASSWORD }); if (r.status !== 200) throw new Error('login ' + name + ' -> ' + r.status); return r.data }
 const T = 1 // 云雀小组
 
@@ -22,7 +22,7 @@ const T = 1 // 云雀小组
 await login('leader')
 let r = await req('GET', '/auth/me'); check('登录后 me 返回当前用户', r.status === 200 && r.data.loginName === 'leader')
 r = await req('POST', '/auth/login', { loginName: 'leader', password: 'Wrong1234' }); check('错误密码 401', r.status === 401)
-r = await req('POST', '/auth/change-password', { oldPassword: 'Nope1234', newPassword: 'NewPass12345' }); check('改密原密码错误 400', r.status === 400)
+r = await req('POST', '/auth/change-password', { oldPassword: 'Nope1234', newPassword: 'Demo12345' }); check('改密原密码错误 400', r.status === 400)
 r = await req('GET', '/teams/mine'); check('我的小组含云雀小组且估算单位为 point', r.data?.[0]?.code === 'SKY' && r.data[0].estimateUnit === 'point', JSON.stringify(r.data?.[0]))
 r = await req('GET', `/teams/${T}/members`); check('成员列表 9 人', r.data.length === 9)
 r = await req('GET', `/teams/${T}/items?scope=current`); check('当前迭代范围不含迭代13故事与任务', r.data.every(i => i.iterationId === 1) && r.data.length > 0)
@@ -204,7 +204,7 @@ r = await req('POST', `/teams/${T}/iterations/1/close`, closeBody)
 check('M3 结束迭代：默认结转到迭代 13 + 生成总结', r.status === 200 && r.data.iteration.status === 'FINISHED' && r.data.movedToNext > 0 && !!r.data.reportId, JSON.stringify(r.data))
 r = await req('GET', `/teams/${T}/iterations/2/planning`); check('M3 结转后迭代 13 含改进项', r.data.groups.flatMap(g => g.items).some(i => i.labels.includes('改进项')))
 
-// ---------- 报告 / 幂等 / 认领池 ----------
+// ---------- 修订二：报告 / 幂等 / 认领池 ----------
 await login('leader')
 r = await req('POST', `/teams/${T}/reports/generate`, { kind: 'STANDUP_SUMMARY', periodStart: '2026-11-16', periodEnd: '2026-11-16' })
 check('修订二 站会摘要首次生成 201 且 existed=false', r.status === 201 && r.data.existed === false && r.data.kind === 'STANDUP_SUMMARY', JSON.stringify(r.data))
@@ -297,11 +297,11 @@ r = await req('PATCH', `/teams/${T}/labels/${lab.id}`, { name: 'M4专用标签�
 r = await req('DELETE', `/teams/${T}/labels/${lab.id}`); check('M4 未使用标签删除 204', r.status === 204)
 const inUse = (await req('GET', `/teams/${T}/labels`)).data.find(x => x.usageCount > 0)
 if (inUse) { r = await req('DELETE', `/teams/${T}/labels/${inUse.id}`); check('M4 在用标签删除 409 LABEL_IN_USE', r.status === 409 && r.data.code === 'LABEL_IN_USE' && r.data.detail.usageCount > 0) }
-r = await req('GET', `/teams/${T}/trash?type=ITEM`); check('M4 Q9 回收站 type=ITEM 只含事项', r.status === 200 && r.data.every(x => x.entryType === 'ITEM'))
-r = await req('GET', `/teams/${T}/trash?type=ALL`); check('M4 Q9 回收站 type=ALL 返回统一条目', r.status === 200 && r.data.every(x => 'entryType' in x))
+r = await req('GET', `/teams/${T}/trash?type=ITEM`); check('M4 Q9 回收站 type=ITEM 只含事项', r.status === 200 && r.data.every(x => x.kind === 'ITEM'))
+r = await req('GET', `/teams/${T}/trash?type=ALL`); check('M4 Q9 回收站 type=ALL 返回统一条目', r.status === 200 && r.data.every(x => 'kind' in x && 'deletedAt' in x))
 const delRep = await req('POST', `/teams/${T}/reports/generate`, { kind: 'RISK_SUMMARY' })
 await req('DELETE', `/teams/${T}/reports/${delRep.data.id}`)
-r = await req('GET', `/teams/${T}/trash?type=REPORT`); check('M4 Q9 回收站 type=REPORT 含已删报告', r.status === 200 && r.data.some(x => x.entryType === 'REPORT' && x.id === delRep.data.id))
+r = await req('GET', `/teams/${T}/trash?type=REPORT`); check('M4 Q9 回收站 type=REPORT 含已删报告', r.status === 200 && r.data.some(x => x.kind === 'REPORT' && x.id === delRep.data.id))
 r = await req('POST', `/teams/${T}/reports/${delRep.data.id}/restore`); check('M4 Q9 统一回收站可恢复报告', r.status === 200 && !r.data.deletedAt)
 r = await req('GET', `/teams/${T}/ai/status`); check('M4 AI status 契约字段（available/features 连字符键/teamSettings）', r.status === 200 && r.data.available === true && r.data.mode === 'mock' && 'visionAvailable' in r.data && r.data.features.qa === true && r.data.teamSettings.qa === true, JSON.stringify(r.data))
 r = await req('PUT', `/teams/${T}/ai/settings`, { qa: false }); check('M4 组长改 AI 功能开关（扁平 TeamAiSettings）', r.status === 200 && r.data.qa === false && !('features' in r.data))
@@ -335,6 +335,8 @@ r = await req('POST', `/teams/${T}/ai/quick-update`, { text: '今天天气不错
 r = await req('POST', `/teams/${T}/ai/quick-update`, { text: '那个做到 50% 了' }); check('M4 一句话更新对不上片段进 unmatched', r.status === 200 && r.data.unmatched.length === 1, JSON.stringify(r.data))
 await login('po')
 r = await req('POST', `/teams/${T}/ai/split-stories`, { itemId: 1 }); check('M4 AI 拆故事返回草稿与待澄清问题（clarifyingQuestions/taskId）', r.status === 200 && r.data.taskId === 1 && r.data.stories.length >= 3 && r.data.clarifyingQuestions.length >= 1 && r.data.acceptancePoints.length >= 1)
+await login('leader')
+r = await req('POST', `/teams/${T}/ai/split-stories`, { itemId: 1 }); check('M5 AI 拆故事组长 403（仅 PO，与真实后端一致）', r.status === 403)
 await login('member')
 r = await req('POST', `/teams/${T}/ai/split-stories`, { itemId: 1 }); check('M4 AI 拆故事成员 403', r.status === 403)
 await login('leader')
@@ -360,6 +362,22 @@ r = await req('POST', `/teams/${T}/integrations/adapters/${ad.id}/sync`); check(
 r = await req('GET', `/teams/${T}/integrations/sync-logs`); check('M4 同步日志列表', r.status === 200 && r.data.length >= 1 && 'createdCount' in r.data[0] && 'createdAt' in r.data[0])
 r = await req('PATCH', `/teams/${T}/integrations/adapters/${ad.id}`, { name: '改名适配器' }); check('M4 适配器可编辑', r.status === 200 && r.data.name === '改名适配器')
 r = await req('DELETE', `/teams/${T}/integrations/adapters/${ad.id}`); check('M4 适配器可删除', r.status === 204)
+// ---------- M5 Q6 审计日志 ----------
+await login('leader')
+r = await req('GET', `/teams/${T}/audit-logs`); check('M5 审计日志组长 200 且含种子记录', r.status === 200 && r.data.totalElements >= 5 && r.data.content.some(l => l.action === 'DELETE_ITEM') && 'actorName' in r.data.content[0] && 'createdAt' in r.data.content[0], JSON.stringify(r.data).slice(0, 200))
+r = await req('GET', `/teams/${T}/audit-logs?action=DELETE_ITEM`); check('M5 审计日志按动作筛选', r.status === 200 && r.data.content.length >= 1 && r.data.content.every(l => l.action === 'DELETE_ITEM'))
+r = await req('POST', `/teams/${T}/items`, { type: 'DEFECT', title: '审计冒烟事项', destination: 'POOL' }); const auditItemId = r.data?.id
+r = await req('DELETE', `/teams/${T}/items/${auditItemId}`); check('M5 审计前置：删除事项 204', r.status === 204)
+r = await req('GET', `/teams/${T}/audit-logs?actorId=1`); check('M5 删除事项追加审计记录', r.status === 200 && r.data.content.some(l => l.action === 'DELETE_ITEM' && l.targetId === auditItemId))
+await login('member')
+r = await req('GET', `/teams/${T}/audit-logs`); check('M5 审计日志成员 403', r.status === 403)
+r = await req('GET', `/admin/audit-logs`); check('M5 管理员审计接口成员 403', r.status === 403)
+await login('admin')
+r = await req('GET', `/admin/audit-logs`); check('M5 管理员全部审计 200', r.status === 200 && r.data.totalElements >= 5 && r.data.content.every(l => 'teamId' in l))
+r = await req('GET', `/admin/audit-logs?teamId=${T}`); check('M5 管理员按小组筛选审计', r.status === 200 && r.data.content.every(l => l.teamId === T))
+r = await req('GET', `/teams/${T}/audit-logs`); check('M5 管理员（非成员）看本组审计 200', r.status === 200)
+await login('leader')
+
 // yefqkvf3 待问 1：同步连败通知所有组长（含触发者本人）。mock 失败口径：HTTP 适配器未配置 url 必失败（对齐真实后端 fetch 抛错）
 r = await req('PATCH', `/teams/${T}/members/3/role`, { role: 'LEADER' }); check('连败通知前置：成员 3 升任第二组长', r.status === 204)
 r = await req('POST', `/teams/${T}/integrations/adapters`, { name: '坏源乙', type: 'HTTP', systemName: 'BADTWO', config: {}, enabled: true }); const badAd = r.data

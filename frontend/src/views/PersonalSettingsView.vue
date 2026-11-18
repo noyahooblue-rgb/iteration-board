@@ -20,6 +20,20 @@
       <label class="small">结束<input type="date" v-model="myStatus.end" class="flexin"/></label>
       <AppButton variant="ghost" @click="saveMyStatus">保存状态</AppButton>
     </div>
+    <h2 style="margin-top:22px">外观</h2>
+    <p class="small">仅保存在本机浏览器，立即生效；真实与演示环境行为一致。</p>
+    <div class="prefrow"><span class="grow"><b>主题模式</b><br/><span class="tiny">默认跟随系统，也可固定浅色或深色</span></span>
+      <div class="seg" role="group" aria-label="主题模式">
+        <button v-for="o in themeOpts" :key="o.v" class="press" :class="{on: appearance.theme===o.v}" @click="setAppearance({theme:o.v})">{{o.label}}</button>
+      </div></div>
+    <div class="prefrow"><span class="grow"><b>玻璃强度</b><br/><span class="tiny">调整面板的通透程度与背景模糊</span></span>
+      <div class="seg" role="group" aria-label="玻璃强度">
+        <button v-for="o in glassOpts" :key="o.v" class="press" :class="{on: appearance.glass===o.v}" @click="setAppearance({glass:o.v})">{{o.label}}</button>
+      </div></div>
+    <div class="prefrow"><span class="grow"><b>减少透明度</b><br/><span class="tiny">玻璃面板改为不透明实底</span></span>
+      <label class="switch"><input type="checkbox" :checked="appearance.reduceTransparency" @change="setAppearance({reduceTransparency: ($event.target as HTMLInputElement).checked})"/><span/></label></div>
+    <div class="prefrow"><span class="grow"><b>减少动效</b><br/><span class="tiny">动画与过渡降级为淡入淡出（系统「减少动态效果」同样生效）</span></span>
+      <label class="switch"><input type="checkbox" :checked="appearance.reduceMotion" @change="setAppearance({reduceMotion: ($event.target as HTMLInputElement).checked})"/><span/></label></div>
     <h2 style="margin-top:22px">通知偏好</h2>
     <p class="small">指派类与催办类通知不可关闭（保证工作不漏接）；其余类别可按需开关。</p>
     <div v-for="c in prefCats" :key="c.key" class="prefrow">
@@ -34,6 +48,12 @@ import { reactive, ref, computed, onMounted } from 'vue'
 import AppShell from '../components/AppShell.vue'; import GlassPanel from '../components/GlassPanel.vue'; import AppButton from '../components/AppButton.vue'; import AppInput from '../components/AppInput.vue'; import Avatar from '../components/Avatar.vue'
 import { api, ApiError } from '../api/http'; import { useAuth } from '../stores/auth'; import { useTeam } from '../stores/team'; import { useToast } from '../stores/toast'
 const auth = useAuth(), team = useTeam(), toast = useToast()
+// 外观（M5）：本地偏好，改动即时生效并持久化（localStorage，不走后端）
+import { loadAppearance, saveAppearance, type Appearance, type ThemeMode, type GlassLevel } from '../utils/appearance'
+const appearance = reactive<Appearance>(loadAppearance())
+const themeOpts = [{ v: 'system', label: '跟随系统' }, { v: 'light', label: '浅色' }, { v: 'dark', label: '深色' }] as { v: ThemeMode; label: string }[]
+const glassOpts = [{ v: 'clear', label: '通透' }, { v: 'standard', label: '标准' }, { v: 'frosted', label: '磨砂' }] as { v: GlassLevel; label: string }[]
+function setAppearance(patch: Partial<Appearance>){ Object.assign(appearance, patch); saveAppearance({ ...appearance }) }
 const f = reactive({ old: '', next: '', confirm: '' }); const err = ref('')
 // M3：通知偏好 + 我的成员状态
 import type { NotificationPrefs } from '../api/types'
@@ -71,4 +91,7 @@ async function submit(){
 .switch{position:relative;width:48px;height:28px;flex:none}.switch input{opacity:0;width:0;height:0}.switch span{position:absolute;inset:0;background:var(--track);border-radius:99px;transition:.2s;cursor:pointer}.switch span:before{content:'';position:absolute;width:22px;height:22px;border-radius:50%;background:#fff;top:3px;left:3px;transition:.2s;box-shadow:0 1px 4px rgba(0,0,0,.25)}
 .switch input:checked + span{background:var(--c-green)}.switch input:checked + span:before{transform:translateX(20px)}
 .switch input:disabled + span{opacity:.55;cursor:not-allowed}
+.seg{display:flex;background:var(--track);border-radius:999px;padding:3px;gap:2px;flex:none}
+.seg button{padding:6px 14px;border-radius:999px;font-size:13px;font-weight:500;color:var(--text-2);min-height:32px}
+.seg button.on{background:var(--card-solid);color:var(--text);box-shadow:0 1px 4px rgba(10,40,90,.18);font-weight:600}
 </style>

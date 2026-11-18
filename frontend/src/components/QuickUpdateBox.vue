@@ -3,7 +3,7 @@
     <div class="qhead"><Sparkles :size="16" class="indigo"/><b>一句话更新</b><span class="tiny">说一句你负责事项的进展，AI 帮你对上号</span></div>
     <template v-if="ai.featureOn('quickUpdate')">
       <div class="qrow">
-        <input v-model="text" class="flexin grow" placeholder="如：SKY-4 做到 80% 了 / 登录页切图完成了" @keyup.enter="submit"/>
+        <input v-model="text" class="flexin grow" placeholder="如：登录页切图做到 80% 了 / 导出分页修复完成了" @keyup.enter="submit"/>
         <AppButton :disabled="busy.is('parse') || !text.trim()" @click="submit">{{ busy.is('parse') ? '解析中…' : '解析' }}</AppButton>
       </div>
       <div v-for="(a,i) in actions" :key="i" class="qcard">

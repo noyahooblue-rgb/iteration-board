@@ -83,7 +83,7 @@ public class ReportService {
         return facts;
     }
 
-    // ---------- 权限口径（kind 沿用 M3 字符串） ----------
+    // ----------  权限口径（kind 沿用 M3 字符串） ----------
     // STANDUP_SUMMARY 站会摘要 / WEEKLY 周报 / ITERATION_SUMMARY 迭代总结 / PERSONAL_WEEKLY 我的周报 / RISK_SUMMARY 风险摘要
     public static final java.util.Set<String> KINDS = java.util.Set.of(
             "STANDUP_SUMMARY", "WEEKLY", "ITERATION_SUMMARY", "PERSONAL_WEEKLY", "RISK_SUMMARY");
@@ -199,7 +199,7 @@ public class ReportService {
     }
 
     /**
-     * 生成：一个周期只有一份——该周期已有未删报告时不新建，返回 existed=true；
+     * 生成（）：一个周期只有一份——该周期已有未删报告时不新建，返回 existed=true；
      * 已有墓碑（已删）时同样返回 existed=true，定时任务据此跳过。拒绝未来周期。
      */
     @Transactional
@@ -274,7 +274,10 @@ public class ReportService {
         r.setTitle(titleOf(r, user));
         r.setContent(narrateOrTemplate(team, user, r, buildContent(team, user, r)));
         r.setLastGeneratedAt(Instant.now());
-        return new GenResult(reportRepo.save(r), false);
+        Report saved = reportRepo.save(r);
+        auditService.log(teamId, user, "GENERATE_REPORT", "REPORT", saved.getId(),
+                "生成报告 kind=" + kind + " period=" + saved.getPeriodStart() + "~" + saved.getPeriodEnd());
+        return new GenResult(saved, false);
     }
 
     public record Preview(String content, boolean aiGenerated) {}
@@ -513,7 +516,7 @@ public class ReportService {
                 .orElseThrow(() -> ApiException.notFound("报告不存在"));
     }
 
-    /** 编辑；version 为空时不校验（兼容 M3 调用）。 */
+    /** 编辑（ 编辑权表 + 版本冲突）；version 为空时不校验（兼容 M3 调用）。 */
     @Transactional
     public Report patch(Long teamId, Long reportId, AppUser user, String title, String contentMd, Integer version) {
         TeamMember me = teamService.requireMember(teamId, user);
@@ -595,6 +598,8 @@ public class ReportService {
         r.setDeletedAt(Instant.now());
         r.setDeletedById(user.getId());
         reportRepo.save(r);
+        auditService.log(teamId, user, "DELETE_REPORT", "REPORT", r.getId(),
+                "删除报告 kind=" + r.getKind() + " period=" + r.getPeriodStart() + "~" + r.getPeriodEnd());
     }
 
     @Transactional(readOnly = true)

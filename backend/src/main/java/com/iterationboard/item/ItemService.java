@@ -36,6 +36,7 @@ public class ItemService {
     private final ItemTransitionService transitionService;
     private final TaskDerivationService derivationService;
     private final NotifyService notifyService;
+    private final com.iterationboard.common.AuditService auditService;
 
     public ItemService(ItemRepo itemRepo, TeamRepo teamRepo,
                        TeamMemberRepo memberRepo, UserRepo userRepo,
@@ -45,7 +46,9 @@ public class ItemService {
                        ActivityRepo activityRepo, IterationRepo iterationRepo,
                        ChecklistRepo checklistRepo, ItemOwnerRepo ownerRepo,
                        TeamService teamService, ItemTransitionService transitionService,
-                       TaskDerivationService derivationService, NotifyService notifyService) {
+                       TaskDerivationService derivationService, NotifyService notifyService,
+                       com.iterationboard.common.AuditService auditService) {
+        this.auditService = auditService;
         this.itemRepo = itemRepo; this.teamRepo = teamRepo; this.memberRepo = memberRepo; this.userRepo = userRepo;
         this.collaboratorRepo = collaboratorRepo; this.inviteeRepo = inviteeRepo; this.labelRepo = labelRepo;
         this.itemLabelRepo = itemLabelRepo; this.progressRepo = progressRepo; this.commentRepo = commentRepo;
@@ -146,6 +149,8 @@ public class ItemService {
             }
         }
         itemRepo.save(item);
+        auditService.log(teamId, creator, "CREATE_ITEM", "ITEM", item.getId(),
+                item.getCode() + " " + item.getTitle());
 
         if (cmd.type() != ItemType.TASK && "ASSIGN".equals(dest)) {
             List<Long> owners = cmd.ownerIds() == null ? List.of() : cmd.ownerIds();
@@ -215,7 +220,7 @@ public class ItemService {
         TeamMember member = teamService.requireMember(teamId, user);
         Item item = requireItem(teamId, itemId);
         if (!canEdit(member, item, user)) throw ApiException.forbidden("仅创建人、负责人、PO 或组长可编辑事项");
-        //：故事 PATCH——PO/组长可全改；负责人（非 PO/组长）只能改 description，其余字段 403。
+        // ：故事 PATCH——PO/组长可全改；负责人（非 PO/组长）只能改 description，其余字段 403。
         if (item.getType() == ItemType.STORY && member.getRole() != Role.LEADER && member.getRole() != Role.PO) {
             if (!transitionService.isOwner(item, user)) {
                 throw ApiException.forbidden("故事仅 PO、组长或负责人可编辑");
@@ -279,6 +284,8 @@ public class ItemService {
         }
         itemRepo.save(item);
         activityRepo.save(new Activity(item, user, "EDIT", st.name(), st.name(), null));
+        auditService.log(teamId, user, "EDIT_ITEM", "ITEM", item.getId(),
+                item.getCode() + " " + item.getTitle());
         return item;
     }
 
@@ -358,6 +365,8 @@ public class ItemService {
         item.setDeletedById(user.getId());
         itemRepo.save(item);
         activityRepo.save(new Activity(item, user, "DELETE", item.getStatus().name(), item.getStatus().name(), null));
+        auditService.log(teamId, user, "DELETE_ITEM", "ITEM", item.getId(),
+                item.getCode() + " " + item.getTitle());
         if (item.getParent() != null) derivationService.recalc(item.getParent());
     }
 
@@ -370,6 +379,8 @@ public class ItemService {
         item.setDeletedById(null);
         itemRepo.save(item);
         activityRepo.save(new Activity(item, user, "RESTORE", item.getStatus().name(), item.getStatus().name(), null));
+        auditService.log(teamId, user, "RESTORE_ITEM", "ITEM", item.getId(),
+                item.getCode() + " " + item.getTitle());
         if (item.getParent() != null) derivationService.recalc(item.getParent());
         return item;
     }
@@ -546,7 +557,7 @@ public class ItemService {
                 .filter(c -> c.getDeletedAt() == null).toList();
     }
 
-    /** 评论修改：仅作者，且发出后 15 分钟内，超时 403。 */
+    /** 评论修改（）：仅作者，且发出后 15 分钟内，超时 403。 */
     @Transactional
     public Comment patchComment(Long teamId, Long itemId, Long commentId, AppUser user, String content) {
         teamService.requireMember(teamId, user);
@@ -564,7 +575,7 @@ public class ItemService {
         return commentRepo.save(c);
     }
 
-    /** 评论删除：作者或组长可删（软删除）。 */
+    /** 评论删除（）：作者或组长可删（软删除）。 */
     @Transactional
     public void deleteComment(Long teamId, Long itemId, Long commentId, AppUser user) {
         TeamMember member = teamService.requireMember(teamId, user);

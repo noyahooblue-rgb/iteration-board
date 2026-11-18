@@ -36,6 +36,7 @@ class JoinRequestProductionPathTest {
     @AfterEach
     void cleanup() {
         jdbc.update("DELETE FROM join_request WHERE user_id IN (SELECT id FROM app_user WHERE login_name LIKE 'jr_%')");
+        jdbc.update("DELETE FROM audit_log WHERE team_id IN (SELECT id FROM team WHERE code = 'JRT')");
         jdbc.update("DELETE FROM team_member WHERE user_id IN (SELECT id FROM app_user WHERE login_name LIKE 'jr_%')");
         jdbc.update("DELETE FROM team_member WHERE team_id IN (SELECT id FROM team WHERE code = 'JRT')");
         jdbc.update("DELETE FROM team WHERE code = 'JRT'");

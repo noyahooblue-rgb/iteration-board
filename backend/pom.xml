@@ -87,7 +87,7 @@
             <artifactId>spring-security-test</artifactId>
             <scope>test</scope>
         </dependency>
-        <!-- 历史保留的测试作用域依赖：当前测试配置已改为 TCP 连接（见 src/test/resources/application.properties），该依赖暂未被测试代码直接使用，保留以兼容既有构建。 -->
+        <!-- 测试期经 PostgreSQL Unix 域套接字连接真实 PG（本机 Java TCP 被环境权限拦截时的等价通道；应用运行期仍用 TCP 数据源） -->
         <dependency>
             <groupId>com.kohlschutter.junixsocket</groupId>
             <artifactId>junixsocket-common</artifactId>
@@ -112,8 +112,10 @@
             <resource>
                 <directory>src/main/resources</directory>
             </resource>
-            <!-- 契约原文由构建期从唯一来源 contract/ 复制进 static/ 供 /openapi.yaml 端点提供，
-                 仓库内不保留第二份静态副本（单一来源原则）。 -->
+            <!-- 待问2 回合（M5）：契约单一事实源仍是 ../contract/openapi.yaml；
+                 构建时由 Maven resources 把它拷入 classpath 的 static/ 下，
+                 使 /openapi.yaml 在干净构建（删除 target 后）也能 200，
+                 不再依赖人工放置的静态副本（公开版已验证做法）。 -->
             <resource>
                 <directory>${project.basedir}/../contract</directory>
                 <includes>
@@ -131,9 +133,11 @@
                 <groupId>org.apache.maven.plugins</groupId>
                 <artifactId>maven-surefire-plugin</artifactId>
                 <configuration>
-                    <!-- 固定测试类执行顺序为字母序：CsrfCookieFlowTest 依赖未被其他测试类
-                         污染的 CSRF 引导状态，Surefire 默认的文件系统顺序在不同机器上
-                         不一致，曾导致 CI 环境下该类两条用例失败。 -->
+                    <!-- 待问3 回合（M5）：固定测试类执行顺序为类名字母序，保证结果可复现、
+                         不随文件系统/类路径扫描顺序漂移。注意：这只是可复现性固定，
+                         不是对 CsrfCookieFlowTest 共享状态污染的掩盖——该污染已在
+                         CsrfCookieFlowTest 内按生产配置恢复 CsrfFilter 根治，
+                         并以 reversealphabetical 顺序复跑验证过。 -->
                     <runOrder>alphabetical</runOrder>
                 </configuration>
             </plugin>

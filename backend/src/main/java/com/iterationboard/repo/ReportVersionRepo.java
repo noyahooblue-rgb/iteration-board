@@ -10,4 +10,6 @@ public interface ReportVersionRepo extends JpaRepository<ReportVersion, Long> {
     List<ReportVersion> findByReportIdOrderByCreatedAtDescIdDesc(Long reportId);
     Optional<ReportVersion> findByIdAndReportId(Long id, Long reportId);
     long countByReportId(Long reportId);
+    List<ReportVersion> findByReportId(Long reportId);
+    long deleteByReportId(Long reportId);
 }

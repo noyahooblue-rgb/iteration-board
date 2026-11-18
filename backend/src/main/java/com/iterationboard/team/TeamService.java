@@ -19,14 +19,17 @@ public class TeamService {
     private final TeamMemberRepo memberRepo;
     private final JoinRequestRepo joinRequestRepo;
     private final UserRepo userRepo;
+    private final com.iterationboard.common.AuditService auditService;
     private final SecureRandom random = new SecureRandom();
 
     public TeamService(TeamRepo teamRepo, TeamMemberRepo memberRepo,
-                       JoinRequestRepo joinRequestRepo, UserRepo userRepo) {
+                       JoinRequestRepo joinRequestRepo, UserRepo userRepo,
+                       com.iterationboard.common.AuditService auditService) {
         this.teamRepo = teamRepo;
         this.memberRepo = memberRepo;
         this.joinRequestRepo = joinRequestRepo;
         this.userRepo = userRepo;
+        this.auditService = auditService;
     }
 
     /** 成员身份校验：非成员一律 404，不泄露小组存在性。 */
@@ -60,7 +63,7 @@ public class TeamService {
                            Integer iterationWeeks, Boolean joinApproval) {
         if (name == null || name.isBlank() || name.length() > 64) throw ApiException.validation("小组名称不能为空且不超过 64 字");
         if (code == null || !code.matches("[A-Za-z]{2,5}")) throw ApiException.validation("小组代号须为 2 至 5 个字母");
-        // 代号全平台唯一（不区分大小写）：事项编号「代号-序号」在搜索/AI 问答中不能有歧义。
+        // 代号全平台唯一（不区分大小写）：事项编号「代号-序号」在搜索/AI 问答中不能有歧义（验收意见三-4）。
         // 数据库另有 lower(code) 唯一索引（Flyway V2）兜住并发竞态，竞态时由全局异常处理映射为同一 409。
         if (teamRepo.existsByCodeIgnoreCase(code)) {
             throw new ApiException(HttpStatus.CONFLICT, "TEAM_CODE_TAKEN", "小组代号已被占用（不区分大小写），请换一个代号");
@@ -204,6 +207,8 @@ public class TeamService {
         }
         target.setRole(role);
         memberRepo.save(target);
+        auditService.log(teamId, leader, "CHANGE_ROLE", "MEMBER", targetUserId,
+                "成员角色调整为 " + role);
     }
 
     @Transactional
@@ -212,6 +217,7 @@ public class TeamService {
         Team t = requireTeam(teamId);
         t.setInviteCode(generateInviteCode());
         teamRepo.save(t);
+        auditService.log(teamId, leader, "RESET_INVITE_CODE", "TEAM", teamId, "重置邀请码");
         return t.getInviteCode();
     }
 
@@ -243,6 +249,7 @@ public class TeamService {
             t.setSettingsJson(TeamSettings.mergeInto(t.getSettingsJson(), patch.settings()));
         }
         teamRepo.save(t);
+        auditService.log(teamId, user, "UPDATE_TEAM_SETTINGS", "TEAM", teamId, "修改小组设置");
         return t;
     }
 
@@ -297,6 +304,8 @@ public class TeamService {
             target.setStatusEnd(end);
         }
         memberRepo.save(target);
+        auditService.log(teamId, actor, "UPDATE_MEMBER_STATUS", "MEMBER", targetUserId,
+                "成员状态改为 " + memberStatus);
         return target;
     }
 }

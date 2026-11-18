@@ -6,7 +6,7 @@
     <p class="note">内容卡片则使用 86% 不透明实底、不加模糊，左侧带 4px 分类色条，如下方示例。</p></section>
 
   <section class="panel glass"><h3>内容卡片</h3><p class="sub">圆角 16px · 内边距 16px · 左侧分类色条</p>
-    <article class="demo-card"><div class="dc-top"><span class="small">SKY-25</span><span class="prio P0">P0</span></div>
+    <article class="demo-card"><div class="dc-top"><span class="small">EX-25</span><span class="prio P0">P0</span></div>
       <p class="dc-title">示例事项 · 导出偶发空白</p>
       <div class="dc-meta"><Avatar name="苏某" color="#FF9500" :size="22"/><span class="due over"><Calendar :size="13"/> 11月16日 · 已逾期</span><span class="meta-ico"><MessageSquare :size="14"/> 2</span></div></article></section>
 

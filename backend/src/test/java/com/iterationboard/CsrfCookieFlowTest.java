@@ -32,6 +32,34 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
 class CsrfCookieFlowTest {
 
     @Autowired MockMvc mvc;
+    @Autowired org.springframework.security.web.FilterChainProxy filterChainProxy;
+
+    /**
+     * 状态隔离根治（M5，待问3）：共享污染源是 spring-security-test 的 csrf() 后处理器——
+     * 它经 WebTestUtils 把同一个 Spring 上下文里共享 CsrfFilter 的 tokenRepository
+     * 永久替换为 TestCsrfTokenRepository。此前任何测试类用过 csrf() 后，本类再也拿不到
+     * XSRF-TOKEN Cookie，本类只是靠 Surefire 类名排序最先运行才未受影响（顺序依赖）。
+     * 根治办法：本类每个用例前把共享 CsrfFilter 恢复为 SecurityConfig 的生产配置
+     * （CookieCsrfTokenRepository + plain CsrfTokenRequestAttributeHandler），
+     * 与 M4IntegrationTest.restoreProductionCsrfConfig 同口径；恢复后本类与执行顺序无关，
+     * 已以 reversealphabetical 顺序复跑验证。
+     */
+    @org.junit.jupiter.api.BeforeEach
+    void restoreProductionCsrfConfig() throws Exception {
+        for (org.springframework.security.web.SecurityFilterChain chain : filterChainProxy.getFilterChains()) {
+            for (jakarta.servlet.Filter f : chain.getFilters()) {
+                if (f instanceof org.springframework.security.web.csrf.CsrfFilter csrfFilter) {
+                    java.lang.reflect.Field repoField =
+                            org.springframework.security.web.csrf.CsrfFilter.class.getDeclaredField("tokenRepository");
+                    repoField.setAccessible(true);
+                    repoField.set(csrfFilter,
+                            org.springframework.security.web.csrf.CookieCsrfTokenRepository.withHttpOnlyFalse());
+                    csrfFilter.setRequestHandler(
+                            new org.springframework.security.web.csrf.CsrfTokenRequestAttributeHandler());
+                }
+            }
+        }
+    }
 
     /** 与浏览器一致的引导：首访先 GET 验证码页，响应就应下发 XSRF-TOKEN Cookie（令牌物化过滤器）。 */
     private Cookie bootstrapXsrfCookie() throws Exception {

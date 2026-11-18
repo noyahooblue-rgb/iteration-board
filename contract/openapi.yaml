@@ -1,9 +1,11 @@
 openapi: 3.0.3
 info:
   title: 迭代小组平台 API（M4 契约）
-  version: 0.5.1
+  version: 0.5.2
   description: >
     真实后端（Spring Boot）与浏览器模拟后端共同遵循的唯一契约。
+    0.5.2（M5）：Q6 审计日志读取侧落地（小组组长/平台管理员读本组、平台管理员读全部，只读）；
+    Q4 数据留存口径入后端配置（回收站 30 天物理清理、通知 90 天、审计日志 180 天，app.retention.* 可配，无新增接口）。
     0.5.0（M4）：Q1–Q15 待问结论落地（Q4/Q6 读取侧除外）+ AI 服务层与六项功能正式定义 + 导入批次 + 外部对接适配器；
     Item/Report 附 allowedActions；报告只保留小组路径（Q8）；后端静态 openapi 副本已删除，本文件为唯一来源（Q5）。
     错误统一格式 {code, message, detail}；修改类接口带 version，冲突返回 409。
@@ -1594,7 +1596,7 @@ paths:
       description: >
         组内任何人可催「不是自己负责」的事项：待开始/进行中催全部负责人，待验收催验收人。
         同一发起人对同一事项每天只能催一次，第二次返回 409 NUDGE_DAILY_LIMIT。
-        被催人请假/出差（当日状态生效）时不提醒本人，改记给组长（redirected=true），与一致。
+        被催人请假/出差（当日状态生效）时不提醒本人，改记给组长（redirected=true），与验收 一致。
         至少一位真实对象被催到时事项 nudgeCount +1；被催人收到 NUDGE 通知，可用快捷回应回传。
       parameters:
         - { $ref: '#/components/parameters/TeamId' }
@@ -1978,9 +1980,9 @@ paths:
         '404': { $ref: '#/components/responses/Error' }
   /teams/{teamId}/reminders/scan:
     post:
-      summary: 立即扫描自动提醒（仅组长；与定时扫描同一实现，对应）
+      summary: 立即扫描自动提醒（仅组长；与定时扫描同一实现，对应验收 ）
       description: >
-        按规则表逐条扫描：进行中无进展、待开始未动工、待验收未处理、待认领无人领、
+        按 规则表逐条扫描：进行中无进展、待开始未动工、待验收未处理、待认领无人领、
         阻塞未解除、临近截止、已逾期。阈值取小组设置（工作日口径，含特殊日期）。
         请假/出差成员不提醒本人、改提醒组长。同一规则同一事项同一接收人当天不重复生成。
       parameters: [{ $ref: '#/components/parameters/TeamId' }]
@@ -2000,7 +2002,7 @@ paths:
         '404': { $ref: '#/components/responses/Error' }
   /teams/{teamId}/reports/generate:
     post:
-      summary: 生成报告时手动生成视为有意恢复——原地重生返回 201 且 restored=true 并写审计日志，定时任务仍跳过墓碑；未来周期 400；生成权限——站会/周报/风险=组长/PO，迭代总结=组长，我的周报=本人；支持 Idempotency-Key）
+      summary: 生成报告（ + Q1：一周期一份；已有未删报告返回 200 且 existed=true 不新建；已有墓碑（已删）时手动生成视为有意恢复——原地重生返回 201 且 restored=true 并写审计日志，定时任务仍跳过墓碑；未来周期 400；生成权限——站会/周报/风险=组长/PO，迭代总结=组长，我的周报=本人；支持 Idempotency-Key）
       parameters:
         - { $ref: '#/components/parameters/TeamId' }
         - name: Idempotency-Key
@@ -2035,7 +2037,7 @@ paths:
         '404': { $ref: '#/components/responses/Error' }
   /teams/{teamId}/reports:
     get:
-      summary: 报告列表
+      summary: 报告列表（：服务端按可见范围过滤——风险摘要仅组长/PO、我的周报仅本人、其余全组；不含已删；非成员 404）
       parameters: [{ $ref: '#/components/parameters/TeamId' }]
       responses:
         '200':
@@ -2063,7 +2065,7 @@ paths:
               schema: { $ref: '#/components/schemas/Report' }
         '404': { $ref: '#/components/responses/Error' }
     patch:
-      summary: 编辑报告内容
+      summary: 编辑报告内容（ 编辑权表：站会/周报/风险=组长/PO，迭代总结=组长，我的周报=本人；置 editedByHuman=true；带 version 时冲突 409）
       parameters:
         - { $ref: '#/components/parameters/TeamId' }
         - name: reportId
@@ -2091,7 +2093,7 @@ paths:
         '404': { $ref: '#/components/responses/Error' }
         '409': { $ref: '#/components/responses/Error' }
     delete:
-      summary: 删除报告
+      summary: 删除报告（：软删除进回收站 30 天；有编辑权者可删；自动生成报告删后留墓碑，定时任务不再生成该周期）
       parameters:
         - { $ref: '#/components/parameters/TeamId' }
         - name: reportId
@@ -2120,7 +2122,7 @@ paths:
         '404': { $ref: '#/components/responses/Error' }
   /teams/{teamId}/reports/trash:
     get:
-      summary: 报告回收站
+      summary: 报告回收站（：仅返回调用者有编辑权的已删报告）
       parameters: [{ $ref: '#/components/parameters/TeamId' }]
       responses:
         '200':
@@ -2150,7 +2152,7 @@ paths:
         '404': { $ref: '#/components/responses/Error' }
   /teams/{teamId}/reports/{reportId}/regenerate:
     post:
-      summary: 重新生成报告
+      summary: 重新生成报告（：覆盖前存历史版本；距上次生成 <60 秒返回 409 REGEN_TOO_FREQUENT；生成后 editedByHuman=false；权限同生成）
       parameters:
         - { $ref: '#/components/parameters/TeamId' }
         - name: reportId
@@ -2239,7 +2241,7 @@ paths:
                 items: { $ref: '#/components/schemas/Label' }
         '404': { $ref: '#/components/responses/Error' }
     post:
-      summary: 新建标签
+      summary: 新建标签（：仅组长/PO；组内名称唯一，重名 409 LABEL_NAME_TAKEN）
       parameters: [{ $ref: '#/components/parameters/TeamId' }]
       requestBody:
         required: true
@@ -2305,7 +2307,7 @@ paths:
         '409': { $ref: '#/components/responses/Error' }
   /teams/{teamId}/items/{itemId}/comments/{commentId}:
     patch:
-      summary: 修改评论
+      summary: 修改评论（：仅作者，发出后 15 分钟内，超时 403）
       parameters:
         - { $ref: '#/components/parameters/TeamId' }
         - name: itemId
@@ -2334,7 +2336,7 @@ paths:
         '403': { $ref: '#/components/responses/Error' }
         '404': { $ref: '#/components/responses/Error' }
     delete:
-      summary: 删除评论
+      summary: 删除评论（：作者或组长；软删除）
       parameters:
         - { $ref: '#/components/parameters/TeamId' }
         - name: itemId
@@ -2351,7 +2353,7 @@ paths:
         '404': { $ref: '#/components/responses/Error' }
   /teams/{teamId}/iterations/{iterationId}/key-dates/{keyDateId}:
     patch:
-      summary: 修改关键日期
+      summary: 修改关键日期（：增删改仅组长/PO；删除端点为 DELETE /teams/{teamId}/key-dates/{keyDateId}）
       parameters:
         - { $ref: '#/components/parameters/TeamId' }
         - name: iterationId
@@ -2478,6 +2480,42 @@ paths:
           content:
             application/json:
               schema: { $ref: '#/components/schemas/NotificationPrefs' }
+  /teams/{teamId}/audit-logs:
+    get:
+      summary: 审计日志（本组，只读；M5/Q6）——本组组长（LEADER）或平台管理员可读；普通成员/PO/非成员 403
+      parameters:
+        - { name: teamId, in: path, required: true, schema: { type: integer, format: int64 } }
+        - { name: actorId, in: query, required: false, schema: { type: integer, format: int64 }, description: 按操作者筛选 }
+        - { name: action, in: query, required: false, schema: { type: string }, description: 按动作精确筛选 }
+        - { name: from, in: query, required: false, schema: { type: string, format: date-time }, description: 起始时间（ISO，含） }
+        - { name: to, in: query, required: false, schema: { type: string, format: date-time }, description: 结束时间（ISO，含） }
+        - { name: page, in: query, required: false, schema: { type: integer, minimum: 0, default: 0 } }
+        - { name: size, in: query, required: false, schema: { type: integer, minimum: 1, maximum: 200, default: 20 }, description: 默认按 createdAt 倒序 }
+      responses:
+        '200':
+          description: OK，分页信封 {content, page, size, totalElements, totalPages}
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/AuditLogPage' }
+        '403': { $ref: '#/components/responses/Error' }
+  /admin/audit-logs:
+    get:
+      summary: 审计日志（全部小组，只读；M5/Q6）——仅平台管理员，非管理员 403；teamId 不传=全部小组
+      parameters:
+        - { name: teamId, in: query, required: false, schema: { type: integer, format: int64 }, description: 按小组筛选 }
+        - { name: actorId, in: query, required: false, schema: { type: integer, format: int64 }, description: 按操作者筛选 }
+        - { name: action, in: query, required: false, schema: { type: string }, description: 按动作精确筛选 }
+        - { name: from, in: query, required: false, schema: { type: string, format: date-time }, description: 起始时间（ISO，含） }
+        - { name: to, in: query, required: false, schema: { type: string, format: date-time }, description: 结束时间（ISO，含） }
+        - { name: page, in: query, required: false, schema: { type: integer, minimum: 0, default: 0 } }
+        - { name: size, in: query, required: false, schema: { type: integer, minimum: 1, maximum: 200, default: 20 }, description: 默认按 createdAt 倒序 }
+      responses:
+        '200':
+          description: OK，分页信封 {content, page, size, totalElements, totalPages}
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/AuditLogPage' }
+        '403': { $ref: '#/components/responses/Error' }
 components:
   parameters:
     TeamId:
@@ -2502,6 +2540,29 @@ components:
               message: { type: string }
               detail: { type: object, nullable: true }
   schemas:
+    AuditLog:
+      type: object
+      description: 审计日志条目（Q6，只读；actorName 为操作者显示名，可解析时返回）
+      properties:
+        id: { type: integer, format: int64 }
+        teamId: { type: integer, format: int64, nullable: true }
+        actorId: { type: integer, format: int64 }
+        actorName: { type: string, nullable: true }
+        action: { type: string }
+        targetType: { type: string }
+        targetId: { type: integer, format: int64, nullable: true }
+        detail: { type: string, nullable: true }
+        createdAt: { type: string, format: date-time }
+    AuditLogPage:
+      type: object
+      properties:
+        content:
+          type: array
+          items: { $ref: '#/components/schemas/AuditLog' }
+        page: { type: integer }
+        size: { type: integer }
+        totalElements: { type: integer, format: int64 }
+        totalPages: { type: integer }
     Role:
       type: string
       enum: [LEADER, PO, MEMBER]
@@ -2524,7 +2585,7 @@ components:
       type: string
       description: >
         任务专用状态（由故事推算，非流转产生，规则见 state-machine.md「任务状态推算」）：
-        NOT_STARTED 未开始 / IN_PROGRESS 进行中 / PENDING_ACCEPTANCE 待/ DONE 已完成 / CANCELLED 已取消
+        NOT_STARTED 未开始 / IN_PROGRESS 进行中 / PENDING_ACCEPTANCE 待验收 / DONE 已完成 / CANCELLED 已取消
       enum: [NOT_STARTED, IN_PROGRESS, PENDING_ACCEPTANCE, DONE, CANCELLED]
     User:
       type: object
@@ -3027,7 +3088,7 @@ components:
       properties:
         externalId: { type: string, nullable: true }
         title: { type: string }
-        type: { type: string, enum: [TASK], description: 导入的是任务 }
+        type: { type: string, enum: [TASK], description: 导入的是任务（修订一 ） }
         description: { type: string, nullable: true }
         priority: { type: string, enum: [P0, P1, P2, P3] }
         ownerName: { type: string, nullable: true }
@@ -3124,7 +3185,7 @@ components:
         skipped: { type: integer }
         undoneAt: { type: string, format: date-time, nullable: true }
         createdAt: { type: string, format: date-time }
-        link: { type: string, description: 批次链接 }
+        link: { type: string, description: 批次链接（已生成内容的链接语义） }
     IntegrationAdapter:
       type: object
       properties:

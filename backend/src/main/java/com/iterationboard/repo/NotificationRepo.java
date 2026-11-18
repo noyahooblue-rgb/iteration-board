@@ -10,6 +10,8 @@ import java.util.List;
 
 public interface NotificationRepo extends JpaRepository<Notification, Long> {
     List<Notification> findByRecipientId(Long recipientId);
+    /** M5 留存清理：删除 createdAt 早于界限的通知，返回删除行数。 */
+    long deleteByCreatedAtBefore(Instant cutoff);
     long countByRecipientIdAndTypeAndItemId(Long recipientId, String type, Long itemId);
 
     List<Notification> findByRecipientIdOrderByCreatedAtDesc(Long recipientId);

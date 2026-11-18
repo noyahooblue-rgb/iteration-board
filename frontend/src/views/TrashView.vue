@@ -4,15 +4,15 @@
   <SegmentedControl v-model="typeFilter" :options="[{label:'全部',value:'ALL'},{label:'事项',value:'ITEM'},{label:'报告',value:'REPORT'}]" style="margin-bottom:12px"/>
   <p v-if="loading" class="small">加载中…</p>
   <p v-if="loadErr" class="small" style="color:var(--c-red);margin:8px 0">{{loadErr}} <button class="press" style="color:var(--theme);font-weight:600" @click="load">重试</button></p>
-  <article v-for="e in entries" :key="e.entryType + e.id" class="kcard" :style="{borderLeftColor: e.entryType==='REPORT' ? '#5856D6' : itemColorOf(e)}">
+  <article v-for="e in entries" :key="e.kind + e.id" class="kcard" :style="{borderLeftColor: e.kind==='REPORT' ? '#5856D6' : itemColorOf(e)}">
     <div class="krow">
-      <span class="etag" :class="e.entryType">{{ e.entryType==='REPORT' ? '报告' : '事项' }}</span>
-      <span class="small">{{ e.entryType==='REPORT' ? kindLabel(e.kind) : e.code }}</span>
-      <TypeBadge v-if="e.entryType==='ITEM'" :type="e.type" :story-category="e.storyCategory"/>
+      <span class="etag" :class="e.kind">{{ e.kind==='REPORT' ? '报告' : '事项' }}</span>
+      <span class="small">{{ e.kind==='REPORT' ? kindLabel(e.reportKind) : e.code }}</span>
+      <TypeBadge v-if="e.kind==='ITEM'" :type="e.itemType"/>
       <span style="flex:1"/><span class="tiny">删除于 {{fmt(e.deletedAt)}}</span>
     </div>
     <p class="ktitle">{{e.title}}</p>
-    <div class="krow"><AppButton variant="ghost" :disabled="busy.is('restore'+e.entryType+e.id)" @click="restore(e)"><RotateCcw :size="14"/>恢复</AppButton></div>
+    <div class="krow"><AppButton variant="ghost" :disabled="busy.is('restore'+e.kind+e.id)" @click="restore(e)"><RotateCcw :size="14"/>恢复</AppButton></div>
   </article>
   <p v-if="!entries.length && !loading" class="small">回收站是空的。</p>
 </AppShell>
@@ -29,11 +29,11 @@ const team = useTeam(), toast = useToast(), busy = useBusy()
 const entries = ref<any[]>([]), loading = ref(false), loadErr = ref(''), typeFilter = ref('ALL')
 const fmt = (s?: string | null) => s ? s.slice(0, 16).replace('T', ' ') : '—'
 const kindLabel = (k: string) => ({ STANDUP_SUMMARY: '站会摘要', WEEKLY: '周报', ITERATION_SUMMARY: '迭代总结', PERSONAL_WEEKLY: '我的周报', RISK_SUMMARY: '风险摘要' } as Record<string, string>)[k] ?? k
-const itemColorOf = (e: any) => e.entryType === 'ITEM' ? itemColor(e) : '#5856D6'
+const itemColorOf = (e: any) => e.kind === 'ITEM' ? itemColor({ type: e.itemType, storyCategory: null }) : '#5856D6'
 async function load(){ if (!team.currentId) return; loading.value = true; loadErr.value = ''; try { entries.value = await api.get(`/teams/${team.currentId}/trash?type=${typeFilter.value}`) } catch(e){ loadErr.value = e instanceof ApiError ? e.message : '加载失败' } finally { loading.value = false } }
 onMounted(load); watch(typeFilter, load)
-async function restore(e: any){ await busy.wrap('restore' + e.entryType + e.id, async () => {
-  try { if (e.entryType === 'REPORT') await api.post(`/teams/${team.currentId}/reports/${e.id}/restore`); else await api.post(`/teams/${team.currentId}/items/${e.id}/restore`); toast.show('已恢复'); load() }
+async function restore(e: any){ await busy.wrap('restore' + e.kind + e.id, async () => {
+  try { if (e.kind === 'REPORT') await api.post(`/teams/${team.currentId}/reports/${e.id}/restore`); else await api.post(`/teams/${team.currentId}/items/${e.id}/restore`); toast.show('已恢复'); load() }
   catch(err){ toast.show(err instanceof ApiError ? err.message : '恢复失败') } }) }
 </script>
 <style scoped>

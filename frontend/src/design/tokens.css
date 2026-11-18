@@ -1,4 +1,7 @@
-/* 设计系统变量 */
+/* 设计系统变量：数值落设计口径
+   外观机制（M5）：主题三档由 <html data-theme> 控制——"light"/"dark" 为显式选择；
+   无 data-theme 时跟随系统（prefers-color-scheme）。玻璃强度 data-glass、减少透明度
+   data-reduce-transparency、减少动效 data-reduce-motion 均由 utils/appearance.ts 写入并持久化。 */
 :root{
   --c-req:#007AFF; --c-task:#30B0C7; --c-defect:#FF2D55; --c-analysis:#AF52DE; --c-adhoc:#FF9500;
   --c-red:#FF3B30; --c-green:#34C759; --c-yellow:#FFCC00; --c-indigo:#5856D6;
@@ -7,22 +10,44 @@
   --bg:#dceBff; --text:#10233F; --text-2:rgba(16,35,63,.64); --text-3:rgba(16,35,63,.44);
   --field:rgba(255,255,255,.72); --field-brd:rgba(16,60,130,.14); --track:rgba(16,60,130,.12); --glass-brd:rgba(255,255,255,.72); --glass-hi:rgba(255,255,255,.9); --hover:rgba(0,122,255,.08); --sel:rgba(0,122,255,.14);
   --card:rgba(255,255,255,.86); --card-solid:#ffffff; --fill:rgba(90,100,130,.10);
-  --glass:rgba(255,255,255,.55); --glass-edge:rgba(255,255,255,.75); --separator:rgba(60,60,90,.14);
+  --glass-rgb:255,255,255; --glass-alpha:.55; --glass-blur:20px;
+  --glass:rgba(var(--glass-rgb),var(--glass-alpha)); --glass-edge:rgba(255,255,255,.75); --separator:rgba(60,60,90,.14);
+  --lane-bg:rgba(255,255,255,.4); --lane-brd:rgba(255,255,255,.5); --col-bg:rgba(255,255,255,.28); --col-brd:rgba(255,255,255,.4);
   --shadow:0 18px 44px rgba(10,60,140,.18),0 3px 10px rgba(10,60,140,.10);
   --shadow-lift:0 12px 40px rgba(20,30,60,.20);
   --r-panel:24px; --r-card:16px; --r-ctl:12px;
   --font:"InterVariable","Inter",-apple-system,"PingFang SC","Microsoft YaHei",sans-serif;
   --ease-spring:cubic-bezier(.32,1.35,.45,1); --ease-out:cubic-bezier(.2,.8,.25,1);
 }
+/* 玻璃强度三档：通透 / 标准（默认）/ 磨砂——调不透明度与模糊半径 */
+:root[data-glass="clear"]{ --glass-alpha:.34; --glass-blur:10px }
+:root[data-glass="frosted"]{ --glass-alpha:.82; --glass-blur:30px }
+/* 减少透明度：玻璃与卡片改实底（模糊在 base.css 中同步关闭） */
+:root[data-reduce-transparency]{ --glass:var(--card-solid); --card:var(--card-solid) }
+/* 深色变量：显式深色，或跟随系统且系统为深色（浅色显式选择时不命中后者） */
+:root[data-theme="dark"]{
+  --c-req:#0A84FF; --c-task:#40CBE0; --c-defect:#FF375F; --c-analysis:#BF5AF2; --c-adhoc:#FF9F0A;
+  --c-red:#FF453A; --c-green:#30D158; --c-yellow:#FFD60A; --c-indigo:#5E5CE6; --theme:#0A84FF; --theme-soft:rgba(10,132,255,.18);
+  --bg:#0a1b38; --text:#EAF2FF; --text-2:rgba(234,242,255,.66); --text-3:rgba(234,242,255,.42);
+  --field:rgba(16,22,40,.6); --field-brd:rgba(160,195,255,.18); --track:rgba(180,205,255,.16); --glass-brd:rgba(160,195,255,.22); --glass-hi:rgba(190,215,255,.28); --hover:rgba(90,160,255,.12); --sel:rgba(90,160,255,.2);
+  --card:rgba(23,31,52,.86); --card-solid:#171f34; --fill:rgba(160,170,210,.14);
+  --glass-rgb:20,28,48; --glass-edge:rgba(255,255,255,.22); --separator:rgba(200,210,255,.16);
+  --lane-bg:rgba(16,24,44,.4); --lane-brd:rgba(160,195,255,.14); --col-bg:rgba(16,24,44,.32); --col-brd:rgba(160,195,255,.12);
+  --shadow:0 18px 44px rgba(0,0,10,.45),0 3px 10px rgba(0,0,10,.3);
+  --shadow-lift:0 12px 40px rgba(0,0,0,.55);
+}
 @media (prefers-color-scheme: dark){
-  :root{
+  :root:not([data-theme="light"]){
     --c-req:#0A84FF; --c-task:#40CBE0; --c-defect:#FF375F; --c-analysis:#BF5AF2; --c-adhoc:#FF9F0A;
     --c-red:#FF453A; --c-green:#30D158; --c-yellow:#FFD60A; --c-indigo:#5E5CE6; --theme:#0A84FF; --theme-soft:rgba(10,132,255,.18);
     --bg:#0a1b38; --text:#EAF2FF; --text-2:rgba(234,242,255,.66); --text-3:rgba(234,242,255,.42);
     --field:rgba(16,22,40,.6); --field-brd:rgba(160,195,255,.18); --track:rgba(180,205,255,.16); --glass-brd:rgba(160,195,255,.22); --glass-hi:rgba(190,215,255,.28); --hover:rgba(90,160,255,.12); --sel:rgba(90,160,255,.2);
     --card:rgba(23,31,52,.86); --card-solid:#171f34; --fill:rgba(160,170,210,.14);
-    --glass:rgba(20,28,48,.55); --glass-edge:rgba(255,255,255,.22); --separator:rgba(200,210,255,.16);
+    --glass-rgb:20,28,48; --glass-edge:rgba(255,255,255,.22); --separator:rgba(200,210,255,.16);
+    --lane-bg:rgba(16,24,44,.4); --lane-brd:rgba(160,195,255,.14); --col-bg:rgba(16,24,44,.32); --col-brd:rgba(160,195,255,.12);
     --shadow:0 18px 44px rgba(0,0,10,.45),0 3px 10px rgba(0,0,10,.3);
     --shadow-lift:0 12px 40px rgba(0,0,0,.55);
   }
+  :root[data-reduce-transparency]:not([data-theme="light"]){ --glass:var(--card-solid); --card:var(--card-solid) }
 }
+:root[data-theme="dark"][data-reduce-transparency]{ --glass:var(--card-solid); --card:var(--card-solid) }

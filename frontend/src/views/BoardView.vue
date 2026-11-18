@@ -28,7 +28,7 @@
       </template>
       <template v-else><b>{{lane.label}}</b><span class="small">{{lane.items.length}} 项</span></template>
     </button>
-    <div v-if="!collapsed.has(lane.key)" class="board">
+    <div v-if="!collapsed.has(lane.key)" class="board" :class="{dragging: dragId!==null}">
       <section v-for="col in colsComputed" :key="col.status" class="col" :class="{dim: dragOver===col.status && !canDrop(col.status), over: dragOver===col.status && canDrop(col.status)}"
         @dragover.prevent="dragOver=col.status" @dragleave="dragOver=null" @drop.prevent="onDrop(col.status)">
         <header class="colhead"><h2>{{col.label}}</h2><span class="cnt">{{laneCol(lane,col.status).length}} 项</span><span style="flex:1"/><span class="small">估算 {{estSum(laneCol(lane,col.status))}} {{unit}}</span></header>
@@ -157,17 +157,18 @@ async function onDrop(target:ItemStatus){ const it = dragItem(); dragOver.value=
 .chk{display:inline-flex;gap:6px;align-items:center;font-size:13px}.chk input{width:17px;height:17px}
 .fld-sm{font-size:13px;display:inline-flex;gap:6px;align-items:center}.fld-sm select{min-height:32px;border-radius:9px;border:1px solid var(--field-brd);background:var(--field);padding:0 6px}
 .lane{margin-bottom:18px}
-.lanehead{display:flex;align-items:center;gap:10px;width:100%;text-align:left;padding:9px 14px;border-radius:14px;background:rgba(255,255,255,.4);border:1px solid rgba(255,255,255,.5);margin-bottom:10px;flex-wrap:wrap}
-@media (prefers-color-scheme: dark){.lanehead{background:rgba(16,24,44,.4);border-color:rgba(160,195,255,.14)}}
+.lanehead{display:flex;align-items:center;gap:10px;width:100%;text-align:left;padding:9px 14px;border-radius:14px;background:var(--lane-bg);border:1px solid var(--lane-brd);margin-bottom:10px;flex-wrap:wrap}
 .lanehead .rot{transform:rotate(-90deg)}.lanehead svg{transition:transform .2s}
 .lcode{color:var(--theme);font-weight:700}.lanehead .link{color:var(--theme);font-weight:600;margin-left:auto}
 .board{display:flex;gap:12px;align-items:flex-start;overflow-x:auto;padding-bottom:10px;scroll-snap-type:x proximity}
-.col{width:288px;flex:none;background:rgba(255,255,255,.28);border:1px solid rgba(255,255,255,.4);border-radius:20px;padding:12px 10px 10px;scroll-snap-align:start;transition:opacity .2s}
-@media (prefers-color-scheme: dark){.col{background:rgba(16,24,44,.32);border-color:rgba(160,195,255,.12)}}
+.col{width:288px;flex:none;background:var(--col-bg);border:1px solid var(--col-brd);border-radius:20px;padding:12px 10px 10px;scroll-snap-align:start;transition:opacity .2s}
 .col.dim{opacity:.45}.col.over{outline:2px solid var(--theme)}
 .colhead{display:flex;align-items:baseline;gap:8px;padding:2px 6px 10px}.colhead .cnt{color:var(--text-2);font-size:13px}
 .cards{display:flex;flex-direction:column;gap:12px}
-.kcard{position:relative;background:var(--card);border:1px solid var(--card-brd,rgba(255,255,255,.65));border-left:4px solid var(--theme);border-radius:var(--r-card);box-shadow:0 4px 14px rgba(10,60,140,.08);padding:12px 14px 12px 18px;cursor:grab;text-align:left;width:100%;overflow:hidden}
+.kcard{position:relative;background:var(--card);border:1px solid var(--card-brd,rgba(255,255,255,.65));border-left:4px solid var(--theme);border-radius:var(--r-card);box-shadow:0 1px 3px rgba(10,60,140,.07);padding:12px 14px 12px 18px;cursor:grab;text-align:left;width:100%;overflow:hidden}
+/* 拖拽期间降级：关阴影与过渡，减少重绘（M5 性能优化） */
+.board.dragging .kcard{box-shadow:none;transition:none}
+.board.dragging .kcard.dragging{box-shadow:var(--shadow-lift)}
 .kcard.blocked{border-color:var(--c-red);border-left-color:var(--c-red);box-shadow:0 0 0 1.5px var(--c-red)}
 .kcard.dragging{transform:scale(1.03);box-shadow:var(--shadow-lift);opacity:.9}
 .krow{display:flex;align-items:center;gap:6px}.krow.foot{margin-top:8px}
