@@ -7,8 +7,9 @@
        supported by v2); install.bat rewrites <workingdirectory> to
        the absolute install path.
        Start mode is Manual by default (services must not
-       start automatically at boot unless the user asks); install.bat
-       --autostart rewrites <startmode> to Automatic at install time.
+       start automatically at boot unless the user asks); with the
+       autostart flag, install.bat rewrites <startmode> to Automatic
+       at install time.
        PostgreSQL is NOT wrapped by WinSW anymore (1.0.3):
        it is registered with pg_ctl register, because postgres.exe
        refuses to run with an administrator token. This service only
