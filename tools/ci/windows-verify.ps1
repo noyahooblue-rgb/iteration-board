@@ -149,12 +149,21 @@ try {
   Phase 'P3 stop / backup-skip / start'
   $code = Run-Bat $Root 'stop.bat' @('--no-pause') 'p3-stop.log'
   Check 'P3 stop.bat exit 0' ($code -eq 0)
-  $pgStopped = Wait-State 'IterationBoardPG' 'Stopped' 240
-  if (-not $pgStopped) {
-    $qx = (& sc.exe queryex IterationBoardPG | Out-String) -replace "[\r\n]+", ' // '
-    $procs = (Get-Process postgres, java -ErrorAction SilentlyContinue | ForEach-Object { "$($_.ProcessName):$($_.Id)" }) -join ','
-    Write-Host "::error::P3-DIAG sc queryex: $qx processes: $procs"
+  # Timeline probe: sample the PG service state for 90 s after
+  # stop.bat to see whether it stops at all, and if it comes back
+  # on its own (SCM failure-action restart would show ~30 s later).
+  $timeline = @()
+  $pgStopped = $false
+  $t0 = Get-Date
+  while (((Get-Date) - $t0).TotalSeconds -lt 90) {
+    $svc = Get-Service 'IterationBoardPG' -ErrorAction SilentlyContinue
+    $st = if ($svc) { $svc.Status } else { 'MISSING' }
+    $timeline += "$([int]((Get-Date) - $t0).TotalSeconds)s=$st"
+    if ($st -eq 'Stopped') { $pgStopped = $true; break }
+    Start-Sleep -Seconds 5
   }
+  $qf = (& sc.exe qfailure IterationBoardPG | Out-String) -replace "[\r\n]+", ' '
+  Write-Host "::notice::P3-TIMELINE $($timeline -join ' ') || qfailure: $qf"
   Check 'P3 PG service Stopped' $pgStopped
   Check 'P3 App service Stopped' (Wait-State 'IterationBoardApp' 'Stopped' 120)
   $code = Run-Bat $Root 'backup.bat' @('auto') 'p3-backup-skip.log'
