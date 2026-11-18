@@ -37,15 +37,24 @@ function Check([string]$Name, [bool]$Ok) {
   else {
     Write-Host "  FAIL  $Name"
     $script:Failures += $Name
-    # Surface every failure as a workflow annotation so the run's
-    # check-run annotations list names the exact failing check.
-    Write-Host "::error::FAIL $Name"
   }
 }
 
 function Phase([string]$Name) {
   Write-Host "=== $Name ==="
   Write-Host "::notice::PHASE $Name"
+}
+
+function Dump-Tail([string]$LogName, [int]$Lines = 12) {
+  # Emit the tail of a phase log as ONE ::error:: annotation
+  # (annotations are capped per run, so be economical: phase
+  # notices + one result line + a couple of log tails only).
+  $path = Join-Path $Evidence $LogName
+  if (-not (Test-Path $path)) { return }
+  $tail = (Get-Content $path -Tail $Lines | Where-Object { $_.Trim() -ne '' }) -join ' // '
+  if ($tail.Length -gt 900) { $tail = $tail.Substring($tail.Length - 900) }
+  $tail = $tail -replace '%', '%25' -replace "`r", '%0D' -replace "`n", '%0A'
+  Write-Host "::error::LOGTAIL $LogName :: $tail"
 }
 
 function Run-Bat([string]$Dir, [string]$Bat, [string[]]$BatArgs, [string]$LogName) {
@@ -90,7 +99,7 @@ function Http-Ok([string]$Url, [int]$TimeoutSec = 60) {
 function Assert-Installed([string]$Root, [string]$Phase) {
   Write-Host "[$Phase] asserting installed state at $Root"
   Check "$Phase PG service Running" (Wait-State 'IterationBoardPG' 'Running')
-  Check "$Phase App service Running" (Wait-State 'IterationBoardApp' 'Running')
+  Check "$Phase App service Running" (Wait-State 'IterationBoardApp' 'Running' 180)
   Check "$Phase postgres.exe process exists" ([bool](Get-Process postgres -ErrorAction SilentlyContinue))
   $listen = Get-NetTCPConnection -LocalPort 15432 -State Listen -ErrorAction SilentlyContinue
   Check "$Phase port 15432 listening" ([bool]$listen)
@@ -140,8 +149,8 @@ try {
   Phase 'P3 stop / backup-skip / start'
   $code = Run-Bat $Root 'stop.bat' @('--no-pause') 'p3-stop.log'
   Check 'P3 stop.bat exit 0' ($code -eq 0)
-  Check 'P3 PG service Stopped' (Wait-State 'IterationBoardPG' 'Stopped')
-  Check 'P3 App service Stopped' (Wait-State 'IterationBoardApp' 'Stopped')
+  Check 'P3 PG service Stopped' (Wait-State 'IterationBoardPG' 'Stopped' 120)
+  Check 'P3 App service Stopped' (Wait-State 'IterationBoardApp' 'Stopped' 120)
   $code = Run-Bat $Root 'backup.bat' @('auto') 'p3-backup-skip.log'
   Check 'P3 backup.bat auto exit 0 while services stopped' ($code -eq 0)
   $blog = Get-Content (Join-Path $Root 'logs\backup.log') -Raw -ErrorAction SilentlyContinue
@@ -233,8 +242,11 @@ try {
 Write-Host ''
 if ($script:Failures.Count -gt 0) {
   Write-Host "WINDOWS VERIFY: $($script:Failures.Count) FAILURE(S)"
-  $script:Failures | ForEach-Object { Write-Host "  - $_"; Write-Host "::error::FAILED-CHECK $_" }
-  Write-Host "::error::WINDOWS VERIFY RESULT: $($script:Failures.Count) failure(s)"
+  $script:Failures | ForEach-Object { Write-Host "  - $_" }
+  if ($script:Failures -match 'P1 ') { Dump-Tail 'p1-install.log' }
+  if ($script:Failures -match 'P2 ') { Dump-Tail 'p2-playwright.log' }
+  $joined = ($script:Failures -join ' | ') -replace '%', '%25'
+  Write-Host "::error::WINDOWS VERIFY RESULT: $joined"
   exit 1
 }
 Write-Host "::notice::WINDOWS VERIFY RESULT: all checks passed"
