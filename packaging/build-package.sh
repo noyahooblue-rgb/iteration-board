@@ -4,7 +4,7 @@
 #
 # Usage:  bash packaging/build-package.sh [--skip-downloads]
 #
-# Output: packaging/dist/iteration-board-offline-1.0.1.zip
+# Output: packaging/dist/iteration-board-offline-1.0.2.zip
 #
 # What it does:
 #   1. Builds the backend jar (offline Maven wrapper).
@@ -25,7 +25,7 @@
 # ============================================================
 set -euo pipefail
 
-VERSION="1.0.1"
+VERSION="1.0.2"
 PKG_NAME="iteration-board-offline-${VERSION}"
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_ROOT="$(cd "${SCRIPT_DIR}/.." && pwd)"
@@ -41,8 +41,37 @@ SKIP_DOWNLOADS=0
 PG_URL="https://get.enterprisedb.com/postgresql/postgresql-18.7-1-windows-x64-binaries.zip"
 # Eclipse Temurin JRE 17 Windows x64 (Adoptium official API)
 JRE_URL="https://api.adoptium.net/v3/binary/latest/17/ga/windows/x64/jre/hotspot/normal/eclipse"
-# Microsoft VC++ 2015-2022 x64 redistributable (Microsoft aka.ms)
-VC_URL="https://aka.ms/vs/17/release/vc_redist.x64.exe"
+# Microsoft VC++ 2015-2022 x64 runtime: APP-LOCAL deployment.
+# vc_redist.x64.exe is no longer bundled or run (its silent
+# install can hang indefinitely on managed machines). Instead,
+# the redistributable DLLs themselves ship next to the binaries
+# that import them. The DLLs were extracted ONCE from the
+# official installer (Microsoft aka.ms, URL below) - from the
+# vcRuntimeAdditional amd64 payload cab inside the bundle -
+# and are kept in cache/vc-dlls/ with pinned SHA-256 hashes
+# (verified on every build; a mismatch fails the build).
+# PE import analysis (objdump -p over every .exe/.dll in the
+# PostgreSQL tree, incl. delay-load tables) shows exactly three
+# non-system runtime DLLs are imported: vcruntime140.dll (63
+# files in bin alone), vcruntime140_1.dll (ICU libraries) and
+# msvcp140.dll (ICU libraries). The api-ms-win-crt-* imports
+# are UCRT API sets, in-box on Windows 10/11. The Temurin JRE
+# needs no placement: Adoptium already bundles its own VC++
+# runtime DLLs in jre/bin (verified in the 1.0.1 tree).
+VC_INSTALLER_URL="https://aka.ms/vs/17/release/vc_redist.x64.exe"
+VC_DLL_DIR="${CACHE_DIR}/vc-dlls"
+declare -A VC_DLL_SHA256=(
+  [vcruntime140.dll]="d5e4d9a3e835fa679450145d6a7d94e36573a509317111904d9b3712c30d9066"
+  [vcruntime140_1.dll]="1f2d41c4aa5db0bc33ebf7b66d72943a817d7ce6cbe880502a9403823633093f"
+  [msvcp140.dll]="0f885b509a685d2bbfa652fed26b5fb31d88fbdab0a978c641d1c7b8aa460aa9"
+)
+# Placement: dir (relative to staging root) -> DLL list.
+# pgsql/bin + pgsql/lib: all three (postgres.exe, initdb.exe,
+# pg_ctl.exe, libpq.dll, ICU and plugin DLLs import them).
+VC_PLACEMENTS=(
+  "runtime/pgsql/bin:vcruntime140.dll vcruntime140_1.dll msvcp140.dll"
+  "runtime/pgsql/lib:vcruntime140.dll vcruntime140_1.dll msvcp140.dll"
+)
 # WinSW v2.12.0 x64 (GitHub releases; stable line, MIT. The 3.x
 # alpha line is NOT used for long-running deployments, per M5
 # acceptance fix 2. v2 requires .NET Framework 4.6.1+, which
@@ -101,8 +130,25 @@ echo "[ok] frontend embedded into jar (BOOT-INF/classes/static/)"
 echo "=== 3/5 Runtime components ==="
 fetch "postgresql-win-x64.zip" "${PG_URL}" || MISSING+=("PostgreSQL 18.7 Windows x64 zip | ${PG_URL}")
 fetch "temurin-jre17-win-x64.zip" "${JRE_URL}" || MISSING+=("Temurin JRE 17 Windows x64 zip | ${JRE_URL}")
-fetch "vc_redist.x64.exe" "${VC_URL}" || MISSING+=("VC++ 2015-2022 x64 redist | ${VC_URL}")
 fetch "WinSW-x64.exe" "${WINSW_URL}" || MISSING+=("WinSW v2.12.0 x64 exe | ${WINSW_URL}")
+
+echo "--- VC++ runtime DLLs (app-local, hash-pinned, hard fail) ---"
+for dll in "${!VC_DLL_SHA256[@]}"; do
+  f="${VC_DLL_DIR}/${dll}"
+  if [ ! -s "${f}" ]; then
+    echo "[error] ${f} missing. Extract it from the official installer"
+    echo "        ${VC_INSTALLER_URL} (vcRuntimeAdditional amd64 payload)"
+    echo "        into cache/vc-dlls/ first. Build aborted."
+    exit 1
+  fi
+  actual="$(sha256sum "${f}" | awk '{print $1}')"
+  if [ "${actual}" != "${VC_DLL_SHA256[${dll}]}" ]; then
+    echo "[error] SHA-256 mismatch for ${dll}: ${actual}"
+    echo "        expected ${VC_DLL_SHA256[${dll}]}. Build aborted."
+    exit 1
+  fi
+  echo "[ok] ${dll} hash verified"
+done
 
 echo "=== 4/5 Assemble package tree ==="
 rm -rf "${STAGING_DIR}"
@@ -137,8 +183,27 @@ if [ -s "${CACHE_DIR}/temurin-jre17-win-x64.zip" ]; then
   rm -rf "${BUILD_TMP}/jre-extract"
   echo "[ok] JRE in place"
 fi
-[ -s "${CACHE_DIR}/vc_redist.x64.exe" ] && cp "${CACHE_DIR}/vc_redist.x64.exe" "${STAGING_DIR}/runtime/"
 [ -s "${CACHE_DIR}/WinSW-x64.exe" ] && cp "${CACHE_DIR}/WinSW-x64.exe" "${STAGING_DIR}/runtime/winsw/"
+
+echo "--- Placing VC++ runtime DLLs (app-local) ---"
+for placement in "${VC_PLACEMENTS[@]}"; do
+  dest="${placement%%:*}"
+  dlls="${placement#*:}"
+  mkdir -p "${STAGING_DIR}/${dest}"
+  for dll in ${dlls}; do
+    cp "${VC_DLL_DIR}/${dll}" "${STAGING_DIR}/${dest}/${dll}"
+    if [ ! -s "${STAGING_DIR}/${dest}/${dll}" ]; then
+      echo "[error] failed to place ${dll} into ${dest}. Build aborted."
+      exit 1
+    fi
+  done
+  echo "[ok] ${dest}: ${dlls}"
+done
+# vc_redist.x64.exe must NOT be in the package anymore.
+if [ -e "${STAGING_DIR}/runtime/vc_redist.x64.exe" ]; then
+  echo "[error] runtime/vc_redist.x64.exe present in staging. Build aborted."
+  exit 1
+fi
 
 echo "=== 5/5 Zip ==="
 cd "${SCRIPT_DIR}/staging"

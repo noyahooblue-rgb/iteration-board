@@ -23,8 +23,8 @@ bash packaging/build-package.sh --skip-downloads   # 仅用 cache/ 已有组件�
 1. 用仓库内 Maven 包装脚本离线构建后端 jar；
 2. `npm run build` 构建真实前端，并把 `frontend/dist` 注入 jar 的 `BOOT-INF/classes/static/`（后端工程自身的 `static/` 只有 openapi.yaml，jar 默认不含前端——组装只发生在打包环节，不改仓库源码）；
 3. 下载/复用运行时组件（官方直链，见下表），解压进 staging；
-4. 按交付结构组装目录树：`app/`（jar）、`runtime/`（pgsql、jre、winsw、vc_redist.x64.exe）、`config/`（application.yml + prompts）、`data/`、`backup/`、`logs/`、`docs/`（部署手册、用户手册）、`service/`（WinSW 模板）、根目录 7 个 .bat；
-5. 打成 `packaging/dist/iteration-board-offline-1.0.0.zip`。
+4. 按交付结构组装目录树：`app/`（jar）、`runtime/`（pgsql、jre、winsw；VC++ 运行库 DLL 以 app-local 形式放进 pgsql\bin、pgsql\lib；JRE 自带其运行库 DLL，无需处理）、`config/`（application.yml + prompts）、`data/`、`backup/`、`logs/`、`docs/`（部署手册、用户手册）、`service/`（WinSW 模板）、根目录 7 个 .bat；
+5. 打成 `packaging/dist/iteration-board-offline-<版本>.zip`。
 
 ## 运行时组件官方来源
 
@@ -32,7 +32,7 @@ bash packaging/build-package.sh --skip-downloads   # 仅用 cache/ 已有组件�
 | --- | --- | --- |
 | PostgreSQL Windows x64 二进制 zip | 18.7（与开发/测试锁定版本一致，1.0.1 起） | https://get.enterprisedb.com/postgresql/postgresql-18.7-1-windows-x64-binaries.zip（EnterpriseDB 官方归档） |
 | Eclipse Temurin JRE Windows x64 zip | 17（最新 17.x） | https://api.adoptium.net/v3/binary/latest/17/ga/windows/x64/jre/hotspot/normal/eclipse（Adoptium 官方 API） |
-| VC++ 2015-2022 x64 运行库 | 最新 | https://aka.ms/vs/17/release/vc_redist.x64.exe（微软官方直链） |
+| VC++ 2015-2022 x64 运行库 DLL（app-local，随应用部署） | 14.44.35211.0 | 从微软官方 vc_redist.x64.exe（https://aka.ms/vs/17/release/vc_redist.x64.exe）的 vcRuntimeAdditional amd64 载荷提取 vcruntime140.dll、vcruntime140_1.dll、msvcp140.dll，存入 `cache/vc-dlls/`；构建脚本按固定 SHA-256 校验，缺失或不符直接失败。vc_redist.x64.exe 本身自 1.0.2 起不再入包、不再运行 |
 | WinSW x64 | v2.12.0（稳定版，MIT；1.0.1 起弃用 3.x alpha 线） | https://github.com/winsw/winsw/releases/download/v2.12.0/WinSW-x64.exe（WinSW 官方 GitHub 发布；需 .NET Framework 4.6.1+，Win10/11 自带） |
 
 某个组件下载失败时，脚本会继续完成其余组装并在结尾醒目列出缺失组件与官方 URL；交付前必须补齐，不得使用来源不明的二进制替代。

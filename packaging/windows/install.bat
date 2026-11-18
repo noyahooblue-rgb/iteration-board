@@ -19,33 +19,42 @@ if errorlevel 1 (
 )
 
 rem --- 2. Path sanity check (no spaces recommended) ----------
-echo %ROOT% | findstr /C:" " >nul
-if not errorlevel 1 (
+rem NOTE: never test with "echo %ROOT% | findstr" - echo also
+rem outputs the space before the pipe, so that test always
+rem matches even for paths without spaces. Compare the path
+rem against itself with all spaces removed instead.
+if not "%ROOT%"=="%ROOT: =%" (
   echo [WARN] Install path contains a space: %ROOT%
   echo [WARN] A path without spaces and without non-ASCII characters is recommended, e.g. D:\iteration-board
   choice /C YN /M "Continue anyway"
   if errorlevel 2 exit /b 1
 )
 
-rem --- 3. VC++ 2015-2022 x64 runtime check -------------------
-reg query "HKLM\SOFTWARE\Microsoft\VisualStudio\14.0\VC\Runtimes\x64" /v Installed >nul 2>&1
-if errorlevel 1 (
-  echo [INFO] VC++ runtime not found. Installing bundled vc_redist.x64.exe ...
-  if not exist "%ROOT%\runtime\vc_redist.x64.exe" (
-    echo [ERROR] runtime\vc_redist.x64.exe is missing from this package.
-    pause
-    exit /b 1
-  )
-  call :run_vc_redist
-  if errorlevel 1 (
-    echo [ERROR] VC++ runtime setup failed.
-    pause
-    exit /b 1
-  )
-  echo [INFO] VC++ runtime installed.
-) else (
-  echo [INFO] VC++ runtime already present.
+rem --- 3. VC++ 2015-2022 x64 runtime (app-local DLLs) ----------
+rem PostgreSQL is built with MSVC and needs the VC++ 2015-2022
+rem x64 runtime (the bundled JRE ships its own runtime DLLs).
+rem The runtime DLLs ship inside this package, next to the
+rem binaries that use them (app-local deployment of Microsoft's
+rem redistributable DLLs; provenance and license are recorded
+rem in THIRD_PARTY_NOTICES.md in the project repository).
+rem Nothing is installed system-wide and vc_redist.x64.exe is
+rem NOT used anymore: its silent install can hang indefinitely
+rem on managed machines, with no error. This step only verifies
+rem the DLLs are in place, and names every missing file if not.
+set "VC_MISSING="
+if not exist "%ROOT%\runtime\pgsql\bin\vcruntime140.dll"   set "VC_MISSING=%VC_MISSING% runtime\pgsql\bin\vcruntime140.dll"
+if not exist "%ROOT%\runtime\pgsql\bin\vcruntime140_1.dll" set "VC_MISSING=%VC_MISSING% runtime\pgsql\bin\vcruntime140_1.dll"
+if not exist "%ROOT%\runtime\pgsql\bin\msvcp140.dll"       set "VC_MISSING=%VC_MISSING% runtime\pgsql\bin\msvcp140.dll"
+if not "%VC_MISSING%"=="" (
+  echo [ERROR] Bundled VC++ runtime DLLs are missing from this package:
+  for %%F in (%VC_MISSING%) do echo [ERROR]   - %%F
+  echo [ERROR] The package is incomplete or was not fully extracted.
+  echo [ERROR] Re-extract the full package ^(or re-apply the patch^),
+  echo [ERROR] then run install.bat again.
+  pause
+  exit /b 1
 )
+echo [INFO] VC++ runtime DLLs are bundled in the package (app-local), nothing to install.
 
 rem --- 4. Generate random DB password, write config ----------
 set "CFG=%ROOT%\config\application.yml"
@@ -78,14 +87,19 @@ echo %DBPWD%> "%TEMP%\ib-pw.txt"
 set "IBRC=%ERRORLEVEL%"
 del "%TEMP%\ib-pw.txt" >nul 2>&1
 if not "%IBRC%"=="0" (
-  echo [ERROR] initdb failed with code %IBRC%. See output above.
+  echo [ERROR] initdb failed with code %IBRC%. See the initdb output above.
+  if "%IBRC%"=="-1073741515" (
+    echo [ERROR] Code -1073741515 ^(0xC0000135^) means a required DLL was not found.
+    echo [ERROR] Check that vcruntime140.dll, vcruntime140_1.dll and msvcp140.dll
+    echo [ERROR] exist in runtime\pgsql\bin, then run install.bat again.
+  )
   pause
   exit /b 1
 )
 >>"%ROOT%\data\pgdata\postgresql.conf" echo port = 15432
 >>"%ROOT%\data\pgdata\postgresql.conf" echo listen_addresses = 'localhost'
 echo [INFO] Starting PostgreSQL temporarily to create the database ...
-"%ROOT%\runtime\pgsql\bin\pg_ctl.exe" -D "%ROOT%\data\pgdata" -l "%ROOT%\logs\pg-init.log" -o "-p 15432" start
+"%ROOT%\runtime\pgsql\bin\pg_ctl.exe" -D "%ROOT%\data\pgdata" -l "%ROOT%\logs\pg-init.log" -o "-p 15432" -w -t 60 start
 if errorlevel 1 (
   echo [ERROR] Temporary PostgreSQL start failed. See logs\pg-init.log.
   pause
@@ -95,7 +109,7 @@ set "PGPASSWORD=%DBPWD%"
 "%ROOT%\runtime\pgsql\bin\createdb.exe" -h 127.0.0.1 -p 15432 -U postgres iteration_board
 set "IBRC=%ERRORLEVEL%"
 set "PGPASSWORD="
-"%ROOT%\runtime\pgsql\bin\pg_ctl.exe" -D "%ROOT%\data\pgdata" stop >nul 2>&1
+"%ROOT%\runtime\pgsql\bin\pg_ctl.exe" -D "%ROOT%\data\pgdata" -m fast -w -t 60 stop >nul 2>&1
 if not "%IBRC%"=="0" (
   echo [ERROR] createdb failed with code %IBRC%.
   pause
@@ -145,9 +159,3 @@ echo ============================================================
 pause
 exit /b 0
 
-:run_vc_redist
-"%ROOT%\runtime\vc_redist.x64.exe" /install /quiet /norestart
-if "%ERRORLEVEL%"=="0" exit /b 0
-if "%ERRORLEVEL%"=="3010" exit /b 0
-echo [ERROR] vc_redist exited with code %ERRORLEVEL%.
-exit /b 1

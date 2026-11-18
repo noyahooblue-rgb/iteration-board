@@ -41,12 +41,12 @@ echo [INFO] Saving current program files ...
 for /f "usebackq delims=" %%T in (`powershell -NoProfile -Command "Get-Date -Format yyyyMMdd-HHmmss"`) do set "TS=%%T"
 mkdir "%TARGET%\backup\program-%TS%" >nul 2>&1
 copy /Y "%TARGET%\app\iteration-board.jar" "%TARGET%\backup\program-%TS%\iteration-board.jar" >nul
-if exist "%TARGET%\config\prompts" robocopy "%TARGET%\config\prompts" "%TARGET%\backup\program-%TS%\prompts" /E /NFL /NDL /NJH /NJS >nul
+if exist "%TARGET%\config\prompts" robocopy "%TARGET%\config\prompts" "%TARGET%\backup\program-%TS%\prompts" /E /NFL /NDL /NJH /NJS /R:1 /W:1 >nul
 
 echo [INFO] Replacing program files (config\ and data\ untouched) ...
 copy /Y "%NEWROOT%\app\iteration-board.jar" "%TARGET%\app\iteration-board.jar" >nul
 if errorlevel 1 ( echo [ERROR] Jar copy failed. & goto :rollback )
-if exist "%NEWROOT%\config\prompts" robocopy "%NEWROOT%\config\prompts" "%TARGET%\config\prompts" /E /NFL /NDL /NJH /NJS >nul
+if exist "%NEWROOT%\config\prompts" robocopy "%NEWROOT%\config\prompts" "%TARGET%\config\prompts" /E /NFL /NDL /NJH /NJS /R:1 /W:1 >nul
 
 echo [INFO] Starting services (database migration runs automatically) ...
 "%TARGET%\app\IterationBoardPG.exe" start

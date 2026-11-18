@@ -1,4 +1,4 @@
-# Windows 实测清单（离线安装包 1.0.1）
+# Windows 实测清单（离线安装包 1.0.2）
 
 > 本清单全部项目均为**待实测**：安装包在 Linux 构建机组装，Windows 行为未经真机验证。请在 64 位 Windows 10/11（或 Server 2016+）机器上逐项实测，勾选并填写每项的「实测结果 / 日期 / 实测人」。发现问题时记录现象与 `logs\` 下对应日志文件名，一并反馈。
 >
@@ -10,7 +10,9 @@
   - 实测结果： ／ 日期： ／ 实测人：
 - [ ] install.bat 非管理员运行时给出明确报错提示（不闪退、无乱码）
   - 实测结果： ／ 日期： ／ 实测人：
-- [ ] 缺 VC++ 运行库的机器上 install.bat 能自动装好包内 vc_redist 并继续安装
+- [ ] 无系统 VC++ 运行库的机器上，install.bat 靠包内 app-local DLL 直接继续安装（不再调用 vc_redist、无挂起）；另把 `runtime\pgsql\bin\msvcp140.dll` 临时改名后重跑 install.bat，应报错并逐个列出缺失文件
+  - 实测结果： ／ 日期： ／ 实测人：
+- [ ] 安装路径不含空格时（如 `E:\Ai\project\...\iteration-board-offline-1.0.2`）install.bat 不再误报「路径含空格」；路径真带空格时才出现警告并可选择继续
   - 实测结果： ／ 日期： ／ 实测人：
 - [ ] 安装后「服务」中存在 Iteration Board - PostgreSQL 与 Iteration Board - Application 两项且均为自动启动、状态运行中
   - 实测结果： ／ 日期： ／ 实测人：
