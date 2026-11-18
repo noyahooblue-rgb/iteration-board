@@ -190,8 +190,8 @@ rem PostgreSQL: official pg_ctl registration, NOT WinSW.
 rem postgres.exe refuses to run with an administrator token, so
 rem a WinSW wrapper running as LocalSystem could never start it:
 rem the wrapper reported "started" while postgres exited at once
-rem and the failure action restarted it forever (field round 3).
-rem A service created by pg_ctl register runs
+rem and the failure action restarted it forever (field round 3,
+rem ). A service created by pg_ctl register runs
 rem postgres with a restricted token and works under LocalSystem.
 rem Start type: -S demand (manual) by default, -S auto only when
 rem --autostart was given.
@@ -221,9 +221,17 @@ if errorlevel 1 (
   sc config IterationBoardPG start= %PG_START_TYPE% >nul 2>&1
   echo [INFO] IterationBoardPG was already registered; start type set to %PG_START_TYPE%.
 )
-rem Cap restart-on-failure at 3 tries, 30 s apart, per day: a
-rem broken service must not spin forever and flood the logs.
-sc failure IterationBoardPG reset= 86400 actions= restart/30000/restart/30000/restart/30000 >nul 2>&1
+rem Do NOT set SCM restart-on-failure actions for this service:
+rem a pg_ctl-registered PostgreSQL exits in a way the SCM counts
+rem as a failure even after a normal stop, so restart actions
+rem resurrect it about 30 s after stop.bat (proven by the Windows
+rem runner verification: the service was RUNNING at every sample
+rem for 90 s after a successful stop). Explicitly clear any
+rem failure actions an earlier 1.0.3 build may have set.
+rem Crash resilience does not need them: PostgreSQL recovers
+rem itself on the next start, and the application service keeps
+rem its capped WinSW onfailure restarts.
+sc failure IterationBoardPG reset= 0 actions= "" >nul 2>&1
 
 rem Application service: WinSW wrapper around the JVM. It depends
 rem on IterationBoardPG (see service\IterationBoardApp.xml).

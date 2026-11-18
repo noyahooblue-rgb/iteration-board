@@ -15,8 +15,17 @@ if errorlevel 1 (
 )
 net stop IterationBoardApp >nul 2>&1
 if errorlevel 1 echo [WARN] IterationBoardApp stop returned an error - it may already be stopped.
-net stop IterationBoardPG >nul 2>&1
-if errorlevel 1 echo [WARN] IterationBoardPG stop returned an error - it may already be stopped.
+rem PostgreSQL is stopped through pg_ctl: it signals the
+rem postmaster directly and waits for it to exit. A plain
+rem net stop on the pg_ctl-registered service proved
+rem unreliable in the Windows runner verification - the
+rem command reported success while the postmaster kept
+rem running. net stop stays as a fallback.
+"%ROOT%\runtime\pgsql\bin\pg_ctl.exe" stop -D "%ROOT%\data\pgdata" -m fast -w -t 60 >nul 2>&1
+if errorlevel 1 (
+  sc query IterationBoardPG >nul 2>&1
+  if not errorlevel 1 net stop IterationBoardPG >nul 2>&1
+)
 echo [INFO] Services stopped.
 call :ib_pause
 exit /b 0
