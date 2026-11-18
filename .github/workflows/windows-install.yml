@@ -32,8 +32,10 @@ jobs:
           cache-dependency-path: frontend/package-lock.json
       - name: 提取 VC++ 运行库 DLL（微软官方 vc_redist 解包，哈希由构建脚本钉死校验）
         run: |
-          sudo apt-get update -qq
-          sudo apt-get install -y -qq p7zip-full
+          mkdir -p "$HOME/7z"
+          curl -sfL -o /tmp/7z.tar.xz "https://github.com/ip7z/7zip/releases/download/24.09/7z2409-linux-x64.tar.xz"
+          tar -xf /tmp/7z.tar.xz -C "$HOME/7z"
+          export PATH="$HOME/7z:$PATH"
           bash tools/ci/extract-vc-dlls.sh
       - name: 构建离线全量包（IB_CI 模式：系统 Maven 在线构建）
         env:
