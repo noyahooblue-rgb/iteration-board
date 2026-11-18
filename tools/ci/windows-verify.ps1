@@ -34,7 +34,18 @@ $script:Failures = @()
 
 function Check([string]$Name, [bool]$Ok) {
   if ($Ok) { Write-Host "  PASS  $Name" }
-  else { Write-Host "  FAIL  $Name"; $script:Failures += $Name }
+  else {
+    Write-Host "  FAIL  $Name"
+    $script:Failures += $Name
+    # Surface every failure as a workflow annotation so the run's
+    # check-run annotations list names the exact failing check.
+    Write-Host "::error::FAIL $Name"
+  }
+}
+
+function Phase([string]$Name) {
+  Write-Host "=== $Name ==="
+  Write-Host "::notice::PHASE $Name"
 }
 
 function Run-Bat([string]$Dir, [string]$Bat, [string[]]$BatArgs, [string]$LogName) {
@@ -98,7 +109,7 @@ try {
   if (-not (Test-Path $Zip)) { throw "package zip not found: $Zip" }
 
   # ---------- P1: fresh install, default (manual start) mode ----------
-  Write-Host '=== P1 fresh install (default mode) ==='
+  Phase 'P1 fresh install (default mode)'
   Expand-Archive -Path $Zip -DestinationPath (Join-Path $Work 'pkg') -Force
   $Root = Join-Path $Work 'pkg\iteration-board-offline-1.0.3'
   $code = Run-Bat $Root 'install.bat' @('--no-pause') 'p1-install.log'
@@ -108,7 +119,7 @@ try {
   Check 'P1 App service START_TYPE is DEMAND_START' ((ScQc 'IterationBoardApp') -match 'DEMAND_START')
 
   # ---------- P2: Playwright direct-visit flow ----------
-  Write-Host '=== P2 Playwright e2e (direct, no proxy) ==='
+  Phase 'P2 Playwright e2e (direct, no proxy)'
   $e2eLog = Join-Path $Evidence 'p2-playwright.log'
   Push-Location (Join-Path $env:GITHUB_WORKSPACE 'tools\windows-e2e')
   try {
@@ -126,7 +137,7 @@ try {
   }
 
   # ---------- P3: stop, backup-skip while stopped, start ----------
-  Write-Host '=== P3 stop / backup-skip / start ==='
+  Phase 'P3 stop / backup-skip / start'
   $code = Run-Bat $Root 'stop.bat' @('--no-pause') 'p3-stop.log'
   Check 'P3 stop.bat exit 0' ($code -eq 0)
   Check 'P3 PG service Stopped' (Wait-State 'IterationBoardPG' 'Stopped')
@@ -141,7 +152,7 @@ try {
   Check 'P3 App service Running again' (Wait-State 'IterationBoardApp' 'Running')
 
   # ---------- P4: real backup ----------
-  Write-Host '=== P4 backup ==='
+  Phase 'P4 backup'
   $code = Run-Bat $Root 'backup.bat' @('auto') 'p4-backup.log'
   Check 'P4 backup.bat auto exit 0' ($code -eq 0)
   $bk = Get-ChildItem (Join-Path $Root 'backup') -Directory | Sort-Object Name | Select-Object -Last 1
@@ -149,13 +160,13 @@ try {
   $BackupName = $bk.Name
 
   # ---------- P5: restore ----------
-  Write-Host '=== P5 restore ==='
+  Phase 'P5 restore'
   $code = Run-Bat $Root 'restore.bat' @($BackupName, '--yes', '--no-pause') 'p5-restore.log'
   Check 'P5 restore.bat exit 0' ($code -eq 0)
   Check 'P5 meta endpoint 200 after restore' (Http-Ok 'http://localhost:18080/api/v1/meta')
 
   # ---------- P6: upgrade in place (same package as its own new version) ----------
-  Write-Host '=== P6 upgrade (same package) ==='
+  Phase 'P6 upgrade (same package)'
   Expand-Archive -Path $Zip -DestinationPath (Join-Path $Work 'pkg2') -Force
   $Root2 = Join-Path $Work 'pkg2\iteration-board-offline-1.0.3'
   $code = Run-Bat $Root2 'upgrade.bat' @("`"$Root`"", '--yes', '--no-pause') 'p6-upgrade.log'
@@ -165,7 +176,7 @@ try {
   Check 'P6 meta endpoint 200 after upgrade' (Http-Ok 'http://localhost:18080/api/v1/meta')
 
   # ---------- P7: uninstall keeping data ----------
-  Write-Host '=== P7 uninstall (keep data) ==='
+  Phase 'P7 uninstall (keep data)'
   $code = Run-Bat $Root 'uninstall.bat' @('--yes', '--no-pause') 'p7-uninstall.log'
   Check 'P7 uninstall.bat exit 0' ($code -eq 0)
   Check 'P7 PG service removed' ($null -eq (Get-Service 'IterationBoardPG' -ErrorAction SilentlyContinue))
@@ -173,19 +184,19 @@ try {
   Check 'P7 pgdata kept' (Test-Path (Join-Path $Root 'data\pgdata\PG_VERSION'))
 
   # ---------- P8: reinstall over the half-installed state ----------
-  Write-Host '=== P8 reinstall (recovery path) ==='
+  Phase 'P8 reinstall (recovery path)'
   $code = Run-Bat $Root 'install.bat' @('--no-pause') 'p8-reinstall.log'
   Check 'P8 install.bat exit 0' ($code -eq 0)
   Assert-Installed $Root 'P8'
 
   # ---------- P9: uninstall again ----------
-  Write-Host '=== P9 uninstall ==='
+  Phase 'P9 uninstall'
   $code = Run-Bat $Root 'uninstall.bat' @('--yes', '--no-pause') 'p9-uninstall.log'
   Check 'P9 uninstall.bat exit 0' ($code -eq 0)
   Check 'P9 services removed' ($null -eq (Get-Service 'IterationBoardPG' -ErrorAction SilentlyContinue))
 
   # ---------- P10: install into a path with spaces ----------
-  Write-Host '=== P10 install into path with spaces ==='
+  Phase 'P10 install into path with spaces'
   $SpaceBase = 'C:\ib space test'
   Expand-Archive -Path $Zip -DestinationPath (Join-Path $SpaceBase 'pkg') -Force
   $SRoot = Join-Path $SpaceBase 'pkg\iteration-board-offline-1.0.3'
@@ -197,7 +208,7 @@ try {
   Check 'P10 uninstall.bat exit 0' ($code -eq 0)
 
   # ---------- P11: --autostart mode ----------
-  Write-Host '=== P11 install with --autostart ==='
+  Phase 'P11 install with --autostart'
   $code = Run-Bat $Root 'install.bat' @('--autostart', '--no-pause') 'p11-autostart-install.log'
   Check 'P11 install.bat --autostart exit 0' ($code -eq 0)
   Check 'P11 PG service START_TYPE is AUTO_START' ((ScQc 'IterationBoardPG') -match 'AUTO_START')
@@ -207,6 +218,7 @@ try {
   Check 'P11 final uninstall exit 0' ($code -eq 0)
 } catch {
   Write-Host "FATAL: $($_.Exception.Message)"
+  Write-Host "::error::FATAL $($_.Exception.Message)"
   $script:Failures += "FATAL: $($_.Exception.Message)"
 } finally {
   # Keep the application's own logs as evidence whatever happened.
@@ -221,8 +233,10 @@ try {
 Write-Host ''
 if ($script:Failures.Count -gt 0) {
   Write-Host "WINDOWS VERIFY: $($script:Failures.Count) FAILURE(S)"
-  $script:Failures | ForEach-Object { Write-Host "  - $_" }
+  $script:Failures | ForEach-Object { Write-Host "  - $_"; Write-Host "::error::FAILED-CHECK $_" }
+  Write-Host "::error::WINDOWS VERIFY RESULT: $($script:Failures.Count) failure(s)"
   exit 1
 }
+Write-Host "::notice::WINDOWS VERIFY RESULT: all checks passed"
 Write-Host 'WINDOWS VERIFY: ALL CHECKS PASSED'
 exit 0
