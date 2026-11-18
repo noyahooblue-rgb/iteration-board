@@ -1,0 +1,74 @@
+<template>
+<AppShell title="个人设置">
+  <GlassPanel class="body">
+    <h2>账号</h2>
+    <div class="mrow"><Avatar v-if="auth.user" :name="auth.user.displayName" :color="auth.user.avatarColor" :size="38"/><span class="grow"><b>{{auth.user?.displayName}}</b><br/><span class="small">登录名 @{{auth.user?.loginName}}（注册后不可修改）· 当前小组角色：{{roleName}}</span></span></div>
+    <h2 style="margin-top:22px">修改密码</h2>
+    <p class="small">新密码至少 8 位且同时含字母和数字。修改成功后，其他设备的登录会话会失效。</p>
+    <form @submit.prevent="submit" style="max-width:420px;margin-top:12px">
+      <AppInput v-model="f.old" type="password" label="当前密码" placeholder="请输入当前密码"/>
+      <AppInput v-model="f.next" type="password" label="新密码" placeholder="至少 8 位，含字母和数字" style="margin-top:10px"/>
+      <AppInput v-model="f.confirm" type="password" label="确认新密码" placeholder="再输入一次新密码" style="margin-top:10px"/>
+      <p v-if="err" class="err">{{err}}</p>
+      <AppButton style="margin-top:14px" @click="submit">保存新密码</AppButton>
+    </form>
+    <h2 style="margin-top:22px">我的成员状态</h2>
+    <p class="small">请假/出差等状态会影响催更（改催组长）与迭代容量计算。</p>
+    <div class="frow">
+      <label class="small">状态<select v-model="myStatus.status" class="flexin"><option value="NORMAL">正常</option><option value="LEAVE">请假</option><option value="TRAVEL">出差</option><option value="SECONDMENT">外借</option></select></label>
+      <label class="small">开始<input type="date" v-model="myStatus.start" class="flexin"/></label>
+      <label class="small">结束<input type="date" v-model="myStatus.end" class="flexin"/></label>
+      <AppButton variant="ghost" @click="saveMyStatus">保存状态</AppButton>
+    </div>
+    <h2 style="margin-top:22px">通知偏好</h2>
+    <p class="small">指派类与催办类通知不可关闭（保证工作不漏接）；其余类别可按需开关。</p>
+    <div v-for="c in prefCats" :key="c.key" class="prefrow">
+      <span class="grow"><b>{{c.label}}</b><br/><span class="tiny">{{c.desc}}</span></span>
+      <label class="switch"><input type="checkbox" :checked="prefs[c.key]" :disabled="c.locked" @change="togglePref(c.key, ($event.target as HTMLInputElement).checked)"/><span/></label>
+    </div>
+  </GlassPanel>
+</AppShell>
+</template>
+<script setup lang="ts">
+import { reactive, ref, computed, onMounted } from 'vue'
+import AppShell from '../components/AppShell.vue'; import GlassPanel from '../components/GlassPanel.vue'; import AppButton from '../components/AppButton.vue'; import AppInput from '../components/AppInput.vue'; import Avatar from '../components/Avatar.vue'
+import { api, ApiError } from '../api/http'; import { useAuth } from '../stores/auth'; import { useTeam } from '../stores/team'; import { useToast } from '../stores/toast'
+const auth = useAuth(), team = useTeam(), toast = useToast()
+const f = reactive({ old: '', next: '', confirm: '' }); const err = ref('')
+// M3：通知偏好 + 我的成员状态
+import type { NotificationPrefs } from '../api/types'
+const prefs = reactive<NotificationPrefs>({ ASSIGNMENT: true, NUDGE: true, MENTION: true, ITEM_UPDATE: true, REMINDER: true, SYSTEM: true })
+const prefCats = [
+  { key: 'ASSIGNMENT', label: '指派类', desc: '被指派、认领、转交、邀请（不可关闭）', locked: true },
+  { key: 'NUDGE', label: '催办类', desc: '催一下与催的回应（不可关闭）', locked: true },
+  { key: 'MENTION', label: '@提及', desc: '评论里被 @ 到', locked: false },
+  { key: 'ITEM_UPDATE', label: '事项动态', desc: '我关注事项的状态变化、验收结果', locked: false },
+  { key: 'REMINDER', label: '自动提醒', desc: '未更新、到期、逾期、阻塞等自动提醒', locked: false },
+  { key: 'SYSTEM', label: '系统', desc: '迭代开始/结束、成员变动等系统消息', locked: false },
+] as const
+const myStatus = reactive({ status: 'NORMAL', start: '', end: '' })
+onMounted(async ()=> { try { const p = await api.get('/auth/notification-prefs'); Object.assign(prefs, p ?? {}) } catch {}
+  const me = team.members.find(m=>m.userId===auth.user?.id); if (me) { myStatus.status = me.memberStatus; myStatus.start = me.memberStatusStart ?? ''; myStatus.end = me.memberStatusEnd ?? '' } })
+async function togglePref(key: string, v: boolean){ (prefs as any)[key] = v; try { await api.patch('/auth/notification-prefs', { ...prefs }); toast.show('通知偏好已保存') } catch(e){ toast.show(e instanceof ApiError ? e.message : '保存失败') } }
+async function saveMyStatus(){ if (!auth.user) return; try { await api.patch(`/teams/${team.currentId}/members/${auth.user.id}/status`, { memberStatus: myStatus.status, memberStatusStart: myStatus.start || null, memberStatusEnd: myStatus.end || null }); toast.show('成员状态已保存'); await team.loadTeamData() } catch(e){ toast.show(e instanceof ApiError ? e.message : '保存失败') } }
+const roleName = computed(()=> { const r = team.current?.myRole; return r==='LEADER' ? '组长' : r==='PO' ? 'PO' : r==='MEMBER' ? '成员' : '—' })
+async function submit(){
+  err.value = ''
+  if (!f.old) { err.value = '请输入当前密码'; return }
+  if (!(f.next.length >= 8 && /[A-Za-z]/.test(f.next) && /\d/.test(f.next))) { err.value = '新密码至少 8 位且同时含字母和数字'; return }
+  if (f.next !== f.confirm) { err.value = '两次输入的新密码不一致'; return }
+  try { await api.post('/auth/change-password', { oldPassword: f.old, newPassword: f.next }); toast.show('密码已修改'); f.old = f.next = f.confirm = ''; if (auth.user) auth.user.mustChangePassword = false }
+  catch(e){ err.value = e instanceof ApiError ? e.message : '修改失败' }
+}
+</script>
+<style scoped>
+.body{padding:20px;max-width:760px}
+.mrow{display:flex;align-items:center;gap:12px;margin-top:10px}.mrow .grow{flex:1}
+.err{color:var(--c-red);font-size:12px;margin-top:10px}
+.frow{display:flex;gap:12px;align-items:flex-end;flex-wrap:wrap;margin-top:10px}.frow label{display:flex;flex-direction:column;gap:6px}
+.flexin{min-height:40px;border:1px solid var(--field-brd);border-radius:10px;background:var(--field);padding:6px 10px}
+.prefrow{display:flex;align-items:center;gap:12px;padding:10px 0;border-bottom:1px solid var(--field-brd)}.prefrow .grow{flex:1}
+.switch{position:relative;width:48px;height:28px;flex:none}.switch input{opacity:0;width:0;height:0}.switch span{position:absolute;inset:0;background:var(--track);border-radius:99px;transition:.2s;cursor:pointer}.switch span:before{content:'';position:absolute;width:22px;height:22px;border-radius:50%;background:#fff;top:3px;left:3px;transition:.2s;box-shadow:0 1px 4px rgba(0,0,0,.25)}
+.switch input:checked + span{background:var(--c-green)}.switch input:checked + span:before{transform:translateX(20px)}
+.switch input:disabled + span{opacity:.55;cursor:not-allowed}
+</style>

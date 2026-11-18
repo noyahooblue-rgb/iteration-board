@@ -1,0 +1,28 @@
+@import './tokens.css';
+*{box-sizing:border-box;-webkit-tap-highlight-color:transparent}
+html{-webkit-text-size-adjust:100%}
+body{margin:0;font-family:var(--font);font-size:14px;line-height:1.55;color:var(--text);background:var(--bg);font-variant-numeric:tabular-nums;overscroll-behavior-y:none}
+button,a,[role="button"]{touch-action:manipulation}
+button{font:inherit;color:inherit;background:none;border:0;cursor:pointer}
+input,select,textarea{font-size:16px;font-family:inherit;color:inherit}
+:focus-visible{outline:2.5px solid var(--theme);outline-offset:2px;border-radius:6px}
+h1{font-size:22px;font-weight:600;margin:0} h2{font-size:15px;font-weight:600;margin:0}
+.small{font-size:12px;color:var(--text-2)} .tiny{font-size:12px;color:var(--text-3)}
+.press{transition:transform .18s var(--ease-out)} .press:active{transform:scale(.97)}
+/* 页面背景：与试用空间一致的蓝色极光（浅色 #BFD9FF→#CFE4FF + 蓝/青/靛三色团；深色海军蓝底） */
+.page-bg{position:fixed;inset:0;z-index:-1;background:
+  radial-gradient(62vmax 62vmax at -18vmax -22vmax, rgba(0,122,255,.55), transparent 68%),
+  radial-gradient(54vmax 54vmax at 106% 6vmax, rgba(48,176,199,.5), transparent 68%),
+  radial-gradient(48vmax 48vmax at 26vmax 126%, rgba(88,86,214,.38), transparent 70%),
+  linear-gradient(160deg, #BFD9FF 0%, #DCEBFF 42%, #CFE4FF 100%)}
+@media (prefers-color-scheme: dark){
+  .page-bg{background:
+  radial-gradient(62vmax 62vmax at -18vmax -22vmax, rgba(0,110,255,.5), transparent 68%),
+  radial-gradient(54vmax 54vmax at 106% 6vmax, rgba(30,150,180,.42), transparent 68%),
+  radial-gradient(48vmax 48vmax at 26vmax 126%, rgba(88,86,214,.4), transparent 70%),
+  linear-gradient(160deg, #0A1B38 0%, #0D2247 48%, #081630 100%)}
+}
+.glass{background:var(--glass);backdrop-filter:blur(20px) saturate(180%);-webkit-backdrop-filter:blur(20px) saturate(180%);border:1px solid var(--glass-brd);box-shadow:inset 0 1px 0 var(--glass-hi),var(--shadow)}
+@media (prefers-reduced-motion: reduce){
+  *,*::before,*::after{animation-duration:.15s !important;transition-duration:.15s !important;transition-timing-function:ease !important}
+}

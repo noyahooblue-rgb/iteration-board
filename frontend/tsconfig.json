@@ -1,0 +1,11 @@
+{
+  "compilerOptions": {
+    "target": "ES2022", "module": "ESNext", "moduleResolution": "bundler",
+    "strict": true, "jsx": "preserve", "sourceMap": true, "isolatedModules": true,
+    "esModuleInterop": true, "skipLibCheck": true, "forceConsistentCasingInFileNames": true,
+    "lib": ["ES2022", "DOM", "DOM.Iterable"], "types": ["vite/client"],
+    "baseUrl": ".", "paths": { "@/*": ["src/*"], "@mock/*": ["../mock-backend/src/*"], "@mock-adapter": ["src/api/null-adapter.ts"] },
+    "noUnusedLocals": false, "noUnusedParameters": false
+  },
+  "include": ["src/**/*.ts", "src/**/*.vue", "../mock-backend/src/**/*.ts"]
+}

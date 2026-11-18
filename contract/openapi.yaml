@@ -1,0 +1,3163 @@
+openapi: 3.0.3
+info:
+  title: 迭代小组平台 API（M4 契约）
+  version: 0.5.1
+  description: >
+    真实后端（Spring Boot）与浏览器模拟后端共同遵循的唯一契约。
+    0.5.0（M4）：Q1–Q15 待问结论落地（Q4/Q6 读取侧除外）+ AI 服务层与六项功能正式定义 + 导入批次 + 外部对接适配器；
+    Item/Report 附 allowedActions；报告只保留小组路径（Q8）；后端静态 openapi 副本已删除，本文件为唯一来源（Q5）。
+    错误统一格式 {code, message, detail}；修改类接口带 version，冲突返回 409。
+    状态流转见 contract/state-machine.md。
+    M2（修订一，最高口径）：事项类型改为 TASK 任务 / STORY 故事 / DEFECT 缺陷 /
+    ANALYSIS 分析 / ADHOC 临时事项；父子关系只允许 STORY→TASK；负责人改为数组
+    ownerIds（共同负责）；任务状态由故事推算（见 TaskStatus 与 state-machine.md
+    「任务状态推算」节）；AI 接口按修订一第 8 节预留、标注 M4 实现，本阶段只写契约不实现。
+    M3（验收批复落实）：①任务新增 REJECT 打回（仅 PO、待验收时，reason 必填，且必须
+    同时选择重开哪些已完成故事或新建补充故事，无可做故事不允许打回）；
+    ②共同负责下 TRANSFER 改为只替换一位负责人（replaceUserId 指定被替换者，
+    缺省为发起人本人；其余共同负责人保留）；③小组设置新增容量系数
+    capacityPointsPerWorkday（默认 1），个人剩余容量 = 剩余可用工作日 × 系数，只提示不拦截；
+    ④Item 补 inviteeIds（被邀请认领人，被 M2 列为契约缺口）；⑤补齐契约缺口五项：
+    小组设置 PATCH / 归档 / 退出、单事项催一下与快捷回应、迭代列表、通知查询；
+    ⑥M3 功能：通知中心与 SSE 实时推送、自动提醒扫描、成员状态、站会、总览与风险、
+    迭代全生命周期（创建/开始/结束结转/燃尽图/关键日期）、报告与 Excel 导出。
+  x-type-colors: >
+    分类色（修订一第 1 节）：任务 TASK 蓝 #007AFF；故事 STORY 按 storyCategory——
+    DEV 开发 青 #30B0C7、ANALYSIS 分析 紫 #AF52DE、TEST 测试 薄荷 #00C7BE、OTHER 其他 棕 #A2845E；
+    缺陷 DEFECT 粉 #FF2D55；独立分析 ANALYSIS 紫 #AF52DE；临时事项 ADHOC 橙 #FF9500。
+  x-security-notes: >
+    CSRF（M1 收尾正式入契约，与真实后端现有实现一致）：服务端启用 CSRF 防护，
+    令牌经 Cookie 下发——Cookie 名 XSRF-TOKEN，非 HttpOnly，前端可读取；
+    所有变更类请求（POST/PATCH/DELETE 等非安全方法）必须带请求头 X-XSRF-TOKEN，
+    其值为该 Cookie 的当前值；令牌缺失或不匹配时服务端返回 403。
+    会话 Cookie 本身为 HttpOnly + SameSite。
+servers:
+  - url: /api/v1
+paths:
+  /meta:
+    get:
+      summary: 运行环境信息（前端据此决定是否显示注册入口与演示标识）
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  registrationOpen: { type: boolean }
+                  demoMode: { type: boolean }
+  /auth/captcha:
+    get:
+      summary: 获取图形验证码（本地生成 SVG，无外网依赖）
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  captchaId: { type: string }
+                  imageSvg: { type: string }
+  /auth/register:
+    post:
+      summary: 注册（开放注册开关关闭时返回 403 REGISTRATION_CLOSED）
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [loginName, displayName, password, captchaId, captchaCode]
+              properties:
+                loginName: { type: string, minLength: 3, maxLength: 32 }
+                displayName: { type: string, minLength: 1, maxLength: 32 }
+                password: { type: string, description: 至少 8 位且同时含字母和数字 }
+                captchaId: { type: string }
+                captchaCode: { type: string }
+      responses:
+        '201': { description: 已注册并登录（会话 Cookie 已下发） }
+        '400': { $ref: '#/components/responses/Error' }
+        '403': { $ref: '#/components/responses/Error' }
+        '409': { $ref: '#/components/responses/Error' }
+  /auth/login:
+    post:
+      summary: 登录（连续失败 3 次后要求验证码；5 次锁定 15 分钟）
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [loginName, password]
+              properties:
+                loginName: { type: string }
+                password: { type: string }
+                captchaId: { type: string }
+                captchaCode: { type: string }
+      responses:
+        '200':
+          description: OK，返回当前用户
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/User' }
+        '401': { $ref: '#/components/responses/Error' }
+        '423': { $ref: '#/components/responses/Error' }
+  /auth/logout:
+    post:
+      summary: 退出登录
+      responses:
+        '204': { description: 已退出 }
+  /auth/me:
+    get:
+      summary: 当前登录用户（未登录 401）
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/User' }
+        '401': { $ref: '#/components/responses/Error' }
+  /auth/change-password:
+    post:
+      summary: 修改密码（成功后其他会话失效；临时密码首次登录强制修改走此接口）
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [oldPassword, newPassword]
+              properties:
+                oldPassword: { type: string }
+                newPassword: { type: string }
+      responses:
+        '204': { description: 已修改 }
+        '400': { $ref: '#/components/responses/Error' }
+        '401': { $ref: '#/components/responses/Error' }
+  /teams:
+    post:
+      summary: 创建小组（创建者成为组长，返回邀请码；代号全平台唯一、不区分大小写，冲突 409 TEAM_CODE_TAKEN）
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [name, code]
+              properties:
+                name: { type: string, maxLength: 64 }
+                code: { type: string, description: 2 至 5 个字母，事项编号前缀；全平台唯一（不区分大小写），创建时校验，冲突返回 409 TEAM_CODE_TAKEN }
+                themeColor: { type: string, enum: [blue, indigo, violet, pink, orange, green, teal], default: blue }
+                iterationWeeks: { type: integer, minimum: 1, maximum: 4, default: 2 }
+                joinApproval: { type: boolean, default: true }
+      responses:
+        '201':
+          description: 已创建
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Team' }
+        '400': { $ref: '#/components/responses/Error' }
+        '401': { $ref: '#/components/responses/Error' }
+        '409': { $ref: '#/components/responses/Error' }
+  /teams/mine:
+    get:
+      summary: 我加入的小组列表
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: array
+                items: { $ref: '#/components/schemas/Team' }
+  /teams/by-invite/{inviteCode}:
+    get:
+      summary: 按邀请码预览小组（加入前确认）
+      parameters:
+        - name: inviteCode
+          in: path
+          required: true
+          schema: { type: string }
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  team: { $ref: '#/components/schemas/Team' }
+                  leaderName: { type: string }
+                  alreadyMember: { type: boolean }
+        '404': { $ref: '#/components/responses/Error' }
+  /teams/join:
+    post:
+      summary: 用邀请码加入（需审批时生成待审申请；免审批时直接加入）
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [inviteCode]
+              properties:
+                inviteCode: { type: string }
+      responses:
+        '200':
+          description: joined=true 表示已直接加入；false 表示已提交申请待审批
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  joined: { type: boolean }
+                  team: { $ref: '#/components/schemas/Team' }
+        '404': { $ref: '#/components/responses/Error' }
+        '409': { $ref: '#/components/responses/Error' }
+  /teams/{teamId}/join-requests:
+    get:
+      summary: 待审加入申请（仅组长）
+      parameters: [{ $ref: '#/components/parameters/TeamId' }]
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: array
+                items: { $ref: '#/components/schemas/JoinRequest' }
+        '403': { $ref: '#/components/responses/Error' }
+        '404': { $ref: '#/components/responses/Error' }
+  /teams/{teamId}/join-requests/{requestId}/approve:
+    post:
+      summary: 审批通过并分配角色（仅组长）
+      parameters:
+        - { $ref: '#/components/parameters/TeamId' }
+        - name: requestId
+          in: path
+          required: true
+          schema: { type: integer, format: int64 }
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                role: { $ref: '#/components/schemas/Role' }
+      responses:
+        '204': { description: 已通过 }
+        '403': { $ref: '#/components/responses/Error' }
+        '404': { $ref: '#/components/responses/Error' }
+  /teams/{teamId}/join-requests/{requestId}/reject:
+    post:
+      summary: 审批拒绝（仅组长）
+      parameters:
+        - { $ref: '#/components/parameters/TeamId' }
+        - name: requestId
+          in: path
+          required: true
+          schema: { type: integer, format: int64 }
+      responses:
+        '204': { description: 已拒绝 }
+        '403': { $ref: '#/components/responses/Error' }
+        '404': { $ref: '#/components/responses/Error' }
+  /teams/{teamId}/members:
+    get:
+      summary: 小组成员（仅成员可见，非成员 404）
+      parameters: [{ $ref: '#/components/parameters/TeamId' }]
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: array
+                items: { $ref: '#/components/schemas/Member' }
+        '404': { $ref: '#/components/responses/Error' }
+  /teams/{teamId}/members/{userId}/role:
+    patch:
+      summary: 分配角色（仅组长；不能移除最后一名组长）
+      parameters:
+        - { $ref: '#/components/parameters/TeamId' }
+        - name: userId
+          in: path
+          required: true
+          schema: { type: integer, format: int64 }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [role]
+              properties:
+                role: { $ref: '#/components/schemas/Role' }
+      responses:
+        '204': { description: 已更新 }
+        '400': { $ref: '#/components/responses/Error' }
+        '403': { $ref: '#/components/responses/Error' }
+        '404': { $ref: '#/components/responses/Error' }
+  /teams/{teamId}/invite-code/reset:
+    post:
+      summary: 重置邀请码（仅组长）
+      parameters: [{ $ref: '#/components/parameters/TeamId' }]
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  inviteCode: { type: string }
+        '403': { $ref: '#/components/responses/Error' }
+        '404': { $ref: '#/components/responses/Error' }
+  /teams/{teamId}/items:
+    get:
+      summary: 事项列表（看板用；支持按状态/负责人/类型/迭代筛选）
+      parameters:
+        - { $ref: '#/components/parameters/TeamId' }
+        - name: status
+          in: query
+          schema: { $ref: '#/components/schemas/ItemStatus' }
+        - name: ownerId
+          in: query
+          description: 按负责人筛选（共同负责任一命中即可）
+          schema: { type: integer, format: int64 }
+        - name: parentId
+          in: query
+          schema: { type: integer, format: int64 }
+        - name: includeDeleted
+          in: query
+          schema: { type: boolean, default: false }
+        - name: type
+          in: query
+          schema: { $ref: '#/components/schemas/ItemType' }
+        - name: iterationId
+          in: query
+          schema: { type: integer, format: int64 }
+        - name: scope
+          in: query
+          schema: { type: string, enum: [current, daily, all], default: all }
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: array
+                items: { $ref: '#/components/schemas/Item' }
+        '404': { $ref: '#/components/responses/Error' }
+    post:
+      summary: >
+        新建事项（去向 POOL 认领池 / INVITE 邀请认领 / ASSIGN 直接指派）。
+        权限（修订一）：TASK 任务与 STORY 故事仅 PO 可创建，非 PO 调用返回 403；
+        DEFECT/ANALYSIS/ADHOC 独立事项任何成员可建。
+        STORY 必须带 parentId（同组 TASK）与 storyCategory，缺失或父非 TASK 返回 400；
+        非 STORY 不得带 parentId（父子只允许 STORY→TASK）。
+        TASK 不认领、无负责人与迭代归属：poId 为所属 PO（缺省为创建人），状态由故事推算。
+      parameters: [{ $ref: '#/components/parameters/TeamId' }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [type, title, destination]
+              properties:
+                type: { $ref: '#/components/schemas/ItemType' }
+                title: { type: string, maxLength: 200 }
+                description: { type: string }
+                priority: { type: string, enum: [P0, P1, P2, P3], default: P2 }
+                destination: { type: string, enum: [POOL, INVITE, ASSIGN] }
+                ownerIds:
+                  type: array
+                  description: ASSIGN 时必填，共同负责可多人；被直接指派的负责人 assignedDirectly=true，可婉拒（DECLINE）
+                  items: { type: integer, format: int64 }
+                assigneeId: { type: integer, format: int64, description: 兼容字段，等价于 ownerIds 只有一个元素；新客户端用 ownerIds }
+                inviteeIds:
+                  type: array
+                  items: { type: integer, format: int64 }
+                acceptorId: { type: integer, format: int64, description: 缺省为创建人（故事/独立事项）；TASK 无验收人语义 }
+                storyCategory: { $ref: '#/components/schemas/StoryCategory', description: 'STORY 必填' }
+                poId: { type: integer, format: int64, description: TASK 专用，所属 PO；缺省为创建人 }
+                dueDate: { type: string, format: date }
+                estimate: { type: number, description: 估算（单位见小组 estimateUnit，新建小组默认故事点 POINTS） }
+                parentId: { type: integer, format: int64, description: 仅 STORY 可带，且必须指向同组 TASK }
+                iterationId: { type: integer, format: int64, description: TASK 不可带（任务无迭代归属） }
+                labelNames:
+                  type: array
+                  items: { type: string }
+      responses:
+        '201':
+          description: 已创建
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Item' }
+        '400': { $ref: '#/components/responses/Error' }
+        '403': { $ref: '#/components/responses/Error' }
+        '404': { $ref: '#/components/responses/Error' }
+  /teams/{teamId}/items/{itemId}:
+    get:
+      summary: 事项详情
+      parameters:
+        - { $ref: '#/components/parameters/TeamId' }
+        - { $ref: '#/components/parameters/ItemId' }
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Item' }
+        '404': { $ref: '#/components/responses/Error' }
+    patch:
+      summary: 编辑事项字段（带 version，冲突 409）
+      parameters:
+        - { $ref: '#/components/parameters/TeamId' }
+        - { $ref: '#/components/parameters/ItemId' }
+        - name: Idempotency-Key
+          in: header
+          required: false
+          schema: { type: string, description: Q13，同键 10 分钟只生效一次 }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [version]
+              properties:
+                version: { type: integer }
+                title: { type: string }
+                description: { type: string }
+                priority: { type: string, enum: [P0, P1, P2, P3] }
+                acceptorId: { type: integer, format: int64, nullable: true }
+                dueDate: { type: string, format: date, nullable: true }
+                estimate: { type: number, nullable: true }
+                iterationId: { type: integer, format: int64, nullable: true }
+                parentId: { type: integer, format: int64, nullable: true, description: 仅 STORY 可改，且必须指向同组 TASK }
+                storyCategory: { $ref: '#/components/schemas/StoryCategory' }
+                poId: { type: integer, format: int64, nullable: true, description: TASK 专用 }
+                ownerIds:
+                  type: array
+                  description: >-
+                    M3 新增：整体替换负责人集合（抽屉常用字段点击即改用）。元素必须是小组成员；
+                    集合为空且事项为 NOT_STARTED 时回到 UNCLAIMED；UNCLAIMED 事项设置非空负责人后进入
+                    NOT_STARTED 并记为直接指派。TASK 不可改（恒为空）。
+                  items: { type: integer, format: int64 }
+                labelNames:
+                  type: array
+                  description: M3 新增：整体替换标签集合（按名称，不存在的自动创建）
+                  items: { type: string }
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Item' }
+        '403': { $ref: '#/components/responses/Error' }
+        '404': { $ref: '#/components/responses/Error' }
+        '409': { $ref: '#/components/responses/Error' }
+    delete:
+      summary: 软删除事项（进回收站，30 天内可恢复；删除故事后重算父任务状态）
+      parameters:
+        - { $ref: '#/components/parameters/TeamId' }
+        - { $ref: '#/components/parameters/ItemId' }
+      responses:
+        '204': { description: 已软删除 }
+        '403': { $ref: '#/components/responses/Error' }
+        '404': { $ref: '#/components/responses/Error' }
+  /teams/{teamId}/items/{itemId}/restore:
+    post:
+      summary: 从回收站恢复事项（恢复故事后重算父任务状态）
+      parameters:
+        - { $ref: '#/components/parameters/TeamId' }
+        - { $ref: '#/components/parameters/ItemId' }
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Item' }
+        '404': { $ref: '#/components/responses/Error' }
+  /teams/{teamId}/items/{itemId}/join:
+    post:
+      summary: >
+        加入共同负责：已有负责人且未完成（非 DONE/CANCELLED）的故事/独立事项，
+        任何成员可 join 成为共同负责人（权限与原负责人相同），并通知原负责人。
+        Q13（0.5.0）：已是负责人再 join 返回当前状态 200 不报错，并支持 Idempotency-Key；无负责人（待认领）请走 CLAIM。
+      parameters:
+        - { $ref: '#/components/parameters/TeamId' }
+        - { $ref: '#/components/parameters/ItemId' }
+        - name: Idempotency-Key
+          in: header
+          required: false
+          schema: { type: string, description: Q13，同键 10 分钟只生效一次 }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [version]
+              properties:
+                version: { type: integer }
+      responses:
+        '200':
+          description: OK，返回加入后的事项（ownerIds 含新负责人）
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Item' }
+        '403': { $ref: '#/components/responses/Error' }
+        '404': { $ref: '#/components/responses/Error' }
+        '409': { $ref: '#/components/responses/Error' }
+        '422': { $ref: '#/components/responses/Error' }
+  /teams/{teamId}/items/{itemId}/transitions:
+    post:
+      summary: 执行状态流转（规则见 state-machine.md；Q13：CLAIM 支持 Idempotency-Key，且已认领者再认领返回当前状态不报错）
+      parameters:
+        - { $ref: '#/components/parameters/TeamId' }
+        - { $ref: '#/components/parameters/ItemId' }
+        - name: Idempotency-Key
+          in: header
+          required: false
+          schema: { type: string, description: 仅 CLAIM 生效，同键 10 分钟只生效一次 }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [action, version]
+              properties:
+                action:
+                  type: string
+                  enum: [CLAIM, START, SUBMIT, APPROVE, REJECT, RELEASE, TRANSFER, DECLINE, CANCEL, REOPEN]
+                  description: >
+                    DECLINE（婉拒，M2 已实现）：NOT_STARTED→UNCLAIMED；仅被直接指派
+                    （assignedDirectly=true）的负责人本人；事项无任何 progress 记录；
+                    reason 必填；清空全部负责人；通知创建人。
+                    共同负责口径：任一负责人可 CLAIM 后的登记进展/提交验收（见 progress 接口）；
+                    RELEASE 由任一负责人执行并清空全部负责人；
+                    TRANSFER（M3 定稿，取代 M2 暂行口径）：单负责人时替换为新负责人；
+                    多名共同负责人时只替换一位——replaceUserId 指定被替换者，缺省为发起人本人
+                    （发起人不是负责人且未指定 replaceUserId 时返回 400）；其余共同负责人保留。
+                    作用于 UNCLAIMED 时仍视同指派（进入 NOT_STARTED）。
+                    TASK 任务不走普通流转：仅 PO 可 APPROVE（待验收→已完成）、CANCEL（reason 必填）
+                    与 REJECT 打回（M3 新增：仅待验收时，reason 必填，且必须通过 reopenItemIds
+                    重开至少一个已完成故事、或通过 newStories 新建至少一个补充故事，否则 422；
+                    打回后任务状态随故事推算回到进行中），其余动作 422。
+                version: { type: integer }
+                reason: { type: string, description: REJECT/RELEASE/CANCEL/DECLINE 必填 }
+                newAssigneeId: { type: integer, format: int64, description: TRANSFER 必填（新负责人；与 newOwnerId 二选一） }
+                newOwnerId: { type: integer, format: int64, description: TRANSFER 新负责人的新字段名，与 newAssigneeId 二选一 }
+                replaceUserId: { type: integer, format: int64, description: TRANSFER 专用：共同负责时被替换的那一位负责人 id；缺省为发起人本人 }
+                reopenItemIds:
+                  type: array
+                  description: TASK 的 REJECT 专用：要重开的已完成故事 id 列表（必须是该任务下 DONE 的故事）
+                  items: { type: integer, format: int64 }
+                newStories:
+                  type: array
+                  description: TASK 的 REJECT 专用：打回时新建的补充故事（进认领池 UNCLAIMED）
+                  items:
+                    type: object
+                    required: [title, storyCategory]
+                    properties:
+                      title: { type: string }
+                      storyCategory: { $ref: '#/components/schemas/StoryCategory' }
+                      estimate: { type: number, nullable: true }
+      responses:
+        '200':
+          description: OK，返回流转后的事项
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Item' }
+        '403': { $ref: '#/components/responses/Error' }
+        '404': { $ref: '#/components/responses/Error' }
+        '409': { $ref: '#/components/responses/Error' }
+        '422': { $ref: '#/components/responses/Error' }
+  /teams/{teamId}/items/{itemId}/checklist:
+    get:
+      summary: 检查清单列表（按 sortOrder 升序；事项详情 Item.checklist 亦返回同一清单）
+      parameters:
+        - { $ref: '#/components/parameters/TeamId' }
+        - { $ref: '#/components/parameters/ItemId' }
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: array
+                items: { $ref: '#/components/schemas/ChecklistEntry' }
+        '404': { $ref: '#/components/responses/Error' }
+    post:
+      summary: 新增清单条目（权限同编辑事项：创建人/负责人/PO/组长；sortOrder 缺省追加到末尾）
+      parameters:
+        - { $ref: '#/components/parameters/TeamId' }
+        - { $ref: '#/components/parameters/ItemId' }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [text]
+              properties:
+                text: { type: string, maxLength: 500, description: 条目文字 }
+                sortOrder: { type: integer, description: 排序值，缺省为当前最大排序 +1 }
+      responses:
+        '201':
+          description: 已创建
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ChecklistEntry' }
+        '400': { $ref: '#/components/responses/Error' }
+        '403': { $ref: '#/components/responses/Error' }
+        '404': { $ref: '#/components/responses/Error' }
+  /teams/{teamId}/items/{itemId}/checklist/{entryId}:
+    patch:
+      summary: 修改清单条目（文字/是否完成/排序，均可选，传哪个改哪个）
+      parameters:
+        - { $ref: '#/components/parameters/TeamId' }
+        - { $ref: '#/components/parameters/ItemId' }
+        - name: entryId
+          in: path
+          required: true
+          schema: { type: integer, format: int64 }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                text: { type: string, maxLength: 500 }
+                done: { type: boolean, description: 是否完成 }
+                sortOrder: { type: integer, description: 排序 }
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ChecklistEntry' }
+        '400': { $ref: '#/components/responses/Error' }
+        '403': { $ref: '#/components/responses/Error' }
+        '404': { $ref: '#/components/responses/Error' }
+    delete:
+      summary: 删除清单条目
+      parameters:
+        - { $ref: '#/components/parameters/TeamId' }
+        - { $ref: '#/components/parameters/ItemId' }
+        - name: entryId
+          in: path
+          required: true
+          schema: { type: integer, format: int64 }
+      responses:
+        '204': { description: 已删除 }
+        '403': { $ref: '#/components/responses/Error' }
+        '404': { $ref: '#/components/responses/Error' }
+  /teams/{teamId}/items/{itemId}/progress:
+    post:
+      summary: 登记进展
+      parameters:
+        - { $ref: '#/components/parameters/TeamId' }
+        - { $ref: '#/components/parameters/ItemId' }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                text: { type: string, description: kind=NORMAL 时必填；kind=KEEP_GOING（照常推进）时可省略，服务端自动填「照常推进，无新情况」 }
+                percent: { type: integer, minimum: 0, maximum: 100 }
+                blocked: { type: boolean }
+                blockReason: { type: string }
+                nextStep: { type: string }
+                kind: { type: string, enum: [NORMAL, KEEP_GOING], description: 进展类别；缺省 NORMAL。登记后本轮被催次数清零 }
+      responses:
+        '201':
+          description: 已登记
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ProgressUpdate' }
+        '403': { $ref: '#/components/responses/Error' }
+        '404': { $ref: '#/components/responses/Error' }
+  /teams/{teamId}/items/{itemId}/comments:
+    get:
+      summary: 评论列表
+      parameters:
+        - { $ref: '#/components/parameters/TeamId' }
+        - { $ref: '#/components/parameters/ItemId' }
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: array
+                items: { $ref: '#/components/schemas/Comment' }
+        '404': { $ref: '#/components/responses/Error' }
+    post:
+      summary: 发表评论
+      parameters:
+        - { $ref: '#/components/parameters/TeamId' }
+        - { $ref: '#/components/parameters/ItemId' }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [content]
+              properties:
+                content: { type: string }
+                mentionIds:
+                  type: array
+                  items: { type: integer, format: int64 }
+      responses:
+        '201':
+          description: 已发表
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Comment' }
+        '404': { $ref: '#/components/responses/Error' }
+  /teams/{teamId}/items/{itemId}/activities:
+    get:
+      summary: 时间线（动态页签）
+      parameters:
+        - { $ref: '#/components/parameters/TeamId' }
+        - { $ref: '#/components/parameters/ItemId' }
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: array
+                items: { $ref: '#/components/schemas/Activity' }
+        '404': { $ref: '#/components/responses/Error' }
+  /teams/{teamId}/items/{itemId}/progress-list:
+    get:
+      summary: 进展时间线（进展页签）
+      parameters:
+        - { $ref: '#/components/parameters/TeamId' }
+        - { $ref: '#/components/parameters/ItemId' }
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: array
+                items: { $ref: '#/components/schemas/ProgressUpdate' }
+        '404': { $ref: '#/components/responses/Error' }
+  /teams/{teamId}/items/{itemId}/stories:
+    get:
+      summary: 任务下故事列表（仅 TASK；按 sortOrder 升序，任务详情用）
+      parameters:
+        - { $ref: '#/components/parameters/TeamId' }
+        - { $ref: '#/components/parameters/ItemId' }
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: array
+                items: { $ref: '#/components/schemas/Item' }
+        '400': { $ref: '#/components/responses/Error' }
+        '404': { $ref: '#/components/responses/Error' }
+  /teams/{teamId}/items/{itemId}/stories/reorder:
+    post:
+      summary: 故事拖拽排序（仅 TASK；orderedIds 为该任务下故事的完整或部分顺序，按序重写 sortOrder；仅 PO/组长/任务创建人）
+      parameters:
+        - { $ref: '#/components/parameters/TeamId' }
+        - { $ref: '#/components/parameters/ItemId' }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [orderedIds]
+              properties:
+                orderedIds:
+                  type: array
+                  items: { type: integer, format: int64 }
+      responses:
+        '200':
+          description: OK，返回排序后的故事列表
+          content:
+            application/json:
+              schema:
+                type: array
+                items: { $ref: '#/components/schemas/Item' }
+        '400': { $ref: '#/components/responses/Error' }
+        '403': { $ref: '#/components/responses/Error' }
+        '404': { $ref: '#/components/responses/Error' }
+  /teams/{teamId}/trash:
+    get:
+      summary: 统一回收站（Q9：事项与报告合并；type=ITEM|REPORT|ALL 默认 ALL；报告侧按 编辑权可见口径过滤）
+      parameters:
+        - { $ref: '#/components/parameters/TeamId' }
+        - name: type
+          in: query
+          required: false
+          schema: { type: string, enum: [ITEM, REPORT, ALL], default: ALL }
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: array
+                items: { $ref: '#/components/schemas/TrashEntry' }
+        '400': { $ref: '#/components/responses/Error' }
+        '404': { $ref: '#/components/responses/Error' }
+  /teams/{teamId}/backlog:
+    get:
+      summary: 待办池（任务列表，每项含其下故事概要 stories 与计数；独立事项不在待办池）
+      parameters: [{ $ref: '#/components/parameters/TeamId' }]
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: array
+                items: { $ref: '#/components/schemas/BacklogEntry' }
+        '404': { $ref: '#/components/responses/Error' }
+  /teams/{teamId}/dispatch-batches:
+    post:
+      summary: >
+        批量下发（每人一份）：为 memberIds 中每人生成一个独立事项并直接指派给本人
+        （assignedDirectly=true，可婉拒），同属一个批次。故事批次同样仅 PO 可发
+        （type=STORY 时须带 parentId 与 storyCategory，非 PO 403）。
+      parameters: [{ $ref: '#/components/parameters/TeamId' }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [type, title, memberIds]
+              properties:
+                type: { $ref: '#/components/schemas/ItemType' }
+                title: { type: string, maxLength: 200 }
+                description: { type: string }
+                priority: { type: string, enum: [P0, P1, P2, P3], default: P2 }
+                memberIds:
+                  type: array
+                  minItems: 1
+                  items: { type: integer, format: int64 }
+                storyCategory: { $ref: '#/components/schemas/StoryCategory' }
+                parentId: { type: integer, format: int64 }
+                dueDate: { type: string, format: date }
+                estimate: { type: number }
+                iterationId: { type: integer, format: int64 }
+      responses:
+        '201':
+          description: 已创建批次，返回批次汇总
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/BatchSummary' }
+        '400': { $ref: '#/components/responses/Error' }
+        '403': { $ref: '#/components/responses/Error' }
+        '404': { $ref: '#/components/responses/Error' }
+  /teams/{teamId}/dispatch-batches/{batchId}:
+    get:
+      summary: 批次汇总（完成数/总数 + 逐人状态）
+      parameters:
+        - { $ref: '#/components/parameters/TeamId' }
+        - name: batchId
+          in: path
+          required: true
+          schema: { type: integer, format: int64 }
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/BatchSummary' }
+        '404': { $ref: '#/components/responses/Error' }
+  /teams/{teamId}/dispatch-batches/{batchId}/nudge:
+    post:
+      summary: >
+        一键催未完成：对批次内未完成事项逐个催其负责人。规则：同一人对同一事项每天
+        只能催一次（nudge 表记录，二次催该项计入 skipped）；被催人处于请假/出差
+        （成员状态在当日有效）时跳过本人、改记给组长（redirectedToLeader），组内无组长则只跳过。
+      parameters:
+        - { $ref: '#/components/parameters/TeamId' }
+        - name: batchId
+          in: path
+          required: true
+          schema: { type: integer, format: int64 }
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/BatchNudgeResult' }
+        '404': { $ref: '#/components/responses/Error' }
+  /teams/{teamId}/dispatch-batches/{batchId}/cancel:
+    post:
+      summary: 整批取消（只取消未完成项，已完成保留；reason 必填）
+      parameters:
+        - { $ref: '#/components/parameters/TeamId' }
+        - name: batchId
+          in: path
+          required: true
+          schema: { type: integer, format: int64 }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [reason]
+              properties:
+                reason: { type: string }
+      responses:
+        '200':
+          description: OK，返回取消后的批次汇总
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/BatchSummary' }
+        '400': { $ref: '#/components/responses/Error' }
+        '404': { $ref: '#/components/responses/Error' }
+  /teams/{teamId}/search:
+    get:
+      summary: 搜索（标题/描述/编号/评论内容；含已归档与已完成；不含回收站已删除项）
+      parameters:
+        - { $ref: '#/components/parameters/TeamId' }
+        - name: q
+          in: query
+          required: true
+          schema: { type: string, minLength: 1 }
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: array
+                items: { $ref: '#/components/schemas/Item' }
+        '400': { $ref: '#/components/responses/Error' }
+        '404': { $ref: '#/components/responses/Error' }
+  /teams/{teamId}/saved-filters:
+    get:
+      summary: 我的保存筛选列表（最小实现）
+      parameters: [{ $ref: '#/components/parameters/TeamId' }]
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: array
+                items: { $ref: '#/components/schemas/SavedFilter' }
+        '404': { $ref: '#/components/responses/Error' }
+    post:
+      summary: 保存一个筛选（criteria 为筛选条件 JSON 对象，原样存取）
+      parameters: [{ $ref: '#/components/parameters/TeamId' }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [name, criteria]
+              properties:
+                name: { type: string, maxLength: 64 }
+                criteria: { type: object }
+      responses:
+        '201':
+          description: 已保存
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/SavedFilter' }
+        '400': { $ref: '#/components/responses/Error' }
+        '404': { $ref: '#/components/responses/Error' }
+  /teams/{teamId}/saved-filters/{filterId}:
+    delete:
+      summary: 删除我的保存筛选
+      parameters:
+        - { $ref: '#/components/parameters/TeamId' }
+        - name: filterId
+          in: path
+          required: true
+          schema: { type: integer, format: int64 }
+      responses:
+        '204': { description: 已删除 }
+        '404': { $ref: '#/components/responses/Error' }
+  /teams/{teamId}/iterations/{iterationId}/planning:
+    get:
+      summary: >
+        迭代规划：按任务分组的故事与独立事项（groups）、每人负载 loads（共同负责
+        按人数均分故事点）、成员容量 capacities（可用天数=迭代工作日扣请假/出差天数，
+        已认领故事点 claimedPoints，供前端做超容量提示；容量分母口径为可用天数，暂行）。
+      parameters:
+        - { $ref: '#/components/parameters/TeamId' }
+        - name: iterationId
+          in: path
+          required: true
+          schema: { type: integer, format: int64 }
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Planning' }
+        '404': { $ref: '#/components/responses/Error' }
+  /teams/{teamId}/ai/status:
+    get:
+      summary: AI 可用状态（平台总开关 + 模式/配置 + 小组逐项开关合并；visionAvailable=false 时前端隐藏截图导入）
+      parameters: [{ $ref: '#/components/parameters/TeamId' }]
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/AiStatus' }
+        '404': { $ref: '#/components/responses/Error' }
+  /teams/{teamId}/ai/settings:
+    put:
+      summary: 小组 AI 逐项开关（仅组长；平台总开关在服务端配置 ai.platform-enabled）
+      parameters: [{ $ref: '#/components/parameters/TeamId' }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/TeamAiSettings' }
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/TeamAiSettings' }
+        '403': { $ref: '#/components/responses/Error' }
+  /teams/{teamId}/ai/logs:
+    get:
+      summary: 本组 AI 调用日志（仅组长；功能/模型/耗时/用量/结果，最新 100 条）
+      parameters: [{ $ref: '#/components/parameters/TeamId' }]
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: array
+                items: { $ref: '#/components/schemas/AiCallLog' }
+        '403': { $ref: '#/components/responses/Error' }
+  /teams/{teamId}/ai/split-stories:
+    post:
+      summary: AI 拆故事（仅 PO，非 PO 403）：输入任务 itemId，输出故事草稿（类别/标题/说明/建议点数）、待澄清问题、验收要点；绝不输出建议负责人。确认走既有故事创建接口
+      parameters: [{ $ref: '#/components/parameters/TeamId' }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [itemId]
+              properties:
+                itemId: { type: integer, format: int64, description: 要拆解的任务 ID }
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/SplitStoriesResult' }
+        '403': { $ref: '#/components/responses/Error' }
+        '503': { $ref: '#/components/responses/Error', description: AI_UNAVAILABLE——前端提示手工方式 }
+  /teams/{teamId}/ai/paste-import:
+    post:
+      summary: AI 粘贴导入解析（仅 PO）：文本 / 图片（imageBase64，识图模型；未配识图时 503）/ Excel·CSV（fileName+fileContentBase64，程序先转文本）。导入的是任务。只解析返回预览行，不写库；确认走 POST /imports
+      parameters: [{ $ref: '#/components/parameters/TeamId' }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                text: { type: string, description: 粘贴的文本/表格 }
+                imageBase64: { type: string, description: 截图（base64 或 data URL），最多由前端控制张数 }
+                fileName: { type: string }
+                fileContentBase64: { type: string, description: Excel/CSV 文件内容的 base64 }
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  rows:
+                    type: array
+                    items: { $ref: '#/components/schemas/PasteImportRow' }
+                  truncated: { type: boolean, description: 模型返回超过 100 条被截断 }
+        '403': { $ref: '#/components/responses/Error' }
+        '503': { $ref: '#/components/responses/Error' }
+  /teams/{teamId}/ai/paste-import/file:
+    post:
+      summary: 粘贴导入的文件直传变体（multipart file 字段；xlsx/csv 程序转文本后解析，语义同 paste-import）
+      parameters: [{ $ref: '#/components/parameters/TeamId' }]
+      requestBody:
+        required: true
+        content:
+          multipart/form-data:
+            schema:
+              type: object
+              properties:
+                file: { type: string, format: binary }
+      responses:
+        '200': { description: OK }
+        '403': { $ref: '#/components/responses/Error' }
+  /teams/{teamId}/ai/quick-update:
+    post:
+      summary: 一句话更新解析：句子 + 我负责的未完成事项 + 成员名单给模型，返回动作卡（不写库）；拿不准给 ≤3 候选；阻塞类说法未明说阻塞时卡上带 needsBlockConfirm；对不上的片段单列 unmatched
+      parameters: [{ $ref: '#/components/parameters/TeamId' }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [text]
+              properties:
+                text: { type: string }
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  actions:
+                    type: array
+                    items: { $ref: '#/components/schemas/QuickAction' }
+                  unmatched:
+                    type: array
+                    items: { type: string }
+        '503': { $ref: '#/components/responses/Error' }
+  /teams/{teamId}/ai/quick-update/apply:
+    post:
+      summary: 一句话更新确认执行：按确认后的动作经既有进展/流转/创建服务落库；支持 Idempotency-Key（Q13）
+      parameters:
+        - { $ref: '#/components/parameters/TeamId' }
+        - name: Idempotency-Key
+          in: header
+          required: false
+          schema: { type: string }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [actions]
+              properties:
+                actions:
+                  type: array
+                  items: { $ref: '#/components/schemas/QuickAction' }
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  results:
+                    type: array
+                    items:
+                      type: object
+                      properties:
+                        kind: { type: string }
+                        itemId: { type: integer, format: int64 }
+                        ok: { type: boolean }
+        '400': { $ref: '#/components/responses/Error' }
+  /teams/{teamId}/ai/summarize:
+    post:
+      summary: 自动汇总叙述预览/自测入口（不落库）：与 POST /reports/generate 同一路径——程序算事实表，模型只写叙述，校验编号/数字一致才采用（aiGenerated=true），否则程序模板（aiGenerated=false）
+      parameters: [{ $ref: '#/components/parameters/TeamId' }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [kind]
+              properties:
+                kind: { type: string, enum: [STANDUP_SUMMARY, WEEKLY, ITERATION_SUMMARY, PERSONAL_WEEKLY, RISK_SUMMARY] }
+                periodStart: { type: string, format: date }
+                periodEnd: { type: string, format: date }
+                iterationId: { type: integer, format: int64 }
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  content: { type: string }
+                  aiGenerated: { type: boolean }
+        '403': { $ref: '#/components/responses/Error' }
+  /teams/{teamId}/ai/risk-summary:
+    get:
+      summary: 风险摘要（仅组长/PO）：规则信号由程序风险规则计算（AI 不判定），AI 只汇总排序为最需关注 3 件 + 原因 + 建议动作；AI 不可用时 aiGenerated=false 且 signals 为规则清单原样
+      parameters: [{ $ref: '#/components/parameters/TeamId' }]
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  aiGenerated: { type: boolean }
+                  top:
+                    type: array
+                    items:
+                      type: object
+                      properties:
+                        itemId: { type: integer, format: int64, nullable: true }
+                        itemCode: { type: string, nullable: true }
+                        reason: { type: string }
+                        action: { type: string }
+                  signals:
+                    type: array
+                    items:
+                      type: object
+                      properties:
+                        rule: { type: string }
+                        severity: { type: string, enum: [HIGH, MEDIUM, LOW] }
+                        itemId: { type: integer, format: int64, nullable: true }
+                        itemCode: { type: string, nullable: true }
+                        userId: { type: integer, format: int64, nullable: true }
+                        message: { type: string }
+        '403': { $ref: '#/components/responses/Error' }
+  /teams/{teamId}/ai/qa:
+    post:
+      summary: AI 问答（只读）：模型把问题转结构化查询条件，程序用参数化查询取数（强制 team 过滤），模型据数据作答并引用事项编号；查不到 found=false 明确说查不到；结果存本人问答记录
+      parameters: [{ $ref: '#/components/parameters/TeamId' }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [question]
+              properties:
+                question: { type: string }
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  recordId: { type: integer, format: int64 }
+                  found: { type: boolean }
+                  answer: { type: string }
+                  refs:
+                    type: array
+                    items: { type: string }
+        '503': { $ref: '#/components/responses/Error' }
+  /teams/{teamId}/ai/qa/history:
+    get:
+      summary: 我的问答历史（仅本人，）
+      parameters: [{ $ref: '#/components/parameters/TeamId' }]
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: array
+                items: { $ref: '#/components/schemas/QaRecord' }
+  /teams/{teamId}/ai/qa/history/{recordId}:
+    delete:
+      summary: 删除我的问答记录（仅本人；他人的返回 404）
+      parameters:
+        - { $ref: '#/components/parameters/TeamId' }
+        - name: recordId
+          in: path
+          required: true
+          schema: { type: integer, format: int64 }
+      responses:
+        '204': { description: 已删除 }
+        '404': { $ref: '#/components/responses/Error' }
+  /teams/{teamId}/imports:
+    get:
+      summary: 导入批次列表（可见：发起人、组长、PO，）
+      parameters: [{ $ref: '#/components/parameters/TeamId' }]
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: array
+                items: { $ref: '#/components/schemas/ImportBatch' }
+    post:
+      summary: 导入确认写入（仅 PO）：真正写入任务并生成批次；外部编号去重（同组同系统名同编号只更新标题/描述/截止，不动负责人/状态/进展）；单次 ≤100 条；支持 Idempotency-Key，同键只生效一次并返回已生成批次（含 link 语义，）。行可直接给 rows，或给 rawRows+mapping（字段→列序号，服务端按映射取数）
+      parameters:
+        - { $ref: '#/components/parameters/TeamId' }
+        - name: Idempotency-Key
+          in: header
+          required: false
+          schema: { type: string }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                source: { type: string, enum: [AI_PASTE, FILE_MAPPING, ADAPTER], default: AI_PASTE }
+                systemName: { type: string, description: 外部命名空间（缺省 AI_PASTE / FILE 按 source 取） }
+                rows:
+                  type: array
+                  items: { $ref: '#/components/schemas/ImportRowInput' }
+                rawRows:
+                  type: array
+                  items:
+                    type: array
+                    items: { type: string }
+                mapping:
+                  type: object
+                  description: 字段名 → 列序号（0 起）
+                  additionalProperties: { type: integer }
+      responses:
+        '201':
+          description: 已生成批次
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ImportBatch' }
+        '400': { $ref: '#/components/responses/Error' }
+        '403': { $ref: '#/components/responses/Error' }
+  /teams/{teamId}/imports/{batchId}/undo:
+    post:
+      summary: 整批撤销（发起人或组长，24 小时内；超时 409 UNDO_EXPIRED）：新建任务软删、更新任务回滚导入前快照
+      parameters:
+        - { $ref: '#/components/parameters/TeamId' }
+        - name: batchId
+          in: path
+          required: true
+          schema: { type: integer, format: int64 }
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ImportBatch' }
+        '403': { $ref: '#/components/responses/Error' }
+        '409': { $ref: '#/components/responses/Error' }
+  /teams/{teamId}/imports/file/parse:
+    post:
+      summary: Excel/CSV 列映射导入第一步（仅 PO）：multipart file 字段，POI 读 xlsx、原生读 csv，返回 {headers, rows}；确认走 POST /imports 带 mapping
+      parameters: [{ $ref: '#/components/parameters/TeamId' }]
+      requestBody:
+        required: true
+        content:
+          multipart/form-data:
+            schema:
+              type: object
+              properties:
+                file: { type: string, format: binary }
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  headers:
+                    type: array
+                    items: { type: string }
+                  rows:
+                    type: array
+                    items:
+                      type: array
+                      items: { type: string }
+        '400': { $ref: '#/components/responses/Error' }
+        '403': { $ref: '#/components/responses/Error' }
+  /teams/{teamId}/integrations/adapters:
+    get:
+      summary: 适配器列表（仅组长；配置中密钥脱敏为 ***）
+      parameters: [{ $ref: '#/components/parameters/TeamId' }]
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: array
+                items: { $ref: '#/components/schemas/IntegrationAdapter' }
+        '403': { $ref: '#/components/responses/Error' }
+    post:
+      summary: 新建适配器（仅组长）：type=MOCK 内置虚构样例 / HTTP 通用配置（url/method/listPath/fields 映射/值映射/人员映射/令牌或基本认证，密钥只写不回显）
+      parameters: [{ $ref: '#/components/parameters/TeamId' }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/IntegrationAdapterInput' }
+      responses:
+        '201':
+          description: 已创建
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/IntegrationAdapter' }
+        '403': { $ref: '#/components/responses/Error' }
+  /teams/{teamId}/integrations/adapters/{adapterId}:
+    patch:
+      summary: 修改适配器（仅组长；密钥字段传 *** 表示保留原值）
+      parameters:
+        - { $ref: '#/components/parameters/TeamId' }
+        - name: adapterId
+          in: path
+          required: true
+          schema: { type: integer, format: int64 }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/IntegrationAdapterInput' }
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/IntegrationAdapter' }
+        '403': { $ref: '#/components/responses/Error' }
+        '404': { $ref: '#/components/responses/Error' }
+    delete:
+      summary: 删除适配器（仅组长）
+      parameters:
+        - { $ref: '#/components/parameters/TeamId' }
+        - name: adapterId
+          in: path
+          required: true
+          schema: { type: integer, format: int64 }
+      responses:
+        '204': { description: 已删除 }
+        '403': { $ref: '#/components/responses/Error' }
+  /teams/{teamId}/integrations/adapters/{adapterId}/test:
+    post:
+      summary: 测试连接（仅组长）：拉取一次并报告条数，不写库
+      parameters:
+        - { $ref: '#/components/parameters/TeamId' }
+        - name: adapterId
+          in: path
+          required: true
+          schema: { type: integer, format: int64 }
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  ok: { type: boolean }
+                  count: { type: integer }
+                  message: { type: string }
+        '403': { $ref: '#/components/responses/Error' }
+  /teams/{teamId}/integrations/adapters/{adapterId}/sync:
+    post:
+      summary: 立即同步（仅组长）：按系统名+外部编号识别，新任务进待办池，已存在只更新外部字段，外部关闭只加 externalClosed 标记不改状态；写同步日志；连续失败 3 次通知所有组长（包括亲手触发同步的组长本人，此路径豁免「不通知自己」；通知偏好关闭对应类别者仍不生成）
+      parameters:
+        - { $ref: '#/components/parameters/TeamId' }
+        - name: adapterId
+          in: path
+          required: true
+          schema: { type: integer, format: int64 }
+      responses:
+        '200':
+          description: 本次同步日志（success=false 表示同步失败，详情见 message）
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/SyncLog' }
+        '403': { $ref: '#/components/responses/Error' }
+  /teams/{teamId}/integrations/sync-logs:
+    get:
+      summary: 同步日志列表（仅组长）
+      parameters: [{ $ref: '#/components/parameters/TeamId' }]
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: array
+                items: { $ref: '#/components/schemas/SyncLog' }
+        '403': { $ref: '#/components/responses/Error' }
+  /teams/{teamId}/iterations/current:
+    get:
+      summary: 当前进行中的迭代（看板范围切换用；无则 404）
+      parameters: [{ $ref: '#/components/parameters/TeamId' }]
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Iteration' }
+        '404': { $ref: '#/components/responses/Error' }
+  /teams/{teamId}:
+    patch:
+      summary: 更新小组设置（仅组长；M3 补契约缺口 a）
+      parameters: [{ $ref: '#/components/parameters/TeamId' }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                name: { type: string }
+                description: { type: string, nullable: true }
+                joinApproval: { type: boolean }
+                iterationWeeks: { type: integer, minimum: 1, maximum: 4 }
+                estimateUnit: { type: string, enum: [day, point] }
+                themeColor: { type: string }
+                settings: { $ref: '#/components/schemas/TeamSettings', description: 部分更新：给出的字段覆盖，未给出的保留 }
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Team' }
+        '403': { $ref: '#/components/responses/Error' }
+        '404': { $ref: '#/components/responses/Error' }
+  /teams/{teamId}/archive:
+    post:
+      summary: 归档小组（仅组长；归档后成员不可再进入，M3 补契约缺口 a）
+      parameters: [{ $ref: '#/components/parameters/TeamId' }]
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Team' }
+        '403': { $ref: '#/components/responses/Error' }
+        '404': { $ref: '#/components/responses/Error' }
+  /teams/{teamId}/leave:
+    post:
+      summary: 退出小组（本人移除成员身份；最后一名组长不可退出，M3 补契约缺口 a）
+      parameters: [{ $ref: '#/components/parameters/TeamId' }]
+      responses:
+        '204': { description: 已退出 }
+        '400': { $ref: '#/components/responses/Error' }
+        '404': { $ref: '#/components/responses/Error' }
+  /teams/{teamId}/members/{userId}/status:
+    patch:
+      summary: 设置成员状态（本人或组长；状态 NORMAL/LEAVE/TRAVEL/SECONDED + 起止日期，M3 成员状态）
+      parameters:
+        - { $ref: '#/components/parameters/TeamId' }
+        - name: userId
+          in: path
+          required: true
+          schema: { type: integer, format: int64 }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [memberStatus]
+              properties:
+                memberStatus: { type: string, enum: [NORMAL, LEAVE, TRAVEL, SECONDED] }
+                statusStart: { type: string, format: date, nullable: true }
+                statusEnd: { type: string, format: date, nullable: true }
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Member' }
+        '403': { $ref: '#/components/responses/Error' }
+        '404': { $ref: '#/components/responses/Error' }
+  /teams/{teamId}/items/{itemId}/nudge:
+    post:
+      summary: 单事项催一下（M3 补契约缺口 b，核心功能；Q13 支持 Idempotency-Key，同键 10 分钟只生效一次）
+      description: >
+        组内任何人可催「不是自己负责」的事项：待开始/进行中催全部负责人，待验收催验收人。
+        同一发起人对同一事项每天只能催一次，第二次返回 409 NUDGE_DAILY_LIMIT。
+        被催人请假/出差（当日状态生效）时不提醒本人，改记给组长（redirected=true），与一致。
+        至少一位真实对象被催到时事项 nudgeCount +1；被催人收到 NUDGE 通知，可用快捷回应回传。
+      parameters:
+        - { $ref: '#/components/parameters/TeamId' }
+        - { $ref: '#/components/parameters/ItemId' }
+        - name: Idempotency-Key
+          in: header
+          required: false
+          schema: { type: string }
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/NudgeResult' }
+        '400': { $ref: '#/components/responses/Error' }
+        '403': { $ref: '#/components/responses/Error' }
+        '404': { $ref: '#/components/responses/Error' }
+        '409': { $ref: '#/components/responses/Error' }
+        '422': { $ref: '#/components/responses/Error' }
+  /teams/{teamId}/items/{itemId}/nudge/respond:
+    post:
+      summary: 快捷回应催一下（被催人本人操作；回应回传给发起人；Q13 支持 Idempotency-Key，重复回应返回已回应状态 alreadyResponded=true 不报错）
+      parameters:
+        - { $ref: '#/components/parameters/TeamId' }
+        - { $ref: '#/components/parameters/ItemId' }
+        - name: Idempotency-Key
+          in: header
+          required: false
+          schema: { type: string }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [response]
+              properties:
+                nudgeId: { type: integer, format: int64, description: 可选；缺省回应「发给我且尚未回应」的最近一条 }
+                response: { type: string, enum: [SOON, TODAY, BLOCKED], description: SOON 马上更新 / TODAY 今天搞定 / BLOCKED 卡住了 }
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  nudgeId: { type: integer, format: int64 }
+                  response: { type: string }
+                  respondedAt: { type: string, format: date-time }
+        '403': { $ref: '#/components/responses/Error' }
+        '404': { $ref: '#/components/responses/Error' }
+  /teams/{teamId}/items/export:
+    get:
+      summary: 事项清单导出 Excel（.xlsx；范围 scope=current 当前迭代 / all 全部未删除事项）
+      parameters:
+        - { $ref: '#/components/parameters/TeamId' }
+        - name: scope
+          in: query
+          required: false
+          schema: { type: string, enum: [current, all], default: all }
+      responses:
+        '200':
+          description: Excel 文件
+          content:
+            application/vnd.openxmlformats-officedocument.spreadsheetml.sheet:
+              schema: { type: string, format: binary }
+        '404': { $ref: '#/components/responses/Error' }
+  /teams/{teamId}/iterations:
+    get:
+      summary: 迭代列表（M3 补契约缺口 c；按开始日期倒序）
+      parameters: [{ $ref: '#/components/parameters/TeamId' }]
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: array
+                items: { $ref: '#/components/schemas/Iteration' }
+        '404': { $ref: '#/components/responses/Error' }
+    post:
+      summary: 创建迭代（组长或 PO；状态 PLANNING）
+      parameters: [{ $ref: '#/components/parameters/TeamId' }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [name]
+              properties:
+                name: { type: string }
+                goal: { type: string }
+                startDate: { type: string, format: date }
+                endDate: { type: string, format: date, description: 缺省按小组迭代周数从 startDate 推算 }
+      responses:
+        '201':
+          description: 已创建
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Iteration' }
+        '403': { $ref: '#/components/responses/Error' }
+        '404': { $ref: '#/components/responses/Error' }
+  /teams/{teamId}/iterations/{iterationId}:
+    get:
+      summary: 迭代详情
+      parameters:
+        - { $ref: '#/components/parameters/TeamId' }
+        - name: iterationId
+          in: path
+          required: true
+          schema: { type: integer, format: int64 }
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Iteration' }
+        '404': { $ref: '#/components/responses/Error' }
+    patch:
+      summary: 编辑迭代（名称/目标/起止日期；Q3 起仅组长，PO 与成员 403）
+      parameters:
+        - { $ref: '#/components/parameters/TeamId' }
+        - name: iterationId
+          in: path
+          required: true
+          schema: { type: integer, format: int64 }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                name: { type: string }
+                goal: { type: string, nullable: true }
+                startDate: { type: string, format: date }
+                endDate: { type: string, format: date }
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Iteration' }
+        '403': { $ref: '#/components/responses/Error' }
+        '404': { $ref: '#/components/responses/Error' }
+    delete:
+      summary: 删除迭代（Q3 仅组长；仅规划中且未放入事项时可删，否则 409 DELETE_BLOCKED）
+      parameters:
+        - { $ref: '#/components/parameters/TeamId' }
+        - name: iterationId
+          in: path
+          required: true
+          schema: { type: integer, format: int64 }
+      responses:
+        '204': { description: 已删除 }
+        '403': { $ref: '#/components/responses/Error' }
+        '409': { $ref: '#/components/responses/Error' }
+  /teams/{teamId}/iterations/{iterationId}/start:
+    post:
+      summary: 开始迭代（Q3 起仅组长；PLANNING→ACTIVE；同组同时只能有一个 ACTIVE，已有进行中迭代时 409；开始时生成首张燃尽快照并通知全组）
+      parameters:
+        - { $ref: '#/components/parameters/TeamId' }
+        - name: iterationId
+          in: path
+          required: true
+          schema: { type: integer, format: int64 }
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Iteration' }
+        '403': { $ref: '#/components/responses/Error' }
+        '404': { $ref: '#/components/responses/Error' }
+        '409': { $ref: '#/components/responses/Error' }
+        '422': { $ref: '#/components/responses/Error' }
+  /teams/{teamId}/iterations/{iterationId}/close:
+    post:
+      summary: 结束迭代并结转（Q3 起仅组长；ACTIVE/PLANNING→FINISHED；生成迭代总结报告）
+      description: >
+        未完成事项必须逐条给出去向：NEXT 结转到指定迭代（须为同组 PLANNING/ACTIVE 迭代）
+        或 BACKLOG 退回待办池（清 iterationId）；漏给的未完成事项返回 400 并在 detail 里列出编号。
+        improvements 为回顾会改进项标题，逐条自动建成带「改进项」标签的临时事项（不属于任何迭代）。
+        结束时生成最后一张燃尽快照与迭代总结报告（kind=ITERATION_SUMMARY），并通知全组。
+      parameters:
+        - { $ref: '#/components/parameters/TeamId' }
+        - name: iterationId
+          in: path
+          required: true
+          schema: { type: integer, format: int64 }
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                decisions:
+                  type: array
+                  items:
+                    type: object
+                    required: [itemId, target]
+                    properties:
+                      itemId: { type: integer, format: int64 }
+                      target: { type: string, enum: [NEXT, BACKLOG] }
+                      nextIterationId: { type: integer, format: int64, description: target=NEXT 时必填 }
+                improvements:
+                  type: array
+                  items: { type: string }
+      responses:
+        '200':
+          description: OK，返回结束后的迭代与生成的总结报告 id
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  iteration: { $ref: '#/components/schemas/Iteration' }
+                  summaryReportId: { type: integer, format: int64 }
+                  carriedItemIds:
+                    type: array
+                    items: { type: integer, format: int64 }
+                  backlogItemIds:
+                    type: array
+                    items: { type: integer, format: int64 }
+        '400': { $ref: '#/components/responses/Error' }
+        '403': { $ref: '#/components/responses/Error' }
+        '404': { $ref: '#/components/responses/Error' }
+        '422': { $ref: '#/components/responses/Error' }
+  /teams/{teamId}/iterations/{iterationId}/burndown:
+    get:
+      summary: 燃尽图数据（每晚快照 + 理想线；含当天实时点）
+      parameters:
+        - { $ref: '#/components/parameters/TeamId' }
+        - name: iterationId
+          in: path
+          required: true
+          schema: { type: integer, format: int64 }
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Burndown' }
+        '404': { $ref: '#/components/responses/Error' }
+  /teams/{teamId}/iterations/{iterationId}/snapshot:
+    post:
+      summary: 立即生成一张燃尽快照（组长或 PO；与每晚 23:30 定时快照同一口径，供演示与验收）
+      parameters:
+        - { $ref: '#/components/parameters/TeamId' }
+        - name: iterationId
+          in: path
+          required: true
+          schema: { type: integer, format: int64 }
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Burndown' }
+        '403': { $ref: '#/components/responses/Error' }
+        '404': { $ref: '#/components/responses/Error' }
+  /teams/{teamId}/iterations/{iterationId}/key-dates:
+    get:
+      summary: 迭代关键日期列表（封版/投产/评审/其他）
+      parameters:
+        - { $ref: '#/components/parameters/TeamId' }
+        - name: iterationId
+          in: path
+          required: true
+          schema: { type: integer, format: int64 }
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: array
+                items: { $ref: '#/components/schemas/KeyDate' }
+        '404': { $ref: '#/components/responses/Error' }
+    post:
+      summary: 新增关键日期（组长或 PO）
+      parameters:
+        - { $ref: '#/components/parameters/TeamId' }
+        - name: iterationId
+          in: path
+          required: true
+          schema: { type: integer, format: int64 }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [title, date]
+              properties:
+                title: { type: string }
+                date: { type: string, format: date }
+                category: { type: string, enum: [FREEZE, RELEASE, REVIEW, OTHER], description: 缺省 OTHER }
+      responses:
+        '201':
+          description: 已创建
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/KeyDate' }
+        '403': { $ref: '#/components/responses/Error' }
+        '404': { $ref: '#/components/responses/Error' }
+  /teams/{teamId}/key-dates/{keyDateId}:
+    delete:
+      summary: 删除关键日期（组长或 PO）
+      parameters:
+        - { $ref: '#/components/parameters/TeamId' }
+        - name: keyDateId
+          in: path
+          required: true
+          schema: { type: integer, format: int64 }
+      responses:
+        '204': { description: 已删除 }
+        '403': { $ref: '#/components/responses/Error' }
+        '404': { $ref: '#/components/responses/Error' }
+  /teams/{teamId}/standup:
+    get:
+      summary: 站会数据（按人：昨日进展与完成、今日在手、当前阻塞）
+      description: >
+        date 缺省今天。「昨日」= date 的上一个工作日（按小组特殊日期计算）内该成员登记的进展与当天完成事项；
+        「今日」= 当前由其负责的进行中/待开始事项；「阻塞」= 其负责的带阻塞标记事项。附该日站会备注。
+      parameters:
+        - { $ref: '#/components/parameters/TeamId' }
+        - name: date
+          in: query
+          required: false
+          schema: { type: string, format: date }
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Standup' }
+        '404': { $ref: '#/components/responses/Error' }
+  /teams/{teamId}/standup/note:
+    put:
+      summary: 保存站会备注（任一成员；同日一条，覆盖更新）
+      parameters: [{ $ref: '#/components/parameters/TeamId' }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [date, content]
+              properties:
+                date: { type: string, format: date }
+                content: { type: string }
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  date: { type: string, format: date }
+                  content: { type: string }
+        '404': { $ref: '#/components/responses/Error' }
+  /teams/{teamId}/overview:
+    get:
+      summary: 组长总览（成员行 + 风险清单 + 迭代健康度）
+      description: >
+        每位成员一行：成员状态、在做事项、最近更新时间、待更新数、剩余故事点与剩余容量（容量口径见 TeamSettings）。
+        risks 与 iterationHealth 仅组长与 PO 可见（canViewRisks=false 时 risks 为空数组、iterationHealth 为 null）。
+        风险由规则计算，不由 AI 判定。
+      parameters: [{ $ref: '#/components/parameters/TeamId' }]
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Overview' }
+        '404': { $ref: '#/components/responses/Error' }
+  /teams/{teamId}/reminders/scan:
+    post:
+      summary: 立即扫描自动提醒（仅组长；与定时扫描同一实现，对应）
+      description: >
+        按规则表逐条扫描：进行中无进展、待开始未动工、待验收未处理、待认领无人领、
+        阻塞未解除、临近截止、已逾期。阈值取小组设置（工作日口径，含特殊日期）。
+        请假/出差成员不提醒本人、改提醒组长。同一规则同一事项同一接收人当天不重复生成。
+      parameters: [{ $ref: '#/components/parameters/TeamId' }]
+      responses:
+        '200':
+          description: OK，返回各规则本次新建提醒数
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  created:
+                    type: object
+                    additionalProperties: { type: integer }
+                  totalCreated: { type: integer }
+        '403': { $ref: '#/components/responses/Error' }
+        '404': { $ref: '#/components/responses/Error' }
+  /teams/{teamId}/reports/generate:
+    post:
+      summary: 生成报告时手动生成视为有意恢复——原地重生返回 201 且 restored=true 并写审计日志，定时任务仍跳过墓碑；未来周期 400；生成权限——站会/周报/风险=组长/PO，迭代总结=组长，我的周报=本人；支持 Idempotency-Key）
+      parameters:
+        - { $ref: '#/components/parameters/TeamId' }
+        - name: Idempotency-Key
+          in: header
+          required: false
+          schema: { type: string, description: '幂等键：同用户同键 10 分钟内重复提交返回首次结果' }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [kind]
+              properties:
+                kind: { type: string, enum: [STANDUP_SUMMARY, WEEKLY, ITERATION_SUMMARY, PERSONAL_WEEKLY, RISK_SUMMARY] }
+                periodStart: { type: string, format: date, description: 周期开始（站会/风险=日期；周报/我的周报=周开始；缺省按当日/当周） }
+                periodEnd: { type: string, format: date, description: 周期结束（周类缺省为 periodStart+6 天） }
+                iterationId: { type: integer, format: int64, description: 仅 ITERATION_SUMMARY——指定迭代（Q7 按 iterationId 唯一）；缺省取进行中或最近结束的迭代 }
+      responses:
+        '201':
+          description: 已生成（existed=false；墓碑恢复时 restored=true）
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Report' }
+        '200':
+          description: 该周期已有报告，未新建（existed=true，body 为已有报告）
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Report' }
+        '400': { $ref: '#/components/responses/Error' }
+        '403': { $ref: '#/components/responses/Error' }
+        '404': { $ref: '#/components/responses/Error' }
+  /teams/{teamId}/reports:
+    get:
+      summary: 报告列表
+      parameters: [{ $ref: '#/components/parameters/TeamId' }]
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: array
+                items: { $ref: '#/components/schemas/Report' }
+        '404': { $ref: '#/components/responses/Error' }
+  /teams/{teamId}/reports/{reportId}:
+    get:
+      summary: 报告详情
+      parameters:
+        - { $ref: '#/components/parameters/TeamId' }
+        - name: reportId
+          in: path
+          required: true
+          schema: { type: integer, format: int64 }
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Report' }
+        '404': { $ref: '#/components/responses/Error' }
+    patch:
+      summary: 编辑报告内容
+      parameters:
+        - { $ref: '#/components/parameters/TeamId' }
+        - name: reportId
+          in: path
+          required: true
+          schema: { type: integer, format: int64 }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                contentMd: { type: string, description: Markdown 正文（修订二字段名；兼容旧字段 content） }
+                content: { type: string, description: 兼容旧字段，与 contentMd 二选一 }
+                title: { type: string }
+                version: { type: integer, description: 乐观锁版本（可选，传入时校验） }
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Report' }
+        '403': { $ref: '#/components/responses/Error' }
+        '404': { $ref: '#/components/responses/Error' }
+        '409': { $ref: '#/components/responses/Error' }
+    delete:
+      summary: 删除报告
+      parameters:
+        - { $ref: '#/components/parameters/TeamId' }
+        - name: reportId
+          in: path
+          required: true
+          schema: { type: integer, format: int64 }
+      responses:
+        '204': { description: 已删除 }
+        '403': { $ref: '#/components/responses/Error' }
+        '404': { $ref: '#/components/responses/Error' }
+  /teams/{teamId}/reports/{reportId}/export:
+    get:
+      summary: 导出报告 Markdown（text/markdown 附件下载）
+      parameters:
+        - { $ref: '#/components/parameters/TeamId' }
+        - name: reportId
+          in: path
+          required: true
+          schema: { type: integer, format: int64 }
+      responses:
+        '200':
+          description: Markdown 文件
+          content:
+            text/markdown:
+              schema: { type: string }
+        '404': { $ref: '#/components/responses/Error' }
+  /teams/{teamId}/reports/trash:
+    get:
+      summary: 报告回收站
+      parameters: [{ $ref: '#/components/parameters/TeamId' }]
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: array
+                items: { $ref: '#/components/schemas/Report' }
+        '404': { $ref: '#/components/responses/Error' }
+  /teams/{teamId}/reports/{reportId}/restore:
+    post:
+      summary: 从回收站恢复报告（有编辑权者）
+      parameters:
+        - { $ref: '#/components/parameters/TeamId' }
+        - name: reportId
+          in: path
+          required: true
+          schema: { type: integer, format: int64 }
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Report' }
+        '403': { $ref: '#/components/responses/Error' }
+        '404': { $ref: '#/components/responses/Error' }
+  /teams/{teamId}/reports/{reportId}/regenerate:
+    post:
+      summary: 重新生成报告
+      parameters:
+        - { $ref: '#/components/parameters/TeamId' }
+        - name: reportId
+          in: path
+          required: true
+          schema: { type: integer, format: int64 }
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Report' }
+        '403': { $ref: '#/components/responses/Error' }
+        '404': { $ref: '#/components/responses/Error' }
+        '409': { $ref: '#/components/responses/Error' }
+  /teams/{teamId}/reports/{reportId}/versions:
+    get:
+      summary: 报告历史版本列表（每份最多 5 个，倒序；不含正文，正文走单个版本端点）
+      parameters:
+        - { $ref: '#/components/parameters/TeamId' }
+        - name: reportId
+          in: path
+          required: true
+          schema: { type: integer, format: int64 }
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: array
+                items: { $ref: '#/components/schemas/ReportVersion' }
+        '404': { $ref: '#/components/responses/Error' }
+  /teams/{teamId}/reports/{reportId}/versions/{versionId}:
+    get:
+      summary: 报告历史版本全文
+      parameters:
+        - { $ref: '#/components/parameters/TeamId' }
+        - name: reportId
+          in: path
+          required: true
+          schema: { type: integer, format: int64 }
+        - name: versionId
+          in: path
+          required: true
+          schema: { type: integer, format: int64 }
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ReportVersion' }
+        '404': { $ref: '#/components/responses/Error' }
+  /teams/{teamId}/reports/{reportId}/versions/{versionId}/restore:
+    post:
+      summary: 恢复历史版本（恢复前把当前内容存版；恢复后 editedByHuman=true；需编辑权）
+      parameters:
+        - { $ref: '#/components/parameters/TeamId' }
+        - name: reportId
+          in: path
+          required: true
+          schema: { type: integer, format: int64 }
+        - name: versionId
+          in: path
+          required: true
+          schema: { type: integer, format: int64 }
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Report' }
+        '403': { $ref: '#/components/responses/Error' }
+        '404': { $ref: '#/components/responses/Error' }
+  /teams/{teamId}/labels:
+    get:
+      summary: 标签列表（全组可见，含 usageCount 使用数）
+      parameters: [{ $ref: '#/components/parameters/TeamId' }]
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: array
+                items: { $ref: '#/components/schemas/Label' }
+        '404': { $ref: '#/components/responses/Error' }
+    post:
+      summary: 新建标签
+      parameters: [{ $ref: '#/components/parameters/TeamId' }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [name]
+              properties:
+                name: { type: string }
+                color: { type: string }
+      responses:
+        '201':
+          description: 已创建
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Label' }
+        '403': { $ref: '#/components/responses/Error' }
+        '409': { $ref: '#/components/responses/Error' }
+  /teams/{teamId}/labels/{labelId}:
+    patch:
+      summary: 修改标签（仅组长/PO；改名重名 409）
+      parameters:
+        - { $ref: '#/components/parameters/TeamId' }
+        - name: labelId
+          in: path
+          required: true
+          schema: { type: integer, format: int64 }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                name: { type: string }
+                color: { type: string }
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Label' }
+        '403': { $ref: '#/components/responses/Error' }
+        '404': { $ref: '#/components/responses/Error' }
+        '409': { $ref: '#/components/responses/Error' }
+    delete:
+      summary: 删除标签（仅组长/PO；在用时 409 LABEL_IN_USE 且 detail.usageCount 给出使用数；force=true 强删并解除事项关联）
+      parameters:
+        - { $ref: '#/components/parameters/TeamId' }
+        - name: labelId
+          in: path
+          required: true
+          schema: { type: integer, format: int64 }
+        - name: force
+          in: query
+          required: false
+          schema: { type: boolean, default: false }
+      responses:
+        '204': { description: 已删除 }
+        '403': { $ref: '#/components/responses/Error' }
+        '404': { $ref: '#/components/responses/Error' }
+        '409': { $ref: '#/components/responses/Error' }
+  /teams/{teamId}/items/{itemId}/comments/{commentId}:
+    patch:
+      summary: 修改评论
+      parameters:
+        - { $ref: '#/components/parameters/TeamId' }
+        - name: itemId
+          in: path
+          required: true
+          schema: { type: integer, format: int64 }
+        - name: commentId
+          in: path
+          required: true
+          schema: { type: integer, format: int64 }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [content]
+              properties:
+                content: { type: string }
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Comment' }
+        '403': { $ref: '#/components/responses/Error' }
+        '404': { $ref: '#/components/responses/Error' }
+    delete:
+      summary: 删除评论
+      parameters:
+        - { $ref: '#/components/parameters/TeamId' }
+        - name: itemId
+          in: path
+          required: true
+          schema: { type: integer, format: int64 }
+        - name: commentId
+          in: path
+          required: true
+          schema: { type: integer, format: int64 }
+      responses:
+        '204': { description: 已删除 }
+        '403': { $ref: '#/components/responses/Error' }
+        '404': { $ref: '#/components/responses/Error' }
+  /teams/{teamId}/iterations/{iterationId}/key-dates/{keyDateId}:
+    patch:
+      summary: 修改关键日期
+      parameters:
+        - { $ref: '#/components/parameters/TeamId' }
+        - name: iterationId
+          in: path
+          required: true
+          schema: { type: integer, format: int64 }
+        - name: keyDateId
+          in: path
+          required: true
+          schema: { type: integer, format: int64 }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                title: { type: string }
+                date: { type: string, format: date }
+                category: { type: string, enum: [FREEZE, RELEASE, REVIEW, OTHER] }
+      responses:
+        '200': { description: OK }
+        '403': { $ref: '#/components/responses/Error' }
+        '404': { $ref: '#/components/responses/Error' }
+  /notifications:
+    get:
+      summary: 我的通知（通知中心；M3 补契约缺口 e）
+      parameters:
+        - name: teamId
+          in: query
+          required: false
+          schema: { type: integer, format: int64, description: 只看某小组的通知；缺省全部 }
+        - name: unreadOnly
+          in: query
+          required: false
+          schema: { type: boolean, default: false }
+        - name: category
+          in: query
+          required: false
+          schema: { type: string, enum: [ASSIGNMENT, NUDGE, MENTION, ITEM_UPDATE, REMINDER, SYSTEM], description: 按类别过滤 }
+      responses:
+        '200':
+          description: OK（按时间倒序，最多 200 条）
+          content:
+            application/json:
+              schema:
+                type: array
+                items: { $ref: '#/components/schemas/Notification' }
+  /notifications/unread-count:
+    get:
+      summary: 未读通知数（顶栏铃铛）
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  count: { type: integer }
+  /notifications/read-all:
+    post:
+      summary: 全部标为已读（可带 teamId 只处理某组）
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                teamId: { type: integer, format: int64, nullable: true }
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  updated: { type: integer }
+  /notifications/{notificationId}/read:
+    post:
+      summary: 单条标为已读
+      parameters:
+        - name: notificationId
+          in: path
+          required: true
+          schema: { type: integer, format: int64 }
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Notification' }
+        '404': { $ref: '#/components/responses/Error' }
+  /notifications/stream:
+    get:
+      summary: 实时推送（SSE；事件 notification.created，前端断线重连后以列表接口补齐）
+      responses:
+        '200':
+          description: SSE 长连接
+          content:
+            text/event-stream:
+              schema: { type: string }
+  /auth/notification-prefs:
+    get:
+      summary: 我的通知偏好（按类别开关；ASSIGNMENT 与 NUDGE 不可关闭，强行传 false 时服务端仍按开启处理）
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/NotificationPrefs' }
+    patch:
+      summary: 更新我的通知偏好
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/NotificationPrefs' }
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/NotificationPrefs' }
+components:
+  parameters:
+    TeamId:
+      name: teamId
+      in: path
+      required: true
+      schema: { type: integer, format: int64 }
+    ItemId:
+      name: itemId
+      in: path
+      required: true
+      schema: { type: integer, format: int64 }
+  responses:
+    Error:
+      description: 统一错误格式
+      content:
+        application/json:
+          schema:
+            type: object
+            properties:
+              code: { type: string, description: 如 VALIDATION / INVALID_CREDENTIALS / ACCOUNT_LOCKED / VERSION_CONFLICT / ILLEGAL_TRANSITION / FORBIDDEN / NOT_FOUND / TEAM_CODE_TAKEN / LOGIN_NAME_TAKEN }
+              message: { type: string }
+              detail: { type: object, nullable: true }
+  schemas:
+    Role:
+      type: string
+      enum: [LEADER, PO, MEMBER]
+    ItemType:
+      type: string
+      description: >
+        修订一类型模型：TASK 任务（PO 创建，不认领，蓝 #007AFF）/ STORY 故事（仅 PO 创建，
+        必须挂同组 TASK，认领单位）/ DEFECT 缺陷（粉 #FF2D55）/ ANALYSIS 独立分析（紫 #AF52DE）/
+        ADHOC 临时事项（橙 #FF9500）。M1 的 REQUIREMENT 已迁移为 TASK、旧 TASK 已迁移为 STORY。
+      enum: [TASK, STORY, DEFECT, ANALYSIS, ADHOC]
+    StoryCategory:
+      type: string
+      description: 故事类别（仅 STORY）：DEV 开发 青 #30B0C7 / ANALYSIS 分析 紫 #AF52DE / TEST 测试 薄荷 #00C7BE / OTHER 其他 棕 #A2845E
+      enum: [DEV, ANALYSIS, TEST, OTHER]
+    ItemStatus:
+      type: string
+      description: 故事与独立事项的状态（任务用 TaskStatus，见 Item.taskStatus）
+      enum: [UNCLAIMED, NOT_STARTED, IN_PROGRESS, IN_REVIEW, DONE, CANCELLED]
+    TaskStatus:
+      type: string
+      description: >
+        任务专用状态（由故事推算，非流转产生，规则见 state-machine.md「任务状态推算」）：
+        NOT_STARTED 未开始 / IN_PROGRESS 进行中 / PENDING_ACCEPTANCE 待/ DONE 已完成 / CANCELLED 已取消
+      enum: [NOT_STARTED, IN_PROGRESS, PENDING_ACCEPTANCE, DONE, CANCELLED]
+    User:
+      type: object
+      properties:
+        id: { type: integer, format: int64 }
+        loginName: { type: string }
+        displayName: { type: string }
+        avatarColor: { type: string }
+        platformAdmin: { type: boolean }
+        mustChangePassword: { type: boolean }
+    Team:
+      type: object
+      properties:
+        id: { type: integer, format: int64 }
+        name: { type: string }
+        code: { type: string }
+        description: { type: string, nullable: true }
+        inviteCode: { type: string, description: 仅组长与创建响应可见 }
+        joinApproval: { type: boolean }
+        iterationWeeks: { type: integer }
+        estimateUnit: { type: string, enum: [day, point], description: 估算单位；新建小组默认 point（故事点，修订一），小组设置仍可改为 day（人天） }
+        themeColor: { type: string }
+        status: { type: string, enum: [ACTIVE, ARCHIVED] }
+        myRole: { $ref: '#/components/schemas/Role' }
+        settings: { $ref: '#/components/schemas/TeamSettings' }
+    TeamSettings:
+      type: object
+      description: 小组设置（存 team.settings_json；缺省值由服务端补齐后返回完整对象）
+      properties:
+        capacityPointsPerWorkday:
+          type: number
+          description: 容量系数（验收批复待问 3）：每人每个工作日约等于几个故事点，默认 1。个人本迭代剩余容量 = 剩余可用工作日 × 本系数。只用于提示，不拦截
+        reminderThresholds:
+          type: object
+          description: 自动提醒阈值
+          properties:
+            staleInProgressDays: { type: integer, description: 进行中无新进展阈值，默认 2 }
+            notStartedDays: { type: integer, description: 待开始未动工阈值，默认 2 }
+            reviewPendingDays: { type: integer, description: 待验收未处理阈值，默认 2 }
+            unclaimedDays: { type: integer, description: 待认领无人认领阈值，默认 3 }
+            blockedDays: { type: integer, description: 阻塞未解除阈值，默认 2 }
+            dueSoonDays: { type: integer, description: 临近截止提前量，默认 1 }
+        specialHolidays:
+          type: array
+          description: 特殊非工作日（节假日），ISO 日期；工作日计算时扣除
+          items: { type: string, format: date }
+        specialWorkdays:
+          type: array
+          description: 特殊工作日（调休），ISO 日期；落在周末也算工作日
+          items: { type: string, format: date }
+    Member:
+      type: object
+      properties:
+        userId: { type: integer, format: int64 }
+        displayName: { type: string }
+        loginName: { type: string }
+        avatarColor: { type: string }
+        role: { $ref: '#/components/schemas/Role' }
+        memberStatus: { type: string, enum: [NORMAL, LEAVE, TRAVEL, SECONDED] }
+        memberStatusStart: { type: string, format: date, nullable: true, description: 成员状态起始日（M3） }
+        memberStatusEnd: { type: string, format: date, nullable: true, description: 成员状态结束日（M3） }
+    JoinRequest:
+      type: object
+      properties:
+        id: { type: integer, format: int64 }
+        userId: { type: integer, format: int64 }
+        displayName: { type: string }
+        loginName: { type: string }
+        status: { type: string, enum: [PENDING, APPROVED, REJECTED] }
+        createdAt: { type: string, format: date-time }
+    Item:
+      type: object
+      properties:
+        id: { type: integer, format: int64 }
+        code: { type: string, description: 显示编号，如 SKY-128 }
+        type: { $ref: '#/components/schemas/ItemType' }
+        title: { type: string }
+        description: { type: string }
+        status: { $ref: '#/components/schemas/ItemStatus' }
+        priority: { type: string, enum: [P0, P1, P2, P3] }
+        creatorId: { type: integer, format: int64 }
+        ownerIds:
+          type: array
+          description: 负责人数组（共同负责，M2 取代 assigneeId）；TASK 恒为空数组
+          items: { type: integer, format: int64 }
+        acceptorId: { type: integer, format: int64, nullable: true }
+        storyCategory: { $ref: '#/components/schemas/StoryCategory', nullable: true, description: 仅 STORY }
+        poId: { type: integer, format: int64, nullable: true, description: 仅 TASK，所属 PO }
+        batchId: { type: integer, format: int64, nullable: true, description: 批量下发批次号，无批次为 null }
+        assignedDirectly: { type: boolean, description: 是否直接指派而来（婉拒 DECLINE 的前置条件之一） }
+        sortOrder: { type: integer, description: 故事在所属任务内的排序值 }
+        taskStatus: { $ref: '#/components/schemas/TaskStatus', nullable: true, description: 仅 TASK；其余类型为 null。TASK 的 progressPercent 为推算值（故事点加权，无估算按件数） }
+        collaboratorIds:
+          type: array
+          items: { type: integer, format: int64 }
+        inviteeIds:
+          type: array
+          description: 被邀请认领的人（destination=INVITE 时写入；M3 补齐，M2 曾列为契约缺口）
+          items: { type: integer, format: int64 }
+        parentId: { type: integer, format: int64, nullable: true }
+        iterationId: { type: integer, format: int64, nullable: true }
+        dueDate: { type: string, format: date, nullable: true }
+        estimate: { type: number, nullable: true }
+        progressPercent: { type: integer }
+        blocked: { type: boolean }
+        blockReason: { type: string, nullable: true }
+        nudgeCount: { type: integer }
+        labels:
+          type: array
+          items: { type: string }
+        childCount: { type: integer }
+        childDoneCount: { type: integer }
+        commentCount: { type: integer }
+        version: { type: integer }
+        createdAt: { type: string, format: date-time }
+        updatedAt: { type: string, format: date-time }
+        source: { type: string, description: 来源 MANUAL / AI_PASTE / FILE_MAPPING / ADAPTER }
+        externalSystem: { type: string, nullable: true, description: 外部系统名（导入/同步） }
+        externalId: { type: string, nullable: true, description: 外部编号（同组同系统名唯一识别） }
+        externalUrl: { type: string, nullable: true }
+        externalClosed: { type: boolean, description: 外部已关闭标记（同步置位，不改平台状态） }
+        allowedActions:
+          type: array
+          description: Q11——当前请求用户可执行的操作键（VIEW/EDIT/DELETE/RESTORE/CLAIM/JOIN/NUDGE/PROGRESS），权限判断只在服务端实现，前端按此显隐；无用户上下文的内部组装为空数组
+          items: { type: string }
+    ReportVersion:
+      type: object
+      properties:
+        id: { type: integer, format: int64 }
+        reportId: { type: integer, format: int64 }
+        title: { type: string }
+        content: { type: string, description: 仅单个版本端点返回 }
+        editedByHuman: { type: boolean }
+        createdAt: { type: string, format: date-time }
+    Label:
+      type: object
+      properties:
+        id: { type: integer, format: int64 }
+        teamId: { type: integer, format: int64 }
+        name: { type: string }
+        color: { type: string, nullable: true }
+        usageCount: { type: integer, description: 当前挂有该标签的事项数 }
+        lastProgressAt: { type: string, format: date-time, nullable: true }
+        checklist:
+          type: array
+          description: 检查清单，按 sortOrder 升序；增删改走 /checklist 子资源
+          items: { $ref: '#/components/schemas/ChecklistEntry' }
+    ChecklistEntry:
+      type: object
+      description: 检查清单条目
+      properties:
+        id: { type: integer, format: int64 }
+        itemId: { type: integer, format: int64 }
+        text: { type: string }
+        done: { type: boolean }
+        sortOrder: { type: integer }
+    ProgressUpdate:
+      type: object
+      properties:
+        id: { type: integer, format: int64 }
+        itemId: { type: integer, format: int64 }
+        authorId: { type: integer, format: int64 }
+        text: { type: string }
+        percent: { type: integer, nullable: true }
+        blocked: { type: boolean }
+        blockReason: { type: string, nullable: true }
+        nextStep: { type: string, nullable: true }
+        kind: { type: string, enum: [NORMAL, KEEP_GOING] }
+        createdAt: { type: string, format: date-time }
+    Comment:
+      type: object
+      properties:
+        id: { type: integer, format: int64 }
+        itemId: { type: integer, format: int64 }
+        authorId: { type: integer, format: int64 }
+        content: { type: string }
+        mentionIds:
+          type: array
+          items: { type: integer, format: int64 }
+        createdAt: { type: string, format: date-time }
+    Activity:
+      type: object
+      properties:
+        id: { type: integer, format: int64 }
+        itemId: { type: integer, format: int64 }
+        actorId: { type: integer, format: int64 }
+        action: { type: string, description: CREATE / CLAIM / START / SUBMIT / APPROVE / REJECT / RELEASE / TRANSFER / DECLINE / CANCEL / REOPEN / EDIT / BLOCK / UNBLOCK / JOIN / DELETE / RESTORE }
+        fromStatus: { type: string, nullable: true }
+        toStatus: { type: string, nullable: true }
+        detail: { type: string, nullable: true }
+        createdAt: { type: string, format: date-time }
+    BacklogEntry:
+      type: object
+      description: 待办池一行：一个任务 + 其下故事概要
+      properties:
+        task: { $ref: '#/components/schemas/Item' }
+        stories:
+          type: array
+          items: { $ref: '#/components/schemas/Item' }
+        storyCount: { type: integer }
+        doneStoryCount: { type: integer }
+    BatchMemberStatus:
+      type: object
+      properties:
+        userId: { type: integer, format: int64 }
+        itemId: { type: integer, format: int64 }
+        status: { $ref: '#/components/schemas/ItemStatus' }
+    BatchSummary:
+      type: object
+      properties:
+        batchId: { type: integer, format: int64 }
+        teamId: { type: integer, format: int64 }
+        creatorId: { type: integer, format: int64 }
+        title: { type: string }
+        type: { $ref: '#/components/schemas/ItemType' }
+        total: { type: integer }
+        doneCount: { type: integer }
+        members:
+          type: array
+          items: { $ref: '#/components/schemas/BatchMemberStatus' }
+        createdAt: { type: string, format: date-time }
+    BatchNudgeResult:
+      type: object
+      properties:
+        nudgedItemIds:
+          type: array
+          items: { type: integer, format: int64 }
+        skippedItemIds:
+          type: array
+          description: 因每天一次规则或无组长可转而跳过的事项
+          items: { type: integer, format: int64 }
+        redirectedItemIds:
+          type: array
+          description: 被催人请假/出差、改记给组长的事项
+          items: { type: integer, format: int64 }
+    SavedFilter:
+      type: object
+      properties:
+        id: { type: integer, format: int64 }
+        name: { type: string }
+        criteria: { type: object, description: 筛选条件 JSON（原样存取，最小实现） }
+        createdAt: { type: string, format: date-time }
+    PlanningGroup:
+      type: object
+      properties:
+        task: { $ref: '#/components/schemas/Item', nullable: true, description: 独立事项组为 null }
+        items:
+          type: array
+          items: { $ref: '#/components/schemas/Item' }
+    PlanningLoad:
+      type: object
+      properties:
+        userId: { type: integer, format: int64 }
+        points: { type: number, description: 负载故事点（共同负责按人数均分；无估算按 0 计） }
+        itemCount: { type: integer }
+    PlanningCapacity:
+      type: object
+      properties:
+        userId: { type: integer, format: int64 }
+        availableDays: { type: integer, description: 迭代工作日（周一至周五，扣小组特殊日期）扣本人请假/出差覆盖天数；迭代无起止日期时为 0 }
+        claimedPoints: { type: number, description: 已认领故事点（同负载口径） }
+        remainingDays: { type: integer, description: M3：自今天起（含）到迭代结束的剩余可用工作日（同上扣减口径，迭代已结束为 0） }
+        capacityPoints: { type: number, description: M3（待问 3 定稿）：剩余容量 = remainingDays × 小组容量系数 capacityPointsPerWorkday }
+        overCapacity: { type: boolean, description: M3：已认领未完成故事点（均分口径）超过剩余容量时为 true；只提示、不拦截 }
+    Planning:
+      type: object
+      properties:
+        iteration: { $ref: '#/components/schemas/Iteration' }
+        groups:
+          type: array
+          items: { $ref: '#/components/schemas/PlanningGroup' }
+        loads:
+          type: array
+          items: { $ref: '#/components/schemas/PlanningLoad' }
+        capacities:
+          type: array
+          items: { $ref: '#/components/schemas/PlanningCapacity' }
+    Iteration:
+      type: object
+      properties:
+        id: { type: integer, format: int64 }
+        name: { type: string }
+        goal: { type: string }
+        startDate: { type: string, format: date }
+        endDate: { type: string, format: date }
+        status: { type: string, enum: [PLANNING, ACTIVE, FINISHED] }
+    Notification:
+      type: object
+      properties:
+        id: { type: integer, format: int64 }
+        teamId: { type: integer, format: int64, nullable: true }
+        type: { type: string, description: 事件类型，如 ASSIGN / TRANSFER / NUDGE / NUDGE_RESPONSE / MENTION / SUBMIT / APPROVE / REJECT / BLOCK / DECLINE / RELEASE / JOIN / TASK_PENDING_ACCEPTANCE / REMINDER_* / ITERATION_STARTED / ITERATION_FINISHED / JOIN_REQUEST 等 }
+        category: { type: string, enum: [ASSIGNMENT, NUDGE, MENTION, ITEM_UPDATE, REMINDER, SYSTEM], description: 通知类别（偏好开关与筛选口径） }
+        itemId: { type: integer, format: int64, nullable: true }
+        itemCode: { type: string, nullable: true }
+        actorId: { type: integer, format: int64, nullable: true }
+        content: { type: string }
+        readAt: { type: string, format: date-time, nullable: true }
+        createdAt: { type: string, format: date-time }
+    NotificationPrefs:
+      type: object
+      description: 类别 → 是否接收。ASSIGNMENT（被指派）与 NUDGE（被催）不可关闭
+      additionalProperties: { type: boolean }
+    NudgeResult:
+      type: object
+      properties:
+        itemId: { type: integer, format: int64 }
+        nudgedUserIds:
+          type: array
+          description: 实际被催到的负责人/验收人
+          items: { type: integer, format: int64 }
+        redirectedToLeader: { type: boolean, description: 是否因对象请假/出差改记给组长 }
+        nudgeCount: { type: integer, description: 催后事项本轮被催次数 }
+    KeyDate:
+      type: object
+      properties:
+        id: { type: integer, format: int64 }
+        iterationId: { type: integer, format: int64 }
+        title: { type: string }
+        date: { type: string, format: date }
+        category: { type: string, enum: [FREEZE, RELEASE, REVIEW, OTHER] }
+    BurndownPoint:
+      type: object
+      properties:
+        date: { type: string, format: date }
+        remainingEstimate: { type: number, description: 当日剩余估算（未完成事项估算合计，无估算按 0） }
+        remainingCount: { type: integer }
+        doneCount: { type: integer }
+    Burndown:
+      type: object
+      properties:
+        iteration: { $ref: '#/components/schemas/Iteration' }
+        points:
+          type: array
+          description: 实际线（快照点；迭代进行中时含当天实时点，live=true 标记）
+          items:
+            allOf:
+              - { $ref: '#/components/schemas/BurndownPoint' }
+              - type: object
+                properties:
+                  live: { type: boolean }
+        ideal:
+          type: array
+          description: 理想线：自首个快照总量按迭代工作日线性降至结束日 0
+          items: { $ref: '#/components/schemas/BurndownPoint' }
+        totalEstimate: { type: number, description: 首个快照的剩余估算（理想线起点） }
+    StandupMember:
+      type: object
+      properties:
+        userId: { type: integer, format: int64 }
+        memberStatus: { type: string }
+        yesterdayProgress:
+          type: array
+          description: 昨日（上一个工作日）登记的进展
+          items: { $ref: '#/components/schemas/ProgressUpdate' }
+        yesterdayDone:
+          type: array
+          description: 昨日完成的事项
+          items: { $ref: '#/components/schemas/Item' }
+        todayItems:
+          type: array
+          description: 今日在手：其负责的进行中/待开始事项
+          items: { $ref: '#/components/schemas/Item' }
+        blockedItems:
+          type: array
+          items: { $ref: '#/components/schemas/Item' }
+    Standup:
+      type: object
+      properties:
+        date: { type: string, format: date }
+        previousWorkday: { type: string, format: date }
+        members:
+          type: array
+          items: { $ref: '#/components/schemas/StandupMember' }
+        note: { type: string, nullable: true, description: 当日站会备注 }
+    RiskSignal:
+      type: object
+      properties:
+        rule: { type: string, enum: [STALE, BLOCKED_LONG, DUE_SOON, OVERDUE, ITERATION_BEHIND, OVERLOAD, REVIEW_BACKLOG, NUDGED_OFTEN, UNCLAIMED_PRIORITY] }
+        severity: { type: string, enum: [HIGH, MEDIUM, LOW] }
+        itemId: { type: integer, format: int64, nullable: true }
+        itemCode: { type: string, nullable: true }
+        userId: { type: integer, format: int64, nullable: true, description: 与成员相关的信号（超载/验收积压） }
+        message: { type: string }
+    OverviewMember:
+      type: object
+      properties:
+        userId: { type: integer, format: int64 }
+        memberStatus: { type: string }
+        memberStatusStart: { type: string, format: date, nullable: true }
+        memberStatusEnd: { type: string, format: date, nullable: true }
+        inProgressItems:
+          type: array
+          items: { $ref: '#/components/schemas/Item' }
+        lastProgressAt: { type: string, format: date-time, nullable: true, description: 其负责事项的最近进展时间 }
+        staleCount: { type: integer, description: 待更新数：进行中且超过提醒阈值无新进展的事项数 }
+        remainingPoints: { type: number, description: 剩余故事点（未完成负责事项估算按共同负责人均分） }
+        remainingCapacityPoints: { type: number, nullable: true, description: 剩余容量（当前迭代剩余可用工作日 × 容量系数；无进行中迭代为 null） }
+        free: { type: boolean, description: 无在做事项且未请假/出差时为 true（「谁有空」） }
+    Overview:
+      type: object
+      properties:
+        members:
+          type: array
+          items: { $ref: '#/components/schemas/OverviewMember' }
+        canViewRisks: { type: boolean }
+        risks:
+          type: array
+          items: { $ref: '#/components/schemas/RiskSignal' }
+        iterationHealth:
+          type: object
+          nullable: true
+          properties:
+            iteration: { $ref: '#/components/schemas/Iteration' }
+            completionRate: { type: integer, description: 完成率（已完成件数 / 非取消总件数，%） }
+            remainingEstimate: { type: number }
+            idealRemainingEstimate: { type: number }
+            behind: { type: boolean, description: 实际剩余高于理想线 20% 以上 }
+            blockedCount: { type: integer }
+            staleCount: { type: integer }
+    Report:
+      type: object
+      properties:
+        id: { type: integer, format: int64 }
+        teamId: { type: integer, format: int64 }
+        kind: { type: string, enum: [STANDUP_SUMMARY, WEEKLY, ITERATION_SUMMARY, PERSONAL_WEEKLY, RISK_SUMMARY] }
+        title: { type: string }
+        periodStart: { type: string, format: date, nullable: true }
+        periodEnd: { type: string, format: date, nullable: true }
+        ownerId: { type: integer, format: int64, nullable: true, description: 个人周报的归属人 }
+        content: { type: string, description: Markdown 正文 }
+        aiGenerated: { type: boolean, description: 正文是否由 AI 叙述生成（M4：事实表由程序算，AI 只写叙述且校验一致才采用；AI 关闭/不可用/校验不过时为程序模板 false） }
+        edited: { type: boolean }
+        editedByHuman: { type: boolean, description: 修订二——是否被人工编辑过（重新生成后重置 false） }
+        existed: { type: boolean, description: 仅 generate 响应——true 表示该周期已有报告、未新建 }
+        version: { type: integer }
+        iterationId: { type: integer, format: int64, nullable: true, description: 迭代总结所属迭代 }
+        lastGeneratedAt: { type: string, format: date-time, nullable: true }
+        deletedAt: { type: string, format: date-time, nullable: true, description: 软删除时间（回收站/墓碑） }
+        deletedById: { type: integer, format: int64, nullable: true, description: 删除人（Q9 统一回收站展示） }
+        restored: { type: boolean, description: 仅 generate 响应——Q1 墓碑被手动生成恢复时为 true }
+        allowedActions:
+          type: array
+          description: Q11——当前请求用户可执行的操作键（VIEW/EDIT/DELETE/RESTORE/REGENERATE/EXPORT）
+          items: { type: string }
+        createdAt: { type: string, format: date-time }
+        updatedAt: { type: string, format: date-time }
+    TrashEntry:
+      type: object
+      description: Q9 统一回收站条目（事项与报告合并）
+      properties:
+        kind: { type: string, enum: [ITEM, REPORT] }
+        id: { type: integer, format: int64 }
+        code: { type: string, nullable: true, description: 事项显示编号；报告为 null }
+        itemType: { type: string, nullable: true, description: 仅 ITEM }
+        reportKind: { type: string, nullable: true, description: 仅 REPORT }
+        title: { type: string }
+        deletedAt: { type: string, format: date-time }
+        deletedById: { type: integer, format: int64, nullable: true }
+        deletedByName: { type: string, nullable: true }
+    AiStatus:
+      type: object
+      properties:
+        platformEnabled: { type: boolean, description: 平台总开关（服务端配置） }
+        mode: { type: string, enum: [mock, live] }
+        available: { type: boolean, description: 平台可用（总开关开且 mock 或 live 配置完整） }
+        visionAvailable: { type: boolean, description: 识图是否可用（未配识图模型为 false，前端隐藏截图导入） }
+        textModel: { type: string, nullable: true }
+        visionModel: { type: string, nullable: true }
+        features:
+          type: object
+          description: 各功能合并可用状态（平台开关 + 小组逐项开关 + 配置完整性），键为 paste-import/quick-update/split-stories/summarize/risk-summary/qa
+          additionalProperties: { type: boolean }
+        teamSettings: { $ref: '#/components/schemas/TeamAiSettings' }
+    TeamAiSettings:
+      type: object
+      description: 小组 AI 逐项开关（缺省全开）
+      properties:
+        pasteImport: { type: boolean }
+        quickUpdate: { type: boolean }
+        splitStories: { type: boolean }
+        summarize: { type: boolean }
+        riskSummary: { type: boolean }
+        qa: { type: boolean }
+    AiCallLog:
+      type: object
+      properties:
+        id: { type: integer, format: int64 }
+        feature: { type: string }
+        model: { type: string, nullable: true }
+        durationMs: { type: integer, format: int64 }
+        promptTokens: { type: integer, nullable: true }
+        completionTokens: { type: integer, nullable: true }
+        success: { type: boolean }
+        error: { type: string, nullable: true }
+        createdAt: { type: string, format: date-time }
+    PasteImportRow:
+      type: object
+      description: 粘贴导入预览行（程序匹配后的结果）
+      properties:
+        externalId: { type: string, nullable: true }
+        title: { type: string }
+        type: { type: string, enum: [TASK], description: 导入的是任务 }
+        description: { type: string, nullable: true }
+        priority: { type: string, enum: [P0, P1, P2, P3] }
+        ownerName: { type: string, nullable: true }
+        ownerId: { type: integer, format: int64, nullable: true, description: 姓名匹配到的组内成员，对不上为 null }
+        estimate: { type: number, nullable: true }
+        dueDate: { type: string, format: date, nullable: true }
+        parentExternalId: { type: string, nullable: true }
+        sourceSnippet: { type: string, description: 对应原文片段 }
+        confidence: { type: number, description: 把握程度 0–1，低把握字段前端标黄 }
+        matchStatus: { type: string, enum: [NEW, UPDATE, UNCHANGED] }
+        existingItemId: { type: integer, format: int64, nullable: true }
+        diff:
+          type: object
+          description: UPDATE 时的字段差异 {字段名：{from,to}}
+          additionalProperties: { type: object }
+    QuickAction:
+      type: object
+      description: 一句话更新动作卡（解析返回与确认执行共用）
+      properties:
+        kind: { type: string, enum: [UPDATE_ITEM, CREATE_ITEM] }
+        itemId: { type: integer, format: int64, nullable: true, description: UPDATE_ITEM 的目标事项 }
+        itemCode: { type: string, nullable: true }
+        text: { type: string, nullable: true, description: 进展文字 }
+        percent: { type: integer, nullable: true }
+        submitReview: { type: boolean }
+        blocked: { type: boolean }
+        blockReason: { type: string, nullable: true }
+        needsBlockConfirm: { type: boolean, description: 有阻塞类说法但未明说阻塞，确认时需询问 }
+        candidateItemIds:
+          type: array
+          description: 拿不准时的候选事项（≤3）
+          items: { type: integer, format: int64 }
+        type: { type: string, nullable: true, description: CREATE_ITEM 的事项类型（STORY/DEFECT/ANALYSIS/ADHOC） }
+        title: { type: string, nullable: true }
+        ownerName: { type: string, nullable: true }
+        ownerId: { type: integer, format: int64, nullable: true }
+        dueDate: { type: string, format: date, nullable: true }
+    SplitStoriesResult:
+      type: object
+      properties:
+        taskId: { type: integer, format: int64 }
+        stories:
+          type: array
+          items:
+            type: object
+            properties:
+              storyCategory: { type: string, enum: [DEV, ANALYSIS, TEST, OTHER] }
+              title: { type: string }
+              description: { type: string }
+              estimate: { type: number, nullable: true, description: AI 估算，仅供参考 }
+        clarifyingQuestions:
+          type: array
+          items: { type: string }
+        acceptancePoints:
+          type: array
+          items: { type: string }
+    QaRecord:
+      type: object
+      properties:
+        id: { type: integer, format: int64 }
+        question: { type: string }
+        answer: { type: string }
+        found: { type: boolean }
+        refs:
+          type: array
+          items: { type: string }
+        createdAt: { type: string, format: date-time }
+    ImportRowInput:
+      type: object
+      properties:
+        externalId: { type: string, nullable: true }
+        title: { type: string }
+        description: { type: string, nullable: true }
+        priority: { type: string, enum: [P0, P1, P2, P3] }
+        estimate: { type: number, nullable: true, description: 估算 }
+        dueDate: { type: string, format: date, nullable: true }
+        externalUrl: { type: string, nullable: true }
+    ImportBatch:
+      type: object
+      properties:
+        id: { type: integer, format: int64 }
+        teamId: { type: integer, format: int64 }
+        creatorId: { type: integer, format: int64 }
+        source: { type: string, enum: [AI_PASTE, FILE_MAPPING, ADAPTER] }
+        total: { type: integer }
+        createdCount: { type: integer }
+        updatedCount: { type: integer }
+        createdItemIds:
+          type: array
+          items: { type: integer, format: int64 }
+        updatedItemIds:
+          type: array
+          items: { type: integer, format: int64 }
+        skipped: { type: integer }
+        undoneAt: { type: string, format: date-time, nullable: true }
+        createdAt: { type: string, format: date-time }
+        link: { type: string, description: 批次链接 }
+    IntegrationAdapter:
+      type: object
+      properties:
+        id: { type: integer, format: int64 }
+        teamId: { type: integer, format: int64 }
+        name: { type: string }
+        type: { type: string, enum: [MOCK, HTTP] }
+        systemName: { type: string, description: 外部系统名（同步识别键之一） }
+        config:
+          type: object
+          description: HTTP 配置（url/method/listPath/fields/priorityMap/typeMap/userMap/authType/authToken/authUser/authPassword 等）；密钥回显脱敏为 ***
+        enabled: { type: boolean }
+        consecutiveFailures: { type: integer }
+        createdBy: { type: integer, format: int64 }
+        createdAt: { type: string, format: date-time }
+        updatedAt: { type: string, format: date-time }
+    IntegrationAdapterInput:
+      type: object
+      properties:
+        name: { type: string }
+        type: { type: string, enum: [MOCK, HTTP] }
+        systemName: { type: string }
+        config: { type: object, description: 密钥只写不回显；PATCH 时传 *** 表示保留原值 }
+        enabled: { type: boolean }
+    SyncLog:
+      type: object
+      properties:
+        id: { type: integer, format: int64 }
+        adapterId: { type: integer, format: int64 }
+        teamId: { type: integer, format: int64 }
+        createdCount: { type: integer }
+        updatedCount: { type: integer }
+        failedCount: { type: integer }
+        message: { type: string, nullable: true }
+        success: { type: boolean }
+        createdAt: { type: string, format: date-time }

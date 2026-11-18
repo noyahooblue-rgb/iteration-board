@@ -1,0 +1,8 @@
+{
+  "api_key": "sk-REPLACE-ME-PLEASE",
+  "base_url": "http://127.0.0.1:8000/v1",
+  "prompts_dir": "",
+  "text_model": "deepseek-chat",
+  "timeout_seconds": 60,
+  "vision_model": ""
+}

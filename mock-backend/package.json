@@ -1,0 +1,2 @@
+{ "name": "iteration-board-mock-backend", "private": true, "version": "0.1.0", "type": "module",
+  "description": "浏览器内模拟后端：按 contract/openapi.yaml 在内存中实现 /api/v1。永不进 jar / 离线包，仅被演示环境的演示构建引用。" }

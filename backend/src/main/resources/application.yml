@@ -1,0 +1,47 @@
+server:
+  port: 8080
+  servlet:
+    session:
+      timeout: 8h
+      cookie:
+        http-only: true
+        same-site: lax
+
+spring:
+  application:
+    name: iteration-board
+  # 数据库口令等敏感值一律由环境变量注入，无默认值：启动前必须设置 DB_PASSWORD（见根 README「本地运行」）。
+  datasource:
+    url: ${DB_URL:jdbc:postgresql://localhost:5432/iteration_board}
+    username: ${DB_USERNAME:postgres}
+    password: ${DB_PASSWORD:}
+  jpa:
+    hibernate:
+      ddl-auto: validate
+    open-in-view: false
+    properties:
+      hibernate:
+        jdbc:
+          time_zone: UTC
+  flyway:
+    enabled: true
+    locations: classpath:db/migration
+
+app:
+  registration-open: ${REGISTRATION_OPEN:true}
+  demo-mode: ${DEMO_MODE:false}
+
+# AI 服务层：密钥只由环境变量注入；mode=mock 时返回结构化样例结果。
+ai:
+  base-url: ${AI_BASE_URL:}
+  api-key: ${AI_API_KEY:}
+  text-model: ${AI_TEXT_MODEL:}
+  vision-model: ${AI_VISION_MODEL:}
+  mode: ${AI_MODE:mock}
+  timeout-seconds: ${AI_TIMEOUT_SECONDS:60}
+  platform-enabled: ${AI_PLATFORM_ENABLED:true}
+  prompts-dir: ${AI_PROMPTS_DIR:config/prompts}
+
+logging:
+  level:
+    com.iterationboard: INFO
