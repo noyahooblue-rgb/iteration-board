@@ -161,6 +161,21 @@ try {
         Write-Host "::error::LOGTAIL ${ln}: $tail"
       }
     }
+    # 安装器自身日志（logs\）与 PG 日志（data\pg_log\）尾巴一并表面化：
+    # 阶段日志只到步骤横幅，真正的失败行在这些文件里。
+    foreach ($sub in @('logs', 'data\pg_log')) {
+      $dir = Join-Path $Root $sub
+      if (Test-Path $dir) {
+        Get-ChildItem $dir -File -ErrorAction SilentlyContinue |
+          Sort-Object LastWriteTime -Descending | Select-Object -First 3 |
+          ForEach-Object {
+            $tail = (Get-Content $_.FullName -Tail 18 | ForEach-Object { $_.Trim() }) -join ' // '
+            if ($tail.Length -gt 900) { $tail = $tail.Substring(0, 900) }
+            $tail = $tail -replace '%', '%25' -replace "`r", '%0D' -replace "`n", '%0A'
+            Write-Host "::error::LOGTAIL ${sub}/$($_.Name): $tail"
+          }
+      }
+    }
     exit 1
   }
   Write-Host 'SMOKE RESULT: ALL PASS'
