@@ -1,4 +1,4 @@
-// Windows runner E2E: drive a real browser DIRECTLY against the
+// Windows runner E2E (8eyn4mwp): drive a real browser DIRECTLY against the
 // installed application's own address (http://localhost:18080) - no proxy,
 // no mock. Flow: open / -> login page (must be HTML, never a 401 JSON body)
 // -> register an account (captcha read from the SVG the page itself
@@ -50,7 +50,11 @@ try {
   if (bodyText.includes('UNAUTHORIZED') || bodyText.trim().startsWith('{')) {
     fail('home page body looks like a JSON error instead of the SPA login page')
   }
-  if (!bodyText.includes('迭代小组平台')) fail('login page brand text not found')
+  // Brand lockup is an <img> since the brand integration (92c9828):
+  // the brand name lives in its alt attribute, which innerText does
+  // not include. Accept either the visible text or the lockup alt.
+  const lockupAlt = await page.locator('img.lockup').getAttribute('alt').catch(() => null)
+  if (!bodyText.includes('迭代小组平台') && lockupAlt !== '迭代小组平台') fail('login page brand text not found')
   await page.screenshot({ path: `${SHOTS}/01-home-login.png` })
   step('home page renders the login page (HTML 200, no 401 JSON)')
 
