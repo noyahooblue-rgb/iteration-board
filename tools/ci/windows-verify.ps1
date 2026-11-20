@@ -277,6 +277,17 @@ try {
   # password has been changed (it checks must_change_password in DB).
   $code = Run-Bat $Root 'stop.bat' @('--no-pause') 'p1b-stop.log'
   Check 'P1b stop.bat exit 0' ($code -eq 0)
+  # stop returns before the JVM has fully exited; an immediate start
+  # races the still-bound port / still-closing DB (first 1.1.0 runner
+  # round: P1b start failed, P3/P12 starts minutes later passed).
+  # Wait until both services report Stopped (max 60 s).
+  $settleDeadline = (Get-Date).AddSeconds(60)
+  while ((Get-Date) -lt $settleDeadline) {
+    $appSvc = Get-Service -Name 'IterationBoardApp' -ErrorAction SilentlyContinue
+    $pgSvc = Get-Service -Name 'IterationBoardPG' -ErrorAction SilentlyContinue
+    if ((-not $appSvc -or $appSvc.Status -eq 'Stopped') -and (-not $pgSvc -or $pgSvc.Status -eq 'Stopped')) { break }
+    Start-Sleep -Seconds 3
+  }
   $code = Run-Bat $Root 'start.bat' @('--no-pause') 'p1b-start.log'
   Check 'P1b start.bat exit 0' ($code -eq 0)
   Check 'P1b admin-initial-password.txt deleted by start.bat after password change' (-not (Test-Path $AdminPwFile))
@@ -411,6 +422,16 @@ try {
   Check 'P13 migration package produced (zip or split .001)' ($null -ne $migZip -or $null -ne $migVol)
   $code = Run-Bat $Root 'uninstall.bat' @('--yes', '--no-pause') 'p13-uninstall-a.log'
   Check 'P13 uninstall A exit 0 (data kept)' ($code -eq 0)
+  # Service names are machine-global: B's install can only register
+  # IterationBoardApp/PG once A's services are fully deleted (a
+  # just-deleted service lingers until its last handle closes).
+  $settleDeadline = (Get-Date).AddSeconds(60)
+  while ((Get-Date) -lt $settleDeadline) {
+    $appSvc = Get-Service -Name 'IterationBoardApp' -ErrorAction SilentlyContinue
+    $pgSvc = Get-Service -Name 'IterationBoardPG' -ErrorAction SilentlyContinue
+    if (-not $appSvc -and -not $pgSvc) { break }
+    Start-Sleep -Seconds 3
+  }
   Expand-Archive -Path $Zip -DestinationPath (Join-Path $Work 'pkgB') -Force
   $RootB = Join-Path $Work "pkgB\$PkgDirName"
   $script:RootB = $RootB
@@ -554,6 +575,7 @@ if ($script:Failures.Count -gt 0) {
   if ($script:Failures -match 'P1 ') { Dump-Tail 'p1-install.log' }
   if ($script:Failures -match 'P1b') { Dump-Tail 'p1-install.log'; Dump-Tail 'p1b-stop.log'; Dump-Tail 'p1b-start.log' }
   if ($script:Failures -match 'P12') { Dump-Tail 'p12-stop.log'; Dump-Tail 'p12-start.log' }
+  if ($script:Failures -match 'P13') { Dump-Tail 'p13-install-b.log' 25; Dump-Tail 'p13-uninstall-a.log'; Dump-Tail 'p13-export.log' }
   if ($script:Failures -match 'P2 ') { Dump-Tail 'p2-playwright.log' }
   if ($script:Failures -match 'P2b ') { Dump-Tail 'p2b-scenario-e.log' }
   if ($script:Failures -match 'P2c ') { Dump-Tail 'p2c-scenario-f.log' }

@@ -31,10 +31,10 @@ function fail(msg) { throw new Error(msg) }
 // appear over the workbench and intercept clicks until dismissed. Close
 // whichever is visible; safe to call when none is open.
 async function dismissOverlays(page) {
-  for (let i = 0; i < 4; i++) {
-    const btn = page.locator('button', { hasText: /^(知道了|跳过引导|知道了，开始使用)$/ }).first()
+  for (let i = 0; i < 6; i++) {
+    const btn = page.locator('button', { hasText: /^(知道了|跳过引导|知道了，开始使用)$/ }).last()
     if (await btn.count() === 0 || !(await btn.isVisible().catch(() => false))) return
-    await btn.click().catch(() => {})
+    await btn.click({ timeout: 3000 }).catch(() => {})
     await page.waitForTimeout(400)
   }
 }

@@ -218,8 +218,16 @@ exit /b 0
 
 rem --- subroutine: random password, 20 chars, upper+lower+digit -----
 :gen_password
+rem Generate a 20-char password (upper+lower+digit guaranteed) via
+rem PowerShell, returned through a temp file. The previous in-place
+rem for /f backtick one-liner silently produced an empty password on
+rem real Windows cmd (quote mangling inside for /f), which is why the
+rem built-in admin account was never created. No for /f and no nested
+rem double quotes here any more.
 set "ADMIN_PW="
-for /f "usebackq delims=" %%P in (`powershell -NoProfile -Command "$rng = [Security.Cryptography.RNGCryptoServiceProvider]::Create(); $sets = @('ABCDEFGHJKLMNPQRSTUVWXYZ','abcdefghijkmnpqrstuvwxyz','23456789'); $all = $sets -join ''; $pw = ''; do { $bytes = New-Object byte[] 64; $rng.GetBytes($bytes); $pw = -join (0..19 | ForEach-Object { $all[$bytes[$_] %% $all.Length] }) } while (-not ($pw -cmatch '[A-Z]' -and $pw -cmatch '[a-z]' -and $pw -match '[0-9]')); $pw"`) do set "ADMIN_PW=%%P"
+powershell -NoProfile -Command "$rng = [Security.Cryptography.RNGCryptoServiceProvider]::Create(); $sets = @('ABCDEFGHJKLMNPQRSTUVWXYZ','abcdefghijkmnpqrstuvwxyz','23456789'); $all = $sets -join ''; $pw = ''; do { $b = New-Object byte[] 64; $rng.GetBytes($b); $pw = -join (0..19 | ForEach-Object { $all[$b[$_] %% $all.Length] }) } while (-not ($pw -cmatch '[A-Z]' -and $pw -cmatch '[a-z]' -and $pw -match '[0-9]')); [IO.File]::WriteAllText($env:TEMP + '\ib-genpw.txt', $pw)"
+if exist "%TEMP%\ib-genpw.txt" set /p ADMIN_PW=<"%TEMP%\ib-genpw.txt"
+if exist "%TEMP%\ib-genpw.txt" del "%TEMP%\ib-genpw.txt"
 exit /b 0
 
 :ib_pause

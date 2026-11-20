@@ -47,10 +47,10 @@ const PNG_1X1 = 'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8Xw8
 // 1.1.0 first-run overlays (release-notes modal + onboarding guide)
 // intercept clicks until dismissed; close whichever is visible.
 async function dismissOverlays(page) {
-  for (let i = 0; i < 4; i++) {
-    const btn = page.locator('button', { hasText: /^(知道了|跳过引导|知道了，开始使用)$/ }).first()
+  for (let i = 0; i < 6; i++) {
+    const btn = page.locator('button', { hasText: /^(知道了|跳过引导|知道了，开始使用)$/ }).last()
     if (await btn.count() === 0 || !(await btn.isVisible().catch(() => false))) return
-    await btn.click().catch(() => {})
+    await btn.click({ timeout: 3000 }).catch(() => {})
     await page.waitForTimeout(400)
   }
 }
