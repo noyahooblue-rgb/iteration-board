@@ -41,8 +41,23 @@ public class NotifyService {
         if (recipient == null) return;
         if (!includeSelf && actor != null && recipient.getId().equals(actor.getId())) return;
         if (!NotificationPrefs.enabled(recipient, NotificationView.categoryOf(type))) return;
-        Notification n = new Notification(recipient, type, item, actor,
-                content == null ? null : (content.length() > 500 ? content.substring(0, 500) : content));
+        // P25 精简通知：开启后只收指派/邀请认领/@/催/待验收/加入申请类
+        if (NotificationPrefs.compactEnabled(recipient) && !NotificationPrefs.compactAllows(type)) return;
+        String safeContent = content == null ? null : (content.length() > 500 ? content.substring(0, 500) : content);
+        // P25 合并：同一事项、同类型、同一接收人在 5 分钟内的多条变化合并为一条（更新内容与时间，不新增）
+        if (item != null) {
+            var recent = notificationRepo.findRecent(recipient.getId(), type, item.getId(),
+                    java.time.Instant.now().minus(5, java.time.temporal.ChronoUnit.MINUTES));
+            if (!recent.isEmpty()) {
+                Notification existing = recent.get(recent.size() - 1);
+                existing.setContent(safeContent);
+                existing.setCreatedAt(java.time.Instant.now());
+                notificationRepo.save(existing);
+                sseRegistry.push(recipient.getId(), "notification", NotificationView.toMap(existing));
+                return;
+            }
+        }
+        Notification n = new Notification(recipient, type, item, actor, safeContent);
         n.setTeam(team);
         notificationRepo.save(n);
         sseRegistry.push(recipient.getId(), "notification", NotificationView.toMap(n));

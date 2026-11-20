@@ -3,6 +3,8 @@
   <div class="bar glass">
     <label class="small">日期 <input type="date" v-model="date" class="flexin" style="flex:0 0 170px" @change="load"/></label>
     <span class="small">上一工作日 {{data?.previousWorkday ?? '—'}} · {{team.iteration?.name ?? '无进行中迭代'}}</span>
+    <span class="small">摘要数据截至 {{data?.dataAsOf ? fmtTime(data.dataAsOf) : '—'}}</span>
+    <AppButton v-if="canRefresh" variant="ghost" :disabled="refreshLeft > 0 || refreshing" @click="refreshSummary">{{ refreshing ? '刷新中…' : refreshLeft > 0 ? `刷新（${refreshLeft}s）` : '刷新摘要' }}</AppButton>
     <span style="flex:1"/>
     <button v-if="members.length>1" class="small press walk" @click="nextSpeaker">站会走查：{{speaker ? '当前 '+team.memberName(speaker) : '点此开始'}} →</button>
   </div>
@@ -39,6 +41,17 @@ import AppShell from '../components/AppShell.vue'; import GlassPanel from '../co
 import { api, ApiError } from '../api/http'; import { MEMBER_STATUS_META, type StandupData, type Item } from '../api/types'
 import { useTeam } from '../stores/team'; import { useToast } from '../stores/toast'
 const team = useTeam(), toast = useToast()
+const fmtTime = (isoStr: string) => { const d = new Date(isoStr); return isNaN(d.getTime()) ? isoStr : `${String(d.getHours()).padStart(2,'0')}:${String(d.getMinutes()).padStart(2,'0')}` }
+import { useAuth } from '../stores/auth'
+const auth = useAuth(); void auth
+// P12：摘要头「数据截至 HH:MM」+ 组长/PO 刷新（1 分钟节流，按钮倒计时置灰）；逐人卡片始终实时，不受影响。
+const canRefresh = computed(()=> team.current?.myRole === 'LEADER' || team.current?.myRole === 'PO')
+const refreshLeft = ref(0), refreshing = ref(false)
+let refreshTimer: any = null
+function startRefreshCountdown(sec: number){ refreshLeft.value = sec; clearInterval(refreshTimer); refreshTimer = setInterval(() => { refreshLeft.value = Math.max(0, refreshLeft.value - 1); if (!refreshLeft.value) clearInterval(refreshTimer) }, 1000) }
+async function refreshSummary(){ if (refreshing.value || refreshLeft.value > 0) return; refreshing.value = true
+  try { data.value = await api.post(`/teams/${team.currentId}/standup/refresh?date=${date.value}`); noteDraft.value = data.value?.note ?? ''; startRefreshCountdown(60); toast.show('摘要已刷新') }
+  catch(e){ if (e instanceof ApiError && e.status === 429) { startRefreshCountdown(e.detail?.retryAfterSeconds ?? 60); toast.show(e.message) } else toast.show(e instanceof ApiError ? e.message : '刷新失败') } finally { refreshing.value = false } }
 const now = new Date(); const iso = (d:Date)=> `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}-${String(d.getDate()).padStart(2,'0')}`
 const date = ref(iso(now))
 const data = ref<StandupData|null>(null), speaker = ref<number|null>(null), noteDraft = ref(''), loading = ref(false), loadErr = ref('')

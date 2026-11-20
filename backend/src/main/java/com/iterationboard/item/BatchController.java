@@ -28,7 +28,8 @@ public class BatchController {
 
     public record BatchRequest(Enums.ItemType type, String title, String description, Enums.Priority priority,
                                List<Long> memberIds, Enums.StoryCategory storyCategory, Long parentId,
-                               LocalDate dueDate, BigDecimal estimate, Long iterationId) {}
+                               LocalDate dueDate, BigDecimal estimate, Long iterationId,
+                               Boolean includeCreator) {}
     public record CancelRequest(String reason) {}
 
     @PostMapping
@@ -42,7 +43,8 @@ public class BatchController {
         }
         var summary = batchService.create(teamId, u, new BatchService.BatchCmd(
                 req.type(), req.title(), req.description(), req.priority(), req.memberIds(),
-                req.storyCategory(), req.parentId(), req.dueDate(), req.estimate(), req.iterationId()));
+                req.storyCategory(), req.parentId(), req.dueDate(), req.estimate(), req.iterationId(),
+                req.includeCreator()));
         if (idemKey != null) return idempotency.remember(u.getId(), scope, idemKey, HttpStatus.CREATED.value(), summary);
         return ResponseEntity.status(HttpStatus.CREATED).body(summary);
     }

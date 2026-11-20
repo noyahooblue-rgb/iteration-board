@@ -18,6 +18,9 @@ export const seedUsers: (User & { password: string })[] = [
   { id: 9, loginName: 'zhengnan', displayName: '郑楠', avatarColor: '#FF6482', platformAdmin: false, mustChangePassword: false, password: DEMO_PASSWORD },
   // 平台管理员（M5 审计日志「全部小组」范围用）：不属于任何小组，仅平台级权限。
   { id: 10, loginName: 'admin', displayName: '平台管理员', avatarColor: '#636366', platformAdmin: true, mustChangePassword: false, password: DEMO_PASSWORD },
+  // P04 同名演示：两名「张三」同在极光小组（999），选人/显示姓名时须附带登录名消歧（不进云雀小组，不影响 9 人口径）。
+  { id: 11, loginName: 'zhangsan', displayName: '张三', avatarColor: '#30B0C7', platformAdmin: false, mustChangePassword: false, password: DEMO_PASSWORD },
+  { id: 12, loginName: 'zhangsan2', displayName: '张三', avatarColor: '#FF9500', platformAdmin: false, mustChangePassword: false, password: DEMO_PASSWORD },
 ]
 export const seedMembers = [
   { userId: 1, role: 'LEADER', memberStatus: 'NORMAL' }, { userId: 2, role: 'PO', memberStatus: 'NORMAL' },

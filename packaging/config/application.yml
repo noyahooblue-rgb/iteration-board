@@ -56,6 +56,16 @@ ai:
   platform-enabled: true
   prompts-dir: config/prompts
 
+# ------------------------------------------------------------
+# Backups (1.1.0). Directory for backup folders created by
+# backup.bat and the start/stop/upgrade/rollback scripts.
+# Empty (default) = the "backup" folder inside the install
+# folder. Set an absolute path to put backups on another
+# disk or a shared folder, e.g.  dir: "E:\\iteration-board-backup"
+# ------------------------------------------------------------
+backup:
+  dir: ""
+
 logging:
   level:
     com.iterationboard: INFO

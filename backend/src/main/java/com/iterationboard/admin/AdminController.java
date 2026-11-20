@@ -33,7 +33,7 @@ public class AdminController {
         this.currentUser = currentUser;
     }
 
-    public record AdminUserDto(Long id, String loginName, String displayName, boolean platformAdmin, Instant createdAt) { }
+    public record AdminUserDto(Long id, String loginName, String displayName, boolean platformAdmin, String status, Instant createdAt) { }
     public record AdminTeamDto(Long id, String name, String code, long memberCount, Instant createdAt) { }
 
     private void requirePlatformAdmin() {
@@ -47,7 +47,7 @@ public class AdminController {
         requirePlatformAdmin();
         return userRepo.findAll().stream()
                 .map(u -> new AdminUserDto(u.getId(), u.getLoginName(), u.getDisplayName(),
-                        u.isPlatformAdmin(), u.getCreatedAt()))
+                        u.isPlatformAdmin(), u.getStatus(), u.getCreatedAt()))
                 .toList();
     }
 

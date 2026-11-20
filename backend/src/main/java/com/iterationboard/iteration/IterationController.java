@@ -140,6 +140,20 @@ public class IterationController {
         return result;
     }
 
+    /** P18：结束迭代确认数据（将结转/退回事项数、将生成改进项与总结的说明）。 */
+    @GetMapping("/{iterationId}/close-preview")
+    public Map<String, Object> closePreview(@PathVariable Long teamId, @PathVariable Long iterationId) {
+        AppUser u = currentUser.require();
+        return iterationService.closePreview(teamId, iterationId, u);
+    }
+
+    /** P18：撤销结束（结束 24 小时内，组长）。 */
+    @PostMapping("/{iterationId}/undo-close")
+    public IterationService.UndoCloseResult undoClose(@PathVariable Long teamId, @PathVariable Long iterationId) {
+        AppUser u = currentUser.require();
+        return iterationService.undoClose(teamId, iterationId, u);
+    }
+
     @GetMapping("/{iterationId}/burndown")
     public Map<String, Object> burndown(@PathVariable Long teamId, @PathVariable Long iterationId) {
         AppUser u = currentUser.require();

@@ -28,7 +28,7 @@
       <span>{{m.remainingCapacityPoints ?? '—'}} 点</span>
       <span class="free" :class="m.free ? 'FREE' : 'BUSY'">{{m.free ? '有空' : '在忙'}}</span>
     </div>
-    <p class="tiny">剩余容量 = 剩余可用工作日 × 容量系数（小组设置）；「有空」指当前没有进行中事项且今日不在请假/出差。</p>
+    <p class="tiny">剩余容量 = 剩余可用工作日 × 容量系数（小组设置）；「有空」指当前没有进行中事项且今日不在请假/出差。口径（P13）：进行中的独立事项（缺陷/分析/临时事项）计入个人负载与总览剩余点数，但不计入燃尽图；成员行「在做」含独立事项，迭代外事项数见迭代页「迭代外工作」区块。</p>
   </GlassPanel>
 
   <GlassPanel class="panel" v-if="data?.canViewRisks">

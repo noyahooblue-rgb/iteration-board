@@ -61,6 +61,38 @@ return memberRepo.findByTeamIdAndUserId(teamId, u.getId())
 }
 private static boolean eq(AppUser a, AppUser b) { return a!= null && b!= null && a.getId().equals(b.getId());}
 
+/**
+ * P17 自动转交：在组长/PO 中找一位非负责人、非现验收人的成员，优先与现验收人不同角色者。
+ * 找不到（例如小组只有负责人本人具备验收角色）返回 null。
+ */
+/** P17：按小组设置「故事默认验收角色」取验收人，无该角色成员时用回落人。 */
+private AppUser resolveStoryAcceptor(Long teamId, AppUser fallback) {
+String role = "PO";
+try {
+var team = teamRepo.findById(teamId).orElse(null);
+role = com.iterationboard.team.TeamSettings.from(team).storyAcceptorRole;
+} catch (Exception ignored) { }
+for (TeamMember m : memberRepo.findByTeamId(teamId)) {
+if (m.getRole().name().equals(role)) return m.getUser();
+}
+return fallback;
+}
+
+private AppUser findAlternateAcceptor(Item item, AppUser currentAcceptor) {
+Long teamId = item.getTeam().getId();
+Role currentRole = memberRepo.findByTeamIdAndUserId(teamId, currentAcceptor.getId())
+.map(TeamMember::getRole).orElse(null);
+List<TeamMember> candidates = memberRepo.findByTeamId(teamId).stream()
+.filter(m -> m.getRole() == Role.LEADER || m.getRole() == Role.PO)
+.filter(m -> !m.getUser().getId().equals(currentAcceptor.getId()))
+.filter(m -> !isOwner(item, m.getUser()))
+.toList();
+for (TeamMember m : candidates) {
+if (currentRole == null || m.getRole() != currentRole) return m.getUser();
+}
+return candidates.isEmpty() ? null : candidates.get(0).getUser();
+}
+
 public boolean isOwner(Item item, AppUser u) {
 return u!= null && ownerRepo.existsByItemIdAndUserId(item.getId(), u.getId());
 }
@@ -111,19 +143,19 @@ Long teamId = item.getTeam().getId();
 
 // TASK 任务：不参与普通流转；仅 PO 的 APPROVE（待验收→已完成）与 CANCEL（取消任务）。
 if (item.getType() == ItemType.TASK) {
-boolean isPo = eq(item.getPo(), actor)
-|| memberRepo.findByTeamIdAndUserId(teamId, actor.getId()).map(m -> m.getRole() == Role.PO).orElse(false);
+// P17：组长和 PO 都可验收/打回/取消任务（默认验收角色由小组设置决定谁是主验收人，两角色均有验收资格）
+boolean isPo = eq(item.getPo(), actor) || isLeaderOrPo(teamId, actor);
 switch (action) {
 case APPROVE -> {
 if (from!= ItemStatus.IN_REVIEW) throw illegal(item, action);
-if (!isPo) throw ApiException.forbidden("仅 PO 可验收通过任务");
+if (!isPo) throw ApiException.forbidden("仅组长或 PO 可验收通过任务");
 item.setStatus(ItemStatus.DONE);
 item.setProgressPercent(100);
 notifyService.notify(item.getCreator(), "APPROVE", item, actor, "任务已验收通过");
 }
 case CANCEL -> {
 if (from == ItemStatus.DONE || from == ItemStatus.CANCELLED) throw illegal(item, action);
-if (!isPo) throw ApiException.forbidden("仅 PO 可取消任务");
+if (!isPo) throw ApiException.forbidden("仅组长或 PO 可取消任务");
 requireReason(reason);
 item.setStatus(ItemStatus.CANCELLED);
 // 任务被取消 → 通知创建人（与普通事项 CANCEL 口径一致；操作者本人由 NotifyService 自动跳过）
@@ -133,7 +165,7 @@ case REJECT -> {
 // 任务打回（M3，验收批复待问 1 定稿）：必须说明原因，且必须同时重开已完成故事或新建补充故事，
 // 不允许「没有任何故事可做」的打回；任务状态由故事推算回到进行中。
 if (from != ItemStatus.IN_REVIEW) throw illegal(item, action);
-if (!isPo) throw ApiException.forbidden("仅 PO 可打回任务");
+if (!isPo) throw ApiException.forbidden("仅组长或 PO 可打回任务");
 requireReason(reason);
 List<Long> reopenIds = extras == null || extras.reopenItemIds() == null ? List.of() : extras.reopenItemIds();
 List<NewStoryInput> newStories = extras == null || extras.newStories() == null ? List.of() : extras.newStories();
@@ -177,7 +209,7 @@ story.setTitle(ns.title());
 story.setParent(item);
 story.setStoryCategory(ns.storyCategory());
 story.setCreator(actor);
-story.setAcceptor(item.getPo() != null ? item.getPo() : actor);
+story.setAcceptor(resolveStoryAcceptor(teamId, item.getPo() != null ? item.getPo() : actor));
 story.setStatus(ItemStatus.UNCLAIMED);
 story.setSortOrder(nextSort++);
 itemRepo.save(story);
@@ -211,15 +243,32 @@ item.setStatus(ItemStatus.IN_PROGRESS);
 case SUBMIT -> {
 if (from!= ItemStatus.IN_PROGRESS) throw illegal(item, action);
 if (!isOwner(item, actor)) throw ApiException.forbidden("仅负责人可提交验收");
-// 验收人就是提交人本人时直接完成
-item.setStatus(eq(item.getAcceptor(), actor)? ItemStatus.DONE: ItemStatus.IN_REVIEW);
+// P17：任何人不能验收自己负责（含共同负责）的事项——验收人若是负责人之一，自动转交另一角色
+AppUser acc = item.getAcceptor();
+if (acc != null && isOwner(item, acc)) {
+AppUser alt = findAlternateAcceptor(item, acc);
+if (alt != null) {
+item.setAcceptor(alt);
+item.setAcceptorNote("原验收人是本事项负责人，不能验收自己负责的事项，已自动转交由 " + alt.getDisplayName() + " 验收");
+item.setStatus(ItemStatus.IN_REVIEW);
+notifyService.notify(alt, "SUBMIT", item, actor, "事项已提交验收（原验收人为事项负责人，自动转交你验收），请处理");
+} else if (eq(acc, actor)) {
+item.setStatus(ItemStatus.DONE); // 无其他可转交角色时维持既有自验收完成口径
+} else {
+item.setStatus(ItemStatus.IN_REVIEW);
+notifyService.notify(acc, "SUBMIT", item, actor, "事项已提交验收，请处理");
+}
+} else {
+item.setStatus(eq(acc, actor)? ItemStatus.DONE: ItemStatus.IN_REVIEW);
 if (item.getStatus() == ItemStatus.IN_REVIEW) {
 notifyService.notify(item.getAcceptor(), "SUBMIT", item, actor, "事项已提交验收，请处理");
 }
 }
+}
 case APPROVE -> {
 if (from!= ItemStatus.IN_REVIEW) throw illegal(item, action);
-if (!eq(item.getAcceptor(), actor) &&!isLeader(teamId, actor)) throw ApiException.forbidden("仅验收人或组长可通过验收");
+if (isOwner(item, actor)) throw ApiException.forbidden("不能验收自己负责的事项（P17），请等待自动转交的验收人处理");
+if (!eq(item.getAcceptor(), actor) &&!isLeaderOrPo(teamId, actor)) throw ApiException.forbidden("仅验收人、组长或 PO 可通过验收");
 item.setStatus(ItemStatus.DONE);
 for (ItemOwner o : ownerRepo.findByItemId(item.getId())) {
 notifyService.notify(o.getUser(), "APPROVE", item, actor, "事项已验收通过");
@@ -227,7 +276,8 @@ notifyService.notify(o.getUser(), "APPROVE", item, actor, "事项已验收通过
 }
 case REJECT -> {
 if (from!= ItemStatus.IN_REVIEW) throw illegal(item, action);
-if (!eq(item.getAcceptor(), actor) &&!isLeader(teamId, actor)) throw ApiException.forbidden("仅验收人或组长可打回");
+if (isOwner(item, actor)) throw ApiException.forbidden("不能验收自己负责的事项（P17），请等待自动转交的验收人处理");
+if (!eq(item.getAcceptor(), actor) &&!isLeaderOrPo(teamId, actor)) throw ApiException.forbidden("仅验收人、组长或 PO 可打回");
 requireReason(reason);
 item.setStatus(ItemStatus.IN_PROGRESS);
 for (ItemOwner o : ownerRepo.findByItemId(item.getId())) {

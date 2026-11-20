@@ -12,15 +12,23 @@ import java.util.Map;
 public class MetaController {
     private final boolean registrationOpen;
     private final boolean demoMode;
+    private final com.iterationboard.admin.VersionInfo versionInfo;
 
     public MetaController(@Value("${app.registration-open:true}") boolean registrationOpen,
-                          @Value("${app.demo-mode:false}") boolean demoMode) {
+                          @Value("${app.demo-mode:false}") boolean demoMode,
+                          com.iterationboard.admin.VersionInfo versionInfo) {
         this.registrationOpen = registrationOpen;
         this.demoMode = demoMode;
+        this.versionInfo = versionInfo;
     }
 
     @GetMapping("/meta")
     public Map<String, Object> meta() {
-        return Map.of("registrationOpen", registrationOpen, "demoMode", demoMode);
+        Map<String, Object> m = new java.util.LinkedHashMap<>();
+        m.put("registrationOpen", registrationOpen);
+        m.put("demoMode", demoMode);
+        m.put("version", versionInfo.version());
+        m.put("buildDate", versionInfo.buildDate());
+        return m;
     }
 }

@@ -17,10 +17,12 @@ import java.util.Map;
 @RequestMapping("/api/v1/teams")
 public class TeamController {
     private final TeamService teamService;
+    private final HandoverService handoverService;
     private final CurrentUser currentUser;
 
-    public TeamController(TeamService teamService, CurrentUser currentUser) {
+    public TeamController(TeamService teamService, HandoverService handoverService, CurrentUser currentUser) {
         this.teamService = teamService;
+        this.handoverService = handoverService;
         this.currentUser = currentUser;
     }
 
@@ -122,6 +124,55 @@ public class TeamController {
     public ResponseEntity<Void> leave(@PathVariable Long teamId) {
         teamService.leave(teamId, currentUser.require());
         return ResponseEntity.noContent().build();
+    }
+
+    /** P05：组长移出成员（须先完成离组交接，否则 409 HANDOVER_PENDING）。 */
+    @DeleteMapping("/{teamId}/members/{userId}")
+    public ResponseEntity<Void> removeMember(@PathVariable Long teamId, @PathVariable Long userId) {
+        teamService.removeMember(teamId, userId, currentUser.require());
+        return ResponseEntity.noContent().build();
+    }
+
+    /** P05：待处理清单查询（移出/退出/停用前）。 */
+    @GetMapping("/{teamId}/members/{userId}/handover-pending")
+    public List<Map<String, Object>> handoverPending(@PathVariable Long teamId, @PathVariable Long userId) {
+        AppUser u = currentUser.require();
+        teamService.requireMember(teamId, u);
+        if (!u.getId().equals(userId)) teamService.requireLeader(teamId, u);
+        return handoverService.pending(teamId, userId).stream().map(HandoverService.PendingEntry::toMap).toList();
+    }
+
+    public record HandoverActionRequest(Long itemId, String action, Long targetUserId) {}
+    public record HandoverRequest(List<HandoverActionRequest> actions) {}
+
+    /** P05：逐条交接（TRANSFER 转交他人 / RETURN_TO_POOL 退回认领池）。 */
+    @PostMapping("/{teamId}/members/{userId}/handover")
+    public Map<String, Object> handover(@PathVariable Long teamId, @PathVariable Long userId,
+                                        @RequestBody HandoverRequest req) {
+        AppUser u = currentUser.require();
+        teamService.requireMember(teamId, u);
+        if (!u.getId().equals(userId)) teamService.requireLeader(teamId, u);
+        List<HandoverService.HandoverAction> actions = (req == null || req.actions() == null ? List.<HandoverActionRequest>of() : req.actions())
+                .stream().map(a -> new HandoverService.HandoverAction(a.itemId(), a.action(), a.targetUserId())).toList();
+        return handoverService.apply(teamId, userId, actions);
+    }
+
+    /** P05：一键全部退回认领池（验收人改为组长）。 */
+    @PostMapping("/{teamId}/members/{userId}/handover/return-all")
+    public Map<String, Object> handoverReturnAll(@PathVariable Long teamId, @PathVariable Long userId) {
+        AppUser u = currentUser.require();
+        teamService.requireMember(teamId, u);
+        if (!u.getId().equals(userId)) teamService.requireLeader(teamId, u);
+        return handoverService.returnAll(teamId, userId);
+    }
+
+    /** P19：请假期间到期事项清单。 */
+    @GetMapping("/{teamId}/members/{userId}/leave-due-items")
+    public List<Map<String, Object>> leaveDueItems(@PathVariable Long teamId, @PathVariable Long userId,
+                                                   @RequestParam(required = false) java.time.LocalDate start,
+                                                   @RequestParam(required = false) java.time.LocalDate end) {
+        teamService.requireMember(teamId, currentUser.require());
+        return handoverService.dueItemsDuring(teamId, userId, start, end);
     }
 
     @PatchMapping("/{teamId}/members/{userId}/status")

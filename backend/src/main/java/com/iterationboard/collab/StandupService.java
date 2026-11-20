@@ -85,10 +85,31 @@ public class StandupService {
         }
         Map<String, Object> out = new LinkedHashMap<>();
         out.put("date", date);
+        // P12：摘要「数据截至」时间戳（逐人卡片本身始终实时聚合）
+        out.put("dataAsOf", java.time.Instant.now());
         out.put("previousWorkday", prev);
         out.put("members", members);
         out.put("note", noteRepo.findByTeamIdAndNoteDate(teamId, date).map(StandupNote::getContent).orElse(null));
         return out;
+    }
+
+    private final java.util.Map<Long, java.time.Instant> lastRefreshByTeam = new java.util.concurrent.ConcurrentHashMap<>();
+
+    /** P12：组长/PO 刷新站会摘要（1 分钟节流）；逐人卡片走 standup() 实时聚合，此处只刷新摘要时间戳口径。 */
+    @Transactional(readOnly = true)
+    public Map<String, Object> refresh(Long teamId, AppUser user, LocalDate date) {
+        TeamMember me = teamService.requireMember(teamId, user);
+        if (me.getRole() != Role.LEADER && me.getRole() != Role.PO) {
+            throw com.iterationboard.common.ApiException.forbidden("仅组长或 PO 可刷新站会摘要");
+        }
+        java.time.Instant now = java.time.Instant.now();
+        java.time.Instant last = lastRefreshByTeam.get(teamId);
+        if (last != null && last.plus(1, java.time.temporal.ChronoUnit.MINUTES).isAfter(now)) {
+            throw new com.iterationboard.common.ApiException(org.springframework.http.HttpStatus.TOO_MANY_REQUESTS,
+                    "REFRESH_THROTTLED", "站会摘要刷新过于频繁，请 1 分钟后再试");
+        }
+        lastRefreshByTeam.put(teamId, now);
+        return standup(teamId, user, date);
     }
 
     @Transactional

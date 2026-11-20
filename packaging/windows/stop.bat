@@ -13,6 +13,14 @@ if errorlevel 1 (
   call :ib_pause
   exit /b 1
 )
+rem P23 (1.1.0): take one backup BEFORE stopping, while
+rem PostgreSQL is still up. backup.bat in auto mode never
+rem pauses and exits 0 when the services are already stopped
+rem (it logs a [SKIP] line instead), and a failed backup must
+rem never block the stop - so the result is not checked here.
+echo [INFO] Taking a pre-stop backup ...
+call "%ROOT%\backup.bat" auto
+echo [INFO] Pre-stop backup step finished - stopping services.
 net stop IterationBoardApp >nul 2>&1
 if errorlevel 1 echo [WARN] IterationBoardApp stop returned an error - it may already be stopped.
 rem PostgreSQL is stopped through pg_ctl: it signals the

@@ -6,7 +6,7 @@
     <div v-if="item.nudgeCount>0" class="banner yellow"><Zap :size="19"/><span class="grow"><b>已被催办 {{item.nudgeCount}} 次</b>，请尽快更新进展或回复状态。<span class="quick-replies">
       <button class="qr press" :disabled="busy.is('respond')" @click="respondNudge('SOON')">马上更新</button>
       <button class="qr press" :disabled="busy.is('respond')" @click="respondNudge('TODAY')">今天搞定</button>
-      <button class="qr press" :disabled="busy.is('respond')" @click="respondNudge('BLOCKED')">卡住了</button></span></span></div>
+      <button class="qr press" :disabled="busy.is('respond')" @click="openBlocked">卡住了</button></span></span></div>
 
     <div class="head"><TypeBadge :type="item.type" :story-category="item.storyCategory"/><span v-if="item.batchId" class="btag">批次 #{{item.batchId}}</span><span class="small">{{item.code}}</span><span style="flex:1"/>
       <button class="icon press" aria-label="关闭" @click="$emit('close')"><X :size="18"/></button>
@@ -29,11 +29,11 @@
     <div class="attrs">
       <div class="attr rel"><span>负责人</span><b class="avaline" :class="{editable:canInlineEdit && item.type!=='TASK'}" @click="toggleEdit('owners')"><Avatar v-if="item.ownerIds.length" :name="team.memberName(item.ownerIds[0])" :color="team.member(item.ownerIds[0])?.avatarColor" :size="22"/>{{item.ownerIds.length ? item.ownerIds.map(id=>team.memberName(id)).join('、') : '未认领'}}<Pencil v-if="canInlineEdit && item.type!=='TASK'" :size="13" class="pen"/></b>
         <div v-if="editField==='owners'" class="pop glass">
-          <label v-for="m in team.members" :key="m.userId" class="poprow"><input type="checkbox" :value="m.userId" v-model="ownerDraft"/>{{m.displayName}}<span class="tiny">{{m.role==='LEADER'?'组长':m.role==='PO'?'PO':'成员'}}</span></label>
+          <label v-for="m in team.members" :key="m.userId" class="poprow"><input type="checkbox" :value="m.userId" v-model="ownerDraft"/>{{memberLabel(team.members, m)}}<span class="tiny">{{m.role==='LEADER'?'组长':m.role==='PO'?'PO':'成员'}}</span></label>
           <div class="popfoot"><AppButton variant="ghost" @click="editField=null">取消</AppButton><AppButton @click="saveOwners">保存</AppButton></div>
         </div></div>
       <div class="attr"><span>协作人</span><b>{{item.collaboratorIds.map(id=>team.memberName(id)).join('、')||'无'}}</b></div>
-      <div class="attr"><span>验收人</span><b class="avaline"><Avatar v-if="item.acceptorId" :name="team.memberName(item.acceptorId)" :color="team.member(item.acceptorId)?.avatarColor" :size="22"/>{{item.acceptorId ? team.memberName(item.acceptorId) : '未设置'}}</b></div>
+      <div class="attr"><span>验收人</span><b class="avaline"><Avatar v-if="item.acceptorId" :name="team.memberName(item.acceptorId)" :color="team.member(item.acceptorId)?.avatarColor" :size="22"/>{{item.acceptorId ? team.memberName(item.acceptorId) : '未设置'}}</b><span v-if="item.acceptorAutoTransferred" class="tiny" style="display:block;color:var(--c-adhoc)">原默认验收人是负责人本人，已按规则自动转交（不能验收自己的事项，P17）</span></div>
       <div class="attr rel"><span>优先级</span><b :class="{editable:canInlineEdit}" @click="toggleEdit('priority')"><span class="prio" :class="item.priority">{{item.priority}}</span><Pencil v-if="canInlineEdit" :size="13" class="pen"/></b>
         <div v-if="editField==='priority'" class="pop glass"><div class="poprow" style="gap:8px"><button v-for="p in ['P0','P1','P2','P3']" :key="p" class="prio press" :class="p" @click="savePriority(p)">{{p}}</button></div></div></div>
       <div class="attr rel"><span>截止日期</span><b :class="{editable:canInlineEdit}" @click="toggleEdit('due')">{{item.dueDate ? fmtDue(item.dueDate) : '未设置'}}<span v-if="dueState==='over'" class="overdue"> 已逾期</span><span v-else-if="dueState==='today'" class="overdue"> 今天到期</span><Pencil v-if="canInlineEdit" :size="13" class="pen"/></b>
@@ -100,6 +100,12 @@
     </div>
   </template>
 
+  <Modal :open="blockedOpen" @close="blockedOpen=false">
+    <h2>卡住了 · 说清原因</h2>
+    <p class="small">被催后反馈「卡住了」必须写一句话原因，会作为阻塞原因同步给催办人和组长。</p>
+    <AppInput v-model="blockedReason" type="textarea" label="阻塞原因（必填）" placeholder="如：等设计稿确认，评审排到周四"/>
+    <div style="display:flex;gap:10px;justify-content:flex-end;margin-top:14px"><AppButton variant="ghost" @click="blockedOpen=false">返回</AppButton><AppButton variant="danger" :disabled="!blockedReason.trim()" @click="confirmBlocked">提交并标记阻塞</AppButton></div>
+  </Modal>
   <Modal :open="!!reasonAction" @close="reasonAction=null">
     <h2>{{reasonAction==='REJECT'?'打回原因':reasonAction==='RELEASE'?'释放原因':reasonAction==='DECLINE'?'婉拒原因':'取消原因'}}</h2>
     <AppInput v-model="reason" type="textarea" label="原因（必填）" placeholder="说清原因，对方会看到"/>
@@ -113,7 +119,7 @@
       <select v-model.number="replaceDraft" class="flexin" style="margin-top:6px">
         <option v-for="oid in item.ownerIds" :key="oid" :value="oid">{{team.memberName(oid)}}</option>
       </select></label>
-    <div class="tlist"><button v-for="m in team.members" :key="m.userId" class="child press" @click="transfer(m.userId)"><Avatar :name="m.displayName" :color="m.avatarColor"/><span>{{m.displayName}}</span></button></div>
+    <div class="tlist"><button v-for="m in team.members" :key="m.userId" class="child press" @click="transfer(m.userId)"><Avatar :name="m.displayName" :color="m.avatarColor"/><span>{{memberLabel(team.members, m)}}</span></button></div>
   </Modal>
   <Modal :open="taskRejectOpen" @close="taskRejectOpen=false">
     <h2>打回任务</h2>
@@ -141,7 +147,8 @@ import Drawer from './Drawer.vue'; import Modal from './Modal.vue'; import AppBu
 import StatusPill from './StatusPill.vue'; import EditItemModal from './EditItemModal.vue'; import { STATUS_META, TYPE_META, STORY_CAT_META, TASK_STATUS_META } from '../api/types'; import TypeBadge from './TypeBadge.vue'; import Avatar from './Avatar.vue'; import ProgressBar from './ProgressBar.vue'
 import MentionInput from './MentionInput.vue'; import { mentionSegments } from '../utils/mention'; import { fmtDateTime, localToday } from '../utils/datetime'
 import { api, ApiError } from '../api/http'; import type { Item, ProgressUpdate, Comment, Activity } from '../api/types'
-import { useTeam } from '../stores/team'; import { useAuth } from '../stores/auth'; import { useToast } from '../stores/toast'; import { useBusy } from '../utils/busy'
+import { useTeam } from '../stores/team'; import { useAuth } from '../stores/auth'; import { memberLabel } from '../utils/memberLabel'
+import { useToast } from '../stores/toast'; import { useBusy } from '../utils/busy'
 const props = defineProps<{open:boolean; itemId:number|null}>()
 const emit = defineEmits(['close','changed','open-item'])
 const team = useTeam(), auth = useAuth(), toast = useToast(), busy = useBusy()
@@ -156,6 +163,10 @@ const checklist = ref<import('../api/types').ChecklistEntry[]>([]), newCheck = r
 const editField = ref<string|null>(null), ownerDraft = ref<number[]>([]), dueDraft = ref(''), estimateDraft = ref(''), labelsDraft = ref('')
 const replaceDraft = ref<number|null>(null)
 const taskRejectOpen = ref(false), reopenDraft = ref<number[]>([]), newStoryDraft = ref<{title:string;storyCategory:string}[]>([])
+const blockedOpen = ref(false), blockedReason = ref('')
+function openBlocked(){ blockedReason.value = ''; blockedOpen.value = true }
+async function confirmBlocked(){ if (!blockedReason.value.trim()) { toast.show('请填写阻塞原因'); return } blockedOpen.value = false; if (!item.value) return
+  await busy.wrap('respond', async () => { try { await api.post(`/teams/${team.currentId}/items/${item.value!.id}/nudge/respond`, { response: 'BLOCKED', blockReason: blockedReason.value.trim() }); toast.show('已回应：卡住了（原因已同步）'); emit('changed'); load() } catch(e) { toast.show(e instanceof ApiError ? (e.status===404 ? '没有待回应的催' : e.message) : '回应失败') } }) }
 const canInlineEdit = computed(()=> { const it = item.value; if (!it) return false; if (it.allowedActions) return it.allowedActions.includes('EDIT'); return !!auth.user && (team.current?.myRole==='LEADER' || team.current?.myRole==='PO' || it.creatorId===auth.user.id || it.ownerIds.includes(auth.user.id)) }) // Q11：优先读 DTO allowedActions
 const canManageLabels = computed(()=> team.current?.myRole==='LEADER' || team.current?.myRole==='PO')
 const editCommentId = ref<number|null>(null), editCommentText = ref(''), commentBusy = ref(false)

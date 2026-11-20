@@ -23,6 +23,9 @@ public class Iteration {
     private String status = "PLANNING";
     @Column(name = "closed_at")
     private Instant closedAt;
+    /** P18：结束迭代快照 JSON（结转前事项归属、自动生成改进项/总结 id），供 24 小时内撤销结束恢复。 */
+    @Column(name = "close_snapshot_json")
+    private String closeSnapshotJson;
 
     public Long getId() { return id; }
     public Team getTeam() { return team; }
@@ -39,4 +42,6 @@ public class Iteration {
     public void setStatus(String v) { status = v; }
     public Instant getClosedAt() { return closedAt; }
     public void setClosedAt(Instant v) { closedAt = v; }
+    public String getCloseSnapshotJson() { return closeSnapshotJson; }
+    public void setCloseSnapshotJson(String v) { closeSnapshotJson = v; }
 }

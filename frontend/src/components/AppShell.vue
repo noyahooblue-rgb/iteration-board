@@ -23,6 +23,10 @@
       <RouterLink to="/settings" class="nitem press" :class="{on:route.path==='/settings'}" title="小组设置"><Settings :size="19"/><span v-if="!ui.collapsed">小组设置</span>
         <!-- 组长待审批加入申请数（1.0.4 A）：审批 UI 在小组设置「加入申请」页签，故角标挂在小组设置入口；数据源 GET /teams/{id}/join-requests -->
         <span v-if="shell.pendingJoins > 0" class="badge-n" :class="{ mini: ui.collapsed }">{{ shell.pendingJoins > 99 ? '99+' : shell.pendingJoins }}</span></RouterLink>
+      <!-- 意见反馈（1.1.0 修订三四）：侧栏底部入口，任何页面打开抽屉 -->
+      <button class="nitem press" title="意见反馈" @click="ui.feedbackOpen=true"><MessageSquarePlus :size="19"/><span v-if="!ui.collapsed">意见反馈</span></button>
+      <!-- 帮助（1.1.0 修订三五.2）：打开随包离线说明书网页版（占位页，正文由文档阶段填充） -->
+      <a class="nitem press" href="/help/index.html" target="_blank" rel="noopener" title="帮助"><CircleHelp :size="19"/><span v-if="!ui.collapsed">帮助</span></a>
       <!-- 平台管理入口（1.0.4 I）：仅 platformAdmin 显示 -->
       <RouterLink v-if="auth.user?.platformAdmin" to="/admin" class="nitem press" :class="{on:route.path==='/admin'}" title="平台管理"><ShieldCheck :size="19"/><span v-if="!ui.collapsed">平台管理</span></RouterLink>
       <button class="nitem press collapse" title="收起/展开侧栏（Ctrl+B）" @click="ui.toggleCollapsed()"><PanelLeft :size="19"/><span v-if="!ui.collapsed">{{ ui.collapsed ? '展开侧栏' : '收起侧栏' }}</span></button>
@@ -53,8 +57,13 @@
       </span>
       <AppButton @click="ui.createOpen=true"><Plus :size="16"/>新建</AppButton>
     </header>
+    <!-- 备份过期横幅（P23）：仅平台管理员，超 3 天无成功备份时提示 -->
+    <div v-if="backupOverdue" class="backup-banner">⚠ 备份提醒：{{backupMsg || '已超过 3 天没有成功备份'}}，请管理员尽快检查备份设置（平台管理 → 系统信息可查看最近备份状态）。</div>
     <main class="content"><slot/></main>
   </div>
+  <FeedbackDrawer/>
+  <OnboardingGuide v-if="auth.user && team.currentId" :open="onboardOpen" :user-id="auth.user.id" :team-id="team.currentId" @close="onboardOpen=false"/>
+  <ReleaseNotesModal :open="notesOpen" :notes="releaseNotes" @close="notesOpen=false"/>
   <CreateItemModal @created="$emit('refresh')"/>
   <CommandPalette/>
 </div>
@@ -62,10 +71,15 @@
 <script setup lang="ts">
 import { computed, ref, watch } from 'vue'
 import { RouterLink, useRoute, useRouter } from 'vue-router'
-import { LayoutDashboard, KanbanSquare, Inbox, IterationCw, Layers, MessagesSquare, Gauge, FileText, Search, Plus, Bell, PanelLeft, ChevronDown, Shapes, Settings, CalendarRange, Sparkles, ShieldCheck } from 'lucide-vue-next'
+import { LayoutDashboard, KanbanSquare, Inbox, IterationCw, Layers, MessagesSquare, Gauge, FileText, Search, Plus, Bell, PanelLeft, ChevronDown, Shapes, Settings, CalendarRange, Sparkles, ShieldCheck, MessageSquarePlus, CircleHelp } from 'lucide-vue-next'
 import { NOTIFICATION_CATEGORY_META, type NotificationItem } from '../api/types'
 import { fmtDateTime } from '../utils/datetime'
 import Avatar from './Avatar.vue'; import AppButton from './AppButton.vue'; import CreateItemModal from './CreateItemModal.vue'; import CommandPalette from './CommandPalette.vue'
+import FeedbackDrawer from './FeedbackDrawer.vue'; import OnboardingGuide from './OnboardingGuide.vue'; import ReleaseNotesModal from './ReleaseNotesModal.vue'
+import { api } from '../api/http'
+import type { BackupStatus, ReleaseNotes } from '../api/types'
+import { tryDesktopNotify, playBeep } from '../utils/browserNotify'
+import { onboardingSeen } from '../utils/onboarding'
 import { onMounted, onUnmounted } from 'vue'
 import { useAi } from '../stores/ai'; import { useTeam } from '../stores/team'; import { useAuth } from '../stores/auth'; import { useUi } from '../stores/ui'; import { useToast } from '../stores/toast'; import { useShell } from '../stores/shell'
 defineEmits(['refresh'])
@@ -104,7 +118,8 @@ function onKey(e: KeyboardEvent){
 // ---------- 通知中心（M3）：未读数/列表/已读在 shell store（1.0.4 并入全局计数），SSE 实时推送也在 store ----------
 const bellOpen = ref(false)
 function toggleBell(){ bellOpen.value = !bellOpen.value; if (bellOpen.value) { shell.loadNotifs(); shell.loadUnread() } }
-async function openNotif(n: NotificationItem){ await shell.markRead(n) }
+async function openNotif(n: NotificationItem){ await shell.markRead(n); bellOpen.value = false; if (n.itemId) router.push(`/task/${n.itemId}`) }
+function navigateNotif(n: any){ if (n?.itemId) router.push(`/task/${n.itemId}`) }
 async function markAllRead(){ const ok = await shell.markAllRead(); toast.show(ok ? '已全部标为已读' : '操作失败') }
 // 路由变化刷新一次计数（1.0.4 A）：进入相应页面/处理后角标随之减少。
 watch(() => route.path, () => { shell.refresh() })
@@ -115,10 +130,21 @@ onMounted(async () => {
   // 全局元素兜底（1.0.4 B）：路由守卫已为 team 路由统一 loadTeams；这里再确保一次，刷新/书签直开任意页都正确。
   if (auth.user && !team.teams.length) { try { await team.loadTeams() } catch {} }
   shell.refresh()
-  shell.start((n: any) => { if (bellOpen.value) shell.loadNotifs(); if (n?.content) toast.show('新通知：' + n.content) })
+  shell.loadNotifPrefs()
+  shell.start((n: any) => { if (bellOpen.value) shell.loadNotifs(); if (n?.content) toast.show('新通知：' + n.content); tryDesktopNotify(n, navigateNotif); playBeep() })
+  checkBackup(); checkReleaseNotes(); checkOnboarding()
   if (team.currentId) aiStore.load(team.currentId)
 })
 onUnmounted(()=> { window.removeEventListener('keydown', onKey) })
+// ---------- 1.1.0 外壳层全局件：备份横幅 / 更新说明 / 新手引导 ----------
+const backupOverdue = ref(false), backupMsg = ref('')
+async function checkBackup(){ if (!auth.user?.platformAdmin) return; try { const b: BackupStatus = await api.get('/admin/backup-status'); backupOverdue.value = !!b.backupStale; backupMsg.value = b.backupStaleMessage ?? '' } catch {} }
+const releaseNotes = ref<ReleaseNotes | null>(null), notesOpen = ref(false)
+async function checkReleaseNotes(){ try { const rn: ReleaseNotes = await api.get('/release-notes'); releaseNotes.value = rn; if (!rn.read) notesOpen.value = true } catch {} }
+watch(() => ui.releaseNotesOpen, (v) => { if (v) { ui.releaseNotesOpen = false; if (releaseNotes.value) notesOpen.value = true; else checkReleaseNotes().then(() => { notesOpen.value = true }) } })
+const onboardOpen = ref(false)
+function checkOnboarding(){ if (auth.user && team.currentId && team.current?.myRole && !onboardingSeen(auth.user.id, team.currentId)) onboardOpen.value = true }
+watch(() => team.currentId, () => { checkOnboarding() })
 async function onSwitch(id:number){ teamMenu.value=false; if(id!==team.currentId){ await team.switchTeam(id); router.go(0) } }
 async function logout(){ await auth.logout(); router.push('/login') }
 </script>
@@ -176,6 +202,7 @@ nav{display:flex;flex-direction:column;gap:2px;margin-top:8px}
 .bp-time{font-size:11.5px;color:var(--text-3)}
 .bp-dot{flex:none;width:8px;height:8px;border-radius:50%;background:var(--c-red);margin-top:6px}
 .content{min-width:0}
+.backup-banner{background:rgba(255,59,48,.12);border:1px solid rgba(255,59,48,.4);color:var(--c-red);border-radius:14px;padding:10px 14px;font-size:13.5px;font-weight:600}
 @media(max-width:820px){
   .shell{flex-direction:column;padding:10px;gap:10px}
   .sidebar{flex-direction:row;align-items:center;width:100%;height:auto;position:static;padding:8px 10px;gap:6px;overflow-x:auto}

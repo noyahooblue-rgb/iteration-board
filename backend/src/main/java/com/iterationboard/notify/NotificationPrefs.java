@@ -44,6 +44,39 @@ public final class NotificationPrefs {
         return of(user).getOrDefault(category, true);
     }
 
+    /** P25 精简通知开关：存 preferences_json 根键 compactNotification（默认关）。 */
+    public static boolean compactEnabled(AppUser user) {
+        String json = user == null ? null : user.getPreferencesJson();
+        if (json == null || json.isBlank()) return false;
+        try {
+            return MAPPER.readTree(json).path("compactNotification").asBoolean(false);
+        } catch (Exception ignored) {
+            return false;
+        }
+    }
+
+    /** 精简模式下仍接收的类型：指派给我 / 邀请我认领 / @我 / 催我 / 待我验收 / 加入申请。 */
+    public static boolean compactAllows(String type) {
+        if (type == null) return false;
+        return switch (type) {
+            case "ASSIGN", "TRANSFER", "ACCEPTOR", "TASK_PENDING_ACCEPTANCE",
+                 "INVITE", "MENTION", "NUDGE", "SUBMIT", "JOIN_REQUEST" -> true;
+            default -> false;
+        };
+    }
+
+    public static String mergeCompact(AppUser user, boolean compact) {
+        try {
+            ObjectNode root = (user.getPreferencesJson() == null || user.getPreferencesJson().isBlank())
+                    ? MAPPER.createObjectNode()
+                    : (ObjectNode) MAPPER.readTree(user.getPreferencesJson());
+            root.put("compactNotification", compact);
+            return MAPPER.writeValueAsString(root);
+        } catch (Exception e) {
+            throw new IllegalStateException("preferences_json 处理失败", e);
+        }
+    }
+
     /** 合并写入偏好（不可关闭的类别强制 true），返回新的 preferences_json。 */
     public static String merge(AppUser user, Map<String, Boolean> patch) {
         try {

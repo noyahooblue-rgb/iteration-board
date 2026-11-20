@@ -40,6 +40,14 @@ public class CollabController {
         return standupService.standup(teamId, u, date == null ? platformTime.today() : date);
     }
 
+    /** P12：站会摘要刷新（组长/PO，1 分钟节流）。 */
+    @PostMapping("/standup/refresh")
+    public Map<String, Object> refreshStandup(@PathVariable Long teamId,
+                                              @RequestParam(required = false) LocalDate date) {
+        AppUser u = currentUser.require();
+        return standupService.refresh(teamId, u, date == null ? platformTime.today() : date);
+    }
+
     @PutMapping("/standup/note")
     public Map<String, Object> saveNote(@PathVariable Long teamId, @RequestBody NoteRequest req) {
         AppUser u = currentUser.require();

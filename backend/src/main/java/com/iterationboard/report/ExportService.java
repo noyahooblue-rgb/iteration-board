@@ -13,6 +13,7 @@ import org.springframework.transaction.annotation.Transactional;
 import java.io.ByteArrayOutputStream;
 import java.io.IOException;
 import java.io.UncheckedIOException;
+import java.util.ArrayList;
 import java.util.List;
 import java.util.stream.Collectors;
 
@@ -53,6 +54,104 @@ public class ExportService {
             case DONE -> "已完成";
             case CANCELLED -> "已取消";
         };
+    }
+
+    // ---------- P20：报告导出 Word（.docx）与 HTML（复制为邮件正文） ----------
+
+    /** 把报告 Markdown 转为结构化 HTML（标题/列表/表格/段落），供「复制为邮件正文」。 */
+    public static String markdownToHtml(String md) {
+        StringBuilder html = new StringBuilder();
+        List<String> lines = (md == null ? "" : md).lines().toList();
+        boolean inList = false;
+        boolean inTable = false;
+        for (int idx = 0; idx < lines.size(); idx++) {
+            String line = lines.get(idx);
+            String trimmed = line.trim();
+            boolean isTableRow = trimmed.startsWith("|") && trimmed.endsWith("|") && trimmed.length() > 1;
+            if (isTableRow) {
+                if (!inTable) { html.append("<table border=\"1\" cellspacing=\"0\" cellpadding=\"4\">\n"); inTable = true; }
+                String[] cells = trimmed.substring(1, trimmed.length() - 1).split("\\|", -1);
+                boolean separator = java.util.Arrays.stream(cells).allMatch(c -> c.trim().matches(":?-{3,}:?"));
+                if (!separator) {
+                    html.append("<tr>");
+                    for (String c : cells) html.append("<td>").append(escapeHtml(c.trim())).append("</td>");
+                    html.append("</tr>\n");
+                }
+                continue;
+            } else if (inTable) {
+                html.append("</table>\n");
+                inTable = false;
+            }
+            if (trimmed.startsWith("- ") || trimmed.startsWith("* ")) {
+                if (!inList) { html.append("<ul>\n"); inList = true; }
+                html.append("<li>").append(escapeHtml(trimmed.substring(2))).append("</li>\n");
+                continue;
+            } else if (inList) {
+                html.append("</ul>\n");
+                inList = false;
+            }
+            if (trimmed.startsWith("### ")) html.append("<h3>").append(escapeHtml(trimmed.substring(4))).append("</h3>\n");
+            else if (trimmed.startsWith("## ")) html.append("<h2>").append(escapeHtml(trimmed.substring(3))).append("</h2>\n");
+            else if (trimmed.startsWith("# ")) html.append("<h1>").append(escapeHtml(trimmed.substring(2))).append("</h1>\n");
+            else if (!trimmed.isBlank()) html.append("<p>").append(escapeHtml(trimmed)).append("</p>\n");
+        }
+        if (inList) html.append("</ul>\n");
+        if (inTable) html.append("</table>\n");
+        return html.toString();
+    }
+
+    private static String escapeHtml(String text) {
+        return text.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;");
+    }
+
+    /** 报告 Markdown → .docx（POI XWPF）：保留标题层级、无序列表与表格结构。 */
+    public byte[] exportReportDocx(Report report) {
+        try (org.apache.poi.xwpf.usermodel.XWPFDocument doc = new org.apache.poi.xwpf.usermodel.XWPFDocument();
+             ByteArrayOutputStream out = new ByteArrayOutputStream()) {
+            List<String> lines = (report.getContent() == null ? "" : report.getContent()).lines().toList();
+            int i = 0;
+            while (i < lines.size()) {
+                String trimmed = lines.get(i).trim();
+                if (trimmed.startsWith("|") && trimmed.endsWith("|") && trimmed.length() > 1) {
+                    List<String[]> rows = new ArrayList<>();
+                    while (i < lines.size()) {
+                        String t = lines.get(i).trim();
+                        if (!(t.startsWith("|") && t.endsWith("|") && t.length() > 1)) break;
+                        String[] cells = t.substring(1, t.length() - 1).split("\\|", -1);
+                        boolean separator = java.util.Arrays.stream(cells).allMatch(c -> c.trim().matches(":?-{3,}:?"));
+                        if (!separator) {
+                            String[] trimmedCells = new String[cells.length];
+                            for (int c = 0; c < cells.length; c++) trimmedCells[c] = cells[c].trim();
+                            rows.add(trimmedCells);
+                        }
+                        i++;
+                    }
+                    if (!rows.isEmpty()) {
+                        int cols = rows.stream().mapToInt(r -> r.length).max().orElse(1);
+                        var table = doc.createTable(rows.size(), cols);
+                        for (int r = 0; r < rows.size(); r++) {
+                            for (int c = 0; c < cols; c++) {
+                                table.getRow(r).getCell(c).setText(c < rows.get(r).length ? rows.get(r)[c] : "");
+                            }
+                        }
+                    }
+                    continue;
+                }
+                i++;
+                if (trimmed.isBlank()) continue;
+                var para = doc.createParagraph();
+                var run = para.createRun();
+                if (trimmed.startsWith("### ")) { run.setBold(true); run.setFontSize(13); run.setText(trimmed.substring(4)); }
+                else if (trimmed.startsWith("## ")) { run.setBold(true); run.setFontSize(15); run.setText(trimmed.substring(3)); }
+                else if (trimmed.startsWith("# ")) { run.setBold(true); run.setFontSize(18); run.setText(trimmed.substring(2)); }
+                else if (trimmed.startsWith("- ") || trimmed.startsWith("* ")) { run.setText("• " + trimmed.substring(2)); }
+                else run.setText(trimmed);
+            }
+            doc.write(out);
+            return out.toByteArray();
+        } catch (IOException e) {
+            throw new UncheckedIOException("Word 导出失败", e);
+        }
     }
 
     @Transactional(readOnly = true)

@@ -37,6 +37,7 @@
     </template>
   </template>
   <p class="tiny foot">请勿录入客户信息、生产数据、密码和密钥。</p>
+  <p class="tiny foot" style="margin-top:4px">版本 {{version}} · 构建日期 {{buildDate}}</p>
 </GlassPanel></div>
 </template>
 <script setup lang="ts">
@@ -46,6 +47,10 @@ import { Bird, UserRoundX } from 'lucide-vue-next'
 import GlassPanel from '../components/GlassPanel.vue'; import AppButton from '../components/AppButton.vue'; import AppInput from '../components/AppInput.vue'; import SegmentedControl from '../components/SegmentedControl.vue'
 import { api, ApiError, DEMO_ACCOUNTS, DEMO_SUBTITLE, DEMO_FILL_HINT, DEMO_REG_CLOSED_TEXT, DEMO_PASSWORD_FILL } from '../api/http'; import { useAuth } from '../stores/auth'; import { useTeam } from '../stores/team'; import { useToast } from '../stores/toast'
 const router = useRouter(), auth = useAuth(), team = useTeam(), toast = useToast()
+import { APP_VERSION, BUILD_DATE } from '../utils/appMeta'
+// 登录页底部版本（修订三二.1）：优先用后端 /meta 的版本，离线兜底用本地常量。
+const version = computed(()=> (auth.meta as any).version ?? APP_VERSION)
+const buildDate = computed(()=> (auth.meta as any).buildDate ?? BUILD_DATE)
 const tab = ref('login'), err = ref(''), lockedMin = ref(0), needCaptcha = ref(false), busy = ref(false)
 const meta = computed(()=>auth.meta)
 const f = reactive({ loginName:'', password:'', captchaCode:'' }); const r = reactive({ loginName:'', displayName:'', password:'', captchaCode:'' })

@@ -4,7 +4,7 @@
 #
 # Usage:  bash packaging/build-package.sh [--skip-downloads]
 #
-# Output: packaging/dist/iteration-board-offline-1.0.4.zip
+# Output: packaging/dist/iteration-board-offline-1.1.0.zip
 #
 # What it does:
 #   1. Builds the backend jar (offline Maven wrapper).
@@ -25,7 +25,10 @@
 # ============================================================
 set -euo pipefail
 
-VERSION="1.0.4"
+# Single source of truth for the package version (1.1.0).
+# It is also written into the package as version.txt, which
+# install/upgrade/migrate scripts read at runtime.
+VERSION="1.1.0"
 PKG_NAME="iteration-board-offline-${VERSION}"
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_ROOT="$(cd "${SCRIPT_DIR}/.." && pwd)"
@@ -169,9 +172,13 @@ cp "${WORK_JAR}" "${STAGING_DIR}/app/iteration-board.jar"
 rm -f "${WORK_JAR}"
 cp "${SCRIPT_DIR}/config/application.yml" "${STAGING_DIR}/config/application.yml"
 cp -r "${REPO_ROOT}/backend/config/prompts" "${STAGING_DIR}/config/prompts"
-for f in install start stop uninstall backup restore upgrade; do
+for f in install start stop uninstall backup restore upgrade apply-patch rollback reset-admin migrate-export migrate-import; do
   cp "${SCRIPT_DIR}/windows/${f}.bat" "${STAGING_DIR}/${f}.bat"
 done
+# version.txt: the installed copy is how scripts on the target
+# learn the program version (manifest checks, rollback info).
+printf '%s\n%s\n' "${VERSION}" "$(date +%F)" > "${STAGING_DIR}/version.txt"
+echo "[ok] version.txt written: ${VERSION}" 
 cp "${SCRIPT_DIR}/windows/IterationBoardApp.xml" "${STAGING_DIR}/service/"
 # The service XML must be well-formed or WinSW refuses to load it
 # at service start (an XML comment containing a double hyphen did

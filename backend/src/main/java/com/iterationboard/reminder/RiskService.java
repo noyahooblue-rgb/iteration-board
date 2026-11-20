@@ -83,7 +83,8 @@ public class RiskService {
                 out.add(new RiskSignal("DUE_SOON", "MEDIUM", i.getId(), i.getCode(), null,
                         "临近截止（" + i.getDueDate() + "）：" + i.getTitle()));
             }
-            if (i.getStatus() == ItemStatus.IN_PROGRESS) {
+            boolean inPlanningIteration = i.getIteration() != null && "PLANNING".equals(i.getIteration().getStatus());
+            if (i.getStatus() == ItemStatus.IN_PROGRESS && !inPlanningIteration) {
                 LocalDate last = lastActivityDate(i);
                 if (last != null && Workdays.workdaysBetween(last, today, settings) >= th.staleInProgressWorkdays()) {
                     out.add(new RiskSignal("STALE", "MEDIUM", i.getId(), i.getCode(), null,
@@ -97,7 +98,7 @@ public class RiskService {
                 out.add(new RiskSignal("NUDGED_OFTEN", "LOW", i.getId(), i.getCode(), null,
                         "本轮已被催 " + i.getNudgeCount() + " 次仍未更新：" + i.getTitle()));
             }
-            if (i.getStatus() == ItemStatus.UNCLAIMED
+            if (i.getStatus() == ItemStatus.UNCLAIMED && !inPlanningIteration
                     && (i.getPriority() == Priority.P0 || i.getPriority() == Priority.P1)
                     && Workdays.workdaysBetween(dateOf(i.getCreatedAt()), today, settings) >= th.unclaimedWorkdays()) {
                 out.add(new RiskSignal("UNCLAIMED_PRIORITY", "MEDIUM", i.getId(), i.getCode(), null,

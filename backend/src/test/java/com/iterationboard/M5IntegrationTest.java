@@ -112,7 +112,11 @@ class M5IntegrationTest {
         MockHttpSession adminS = register("m5admin", "平台管理员");
         long adminId = myId(adminS);
         AppUser admin = userRepo.findById(adminId).orElseThrow();
-        assertThat(admin.isPlatformAdmin()).isTrue();
+        // 1.1.0 修订（P01）：自助注册不再自动成为平台管理员；本场景以直接授予模拟「已有管理员授予」的前置状态
+        assertThat(admin.isPlatformAdmin()).isFalse();
+        admin.setPlatformAdmin(true);
+        userRepo.save(admin);
+        assertThat(userRepo.findById(adminId).orElseThrow().isPlatformAdmin()).isTrue();
         long teamA = createTeam(adminS, "审计甲组", "SJA");
         long teamB = createTeam(adminS, "审计乙组", "SJB");
 

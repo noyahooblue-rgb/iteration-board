@@ -382,6 +382,21 @@ public class ReportService {
                 ownerRepo.findByItemId(i.getId()).forEach(o -> doneByOwner.merge(o.getUser().getId(), 1L, Long::sum)));
         if (doneByOwner.isEmpty()) sb.append("（无）\n");
         doneByOwner.forEach((uid, c) -> sb.append("- ").append(memberName(team.getId(), uid)).append("：").append(c).append(" 件\n"));
+        // 修订四 P13：迭代外工作单列——独立事项（缺陷/分析/临时事项，不属于任何迭代）计入个人负载与总览，
+        // 不计入燃尽图与上面的迭代完成率，此处单独汇总。
+        List<Item> outside = teamItems(team.getId()).stream()
+                .filter(i -> i.getIteration() == null)
+                .filter(i -> i.getType() == ItemType.DEFECT || i.getType() == ItemType.ANALYSIS || i.getType() == ItemType.ADHOC)
+                .toList();
+        sb.append("\n## 迭代外工作（独立事项，不计入燃尽图）\n\n");
+        if (outside.isEmpty()) {
+            sb.append("（无）\n");
+        } else {
+            long outsideDone = outside.stream().filter(i -> i.getStatus() == ItemStatus.DONE).count();
+            sb.append("- 独立事项共 ").append(outside.size()).append(" 件，已完成 ").append(outsideDone).append(" 件\n");
+            outside.forEach(i -> sb.append("- ").append(i.getCode()).append(" ").append(i.getTitle())
+                    .append("（").append(i.getType()).append(" / ").append(i.getStatus()).append("）\n"));
+        }
         return sb.toString();
     }
 

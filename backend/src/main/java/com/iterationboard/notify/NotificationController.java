@@ -115,4 +115,30 @@ public class NotificationController {
         userRepo.save(me);
         return NotificationPrefs.of(me);
     }
+
+    public record NotificationSettingsRequest(Map<String, Boolean> categories, Boolean compactNotification) {}
+
+    /** P25：通知设置全量视图（分类开关 + 精简通知开关）。 */
+    @GetMapping("/auth/notification-settings")
+    public Map<String, Object> getSettings() {
+        AppUser me = currentUser.require();
+        Map<String, Object> out = new java.util.LinkedHashMap<>();
+        out.put("categories", NotificationPrefs.of(me));
+        out.put("compactNotification", NotificationPrefs.compactEnabled(me));
+        return out;
+    }
+
+    @PatchMapping("/auth/notification-settings")
+    @Transactional
+    public Map<String, Object> patchSettings(@RequestBody NotificationSettingsRequest req) {
+        AppUser me = currentUser.require();
+        if (req.categories() != null) {
+            me.setPreferencesJson(NotificationPrefs.merge(me, req.categories()));
+        }
+        if (req.compactNotification() != null) {
+            me.setPreferencesJson(NotificationPrefs.mergeCompact(me, req.compactNotification()));
+        }
+        userRepo.save(me);
+        return getSettings();
+    }
 }

@@ -1,22 +1,25 @@
 // 浏览器模拟后端入口：handleRequest(method, path, body) -> { status, data }
 // 严格按 contract/openapi.yaml 0.5.0 与 contract/state-machine.md 实现；错误统一 {code,message,detail}。
-// 规则与真实后端一致：故事/任务仅 PO 创建、婉拒 DECLINE、共同负责 join、任务状态推算、
+// 规则与真实后端一致：故事/任务组长与 PO 均可创建（P06）、婉拒 DECLINE、共同负责 join、任务状态推算、
 // 批量下发、检查清单、搜索、回收站、保存筛选、迭代规划。
 import { MockError, type Item, type Team, type User, type Batch, type Nudge, type SavedFilter, type Notification, type ChecklistEntry, type KeyDate, type MockReport } from './types'
 import { seedUsers, seedMembers, seedIterations, seedBatches, buildItems, buildProgress, buildComments, buildActivities, seedKeyDates, seedStandupNotes, buildSeedNotifications, buildSeedReports, buildSeedAuditLogs } from './seed'
 
+// 1.1.0 版本常量（与前端 utils/appMeta.ts 对齐；真实后端由构建注入）。
+export const APP_VERSION = '1.1.0'
+export const BUILD_DATE = '2026-11-20'
 // 演示构建开关：演示环境关闭开放注册、开启演示标识。
 export const MOCK_CONFIG = { registrationOpen: false, demoMode: true }
 
 interface StoredUser extends User { password: string }
 const users: StoredUser[] = seedUsers.map(u => ({ ...u }))
 let nextUserId = 100
-export const DEFAULT_SETTINGS = { capacityPointsPerWorkday: 1, reminderThresholds: { staleInProgressWorkdays: 2, notStartedWorkdays: 2, reviewPendingWorkdays: 2, unclaimedWorkdays: 3, blockedWorkdays: 2, dueSoonWorkdays: 1 }, specialHolidays: [] as string[], specialWorkdays: [] as string[] }
+export const DEFAULT_SETTINGS = { storyAcceptRole: 'PO', taskAcceptRole: 'LEADER', capacityPointsPerWorkday: 1, reminderThresholds: { staleInProgressWorkdays: 2, notStartedWorkdays: 2, reviewPendingWorkdays: 2, unclaimedWorkdays: 3, blockedWorkdays: 2, dueSoonWorkdays: 1 }, specialHolidays: [] as string[], specialWorkdays: [] as string[] }
 const teamRow: Team = { id: 1, name: '云雀小组', code: 'SKY', inviteCode: 'SKY2026A', joinApproval: true, iterationWeeks: 2, estimateUnit: 'point', themeColor: 'blue', status: 'ACTIVE', description: '在线协作文档产品的体验与稳定性小组（演示数据，全部虚构）。', settings: JSON.parse(JSON.stringify(DEFAULT_SETTINGS)) }
 const auroraTeam: Team = { id: 999, name: '极光小组', code: 'AUR', joinApproval: true, iterationWeeks: 2, estimateUnit: 'point', themeColor: 'violet', status: 'ACTIVE', description: null, settings: JSON.parse(JSON.stringify(DEFAULT_SETTINGS)) }
 const extraTeams: Team[] = []
 const allTeams = () => [teamRow, auroraTeam, ...extraTeams]
-let members = seedMembers.map(m => ({ teamId: 1, userId: m.userId, role: m.role as string, memberStatus: m.memberStatus, memberStatusStart: m.userId === 9 ? '2026-11-16' : null as string|null, memberStatusEnd: m.userId === 9 ? '2026-11-20' : null as string|null }))
+let members = [...seedMembers.map(m => ({ teamId: 1, userId: m.userId, role: m.role as string, memberStatus: m.memberStatus, memberStatusStart: m.userId === 9 ? '2026-11-16' : null as string|null, memberStatusEnd: m.userId === 9 ? '2026-11-20' : null as string|null })), { teamId: 999, userId: 11, role: 'MEMBER', memberStatus: 'NORMAL', memberStatusStart: null as string|null, memberStatusEnd: null as string|null }, { teamId: 999, userId: 12, role: 'MEMBER', memberStatus: 'NORMAL', memberStatusStart: null as string|null, memberStatusEnd: null as string|null }]
 let items: Item[] = buildItems()
 let progressList = buildProgress(items)
 let comments = buildComments(items)
@@ -71,10 +74,30 @@ function teamView(t: Team, userId: number, includeInvite = false): Team {
   return { ...t, myRole: m?.role as any, inviteCode: includeInvite || m?.role === 'LEADER' ? t.inviteCode : undefined }
 }
 const PREF_CATS = ['ASSIGNMENT', 'NUDGE', 'MENTION', 'ITEM_UPDATE', 'REMINDER', 'SYSTEM']
-function prefsOf(userId: number) { return userPrefs.get(userId) ?? { ASSIGNMENT: true, NUDGE: true, MENTION: true, ITEM_UPDATE: true, REMINDER: true, SYSTEM: true } }
-function notify(userId: number, teamId: number | null, category: string, item: Item | null, content: string, actorId: number | null = null) {
-  if (prefsOf(userId)[category] === false && category !== 'ASSIGNMENT' && category !== 'NUDGE') return
-  const n: Notification = { id: nextId++, userId, teamId, type: category, category, itemId: item?.id ?? null, itemCode: item?.code ?? null, actorId, content, readAt: null, createdAt: new Date().toISOString() }
+const PREF_DEFAULTS: Record<string, boolean> = { ASSIGNMENT: true, NUDGE: true, MENTION: true, ITEM_UPDATE: true, REMINDER: true, SYSTEM: true }
+// 精简通知（P25）与后端一致：单独存 compactNotification，不混进分类表；桌面通知/提示音是浏览器本地偏好，后端不存。
+const compactByUser = new Map<number, boolean>()
+function prefsOf(userId: number) { return { ...PREF_DEFAULTS, ...(userPrefs.get(userId) ?? {}) } }
+// 精简通知（P25）六类白名单判定：ASSIGNMENT 含指派与邀请认领；ITEM_UPDATE 仅「待我验收」类（type=REVIEW_PENDING 或正文含待验收）；SYSTEM 仅加入申请类（type=JOIN_REQUEST）。
+const COMPACT_EXTRA_TYPES = new Set(['REVIEW_PENDING', 'JOIN_REQUEST'])
+function compactAllows(category: string, type: string, content: string) {
+  if (category === 'ASSIGNMENT' || category === 'NUDGE' || category === 'MENTION') return true
+  if (COMPACT_EXTRA_TYPES.has(type)) return true
+  if (category === 'ITEM_UPDATE' && content.includes('待验收')) return true
+  if (category === 'SYSTEM' && content.includes('加入申请')) return true
+  return false
+}
+function notify(userId: number, teamId: number | null, category: string, item: Item | null, content: string, actorId: number | null = null, typeOverride?: string) {
+  const prefs = prefsOf(userId)
+  if (prefs[category] === false && category !== 'ASSIGNMENT' && category !== 'NUDGE') return
+  const nType = typeOverride ?? category
+  if (compactByUser.get(userId) && !compactAllows(category, nType, content)) return
+  // 同一事项 5 分钟内多条变化合并成一条（P25）：仅 ITEM_UPDATE / REMINDER，未读的同类通知就地更新时间与正文。
+  if (item && (category === 'ITEM_UPDATE' || category === 'REMINDER')) {
+    const prev = notifications.find(n => n.userId === userId && n.itemId === item.id && n.category === category && !n.readAt && Date.now() - new Date(n.createdAt).getTime() < 5 * 60 * 1000)
+    if (prev) { prev.content = content; prev.createdAt = new Date().toISOString(); return }
+  }
+  const n: Notification = { id: nextId++, userId, teamId, type: nType, category, itemId: item?.id ?? null, itemCode: item?.code ?? null, actorId, content, readAt: null, createdAt: new Date().toISOString() }
   notifications.unshift(n)
   if (sessionUserId === userId) { try { const set = (globalThis as any).__ibMockEventListeners as Set<(x: any) => void> | undefined; set?.forEach(cb => { try { cb(notifView(n)) } catch {} }) } catch {} }
 }
@@ -179,7 +202,7 @@ export async function handleRequest(method: string, rawPath: string, body?: any,
 function route(method: string, rawPath: string, body: any): { status: number; data: any } {
   const [path, qs] = rawPath.split('?'); const q = new URLSearchParams(qs ?? '')
   const seg = path.replace(/^\/api\/v1/, '').split('/').filter(Boolean)
-  if (method === 'GET' && path.endsWith('/meta')) return { status: 200, data: { ...MOCK_CONFIG } }
+  if (method === 'GET' && path.endsWith('/meta')) return { status: 200, data: { ...MOCK_CONFIG, version: APP_VERSION, buildDate: BUILD_DATE } }
   if (method === 'GET' && seg.join('/') === 'auth/captcha') {
     const chars = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789'; let code = ''; for (let i = 0; i < 4; i++) code += chars[Math.floor(Math.random() * chars.length)]
     const id = 'cap-' + (nextId++); captchas.set(id, code); return { status: 200, data: { captchaId: id, imageSvg: captchaSvg(code) } }
@@ -188,7 +211,86 @@ function route(method: string, rawPath: string, body: any): { status: number; da
   if (seg[0] === 'notifications') return notifRoute(method, seg, body, q)
   if (seg[0] === 'reports') return reportTopRoute(method, seg, body)
   if (seg[0] === 'admin') return adminRoute(method, seg, body, q)
+  if (seg[0] === 'feedback') return feedbackRoute(method, seg, body, q)
+  if (seg[0] === 'release-notes') return releaseNotesRoute(method, seg, body)
   if (seg[0] === 'teams') return teams(method, seg, body, q)
+  throw err(404, 'NOT_FOUND', '接口不存在')
+}
+
+// ---------------- 1.1.0：系统信息 / 备份状态 / 更新说明 / 意见反馈 ----------------
+const MOCK_STARTED_AT = Date.now()
+function backupStatusData() {
+  // 演示口径：最近一次成功备份在 4 天前（>3 天），管理员登录会看到顶部横幅，正好演示 P23。字段与后端 BackupStatusService 一致。
+  const last = new Date(MOCK_STARTED_AT - 4 * 24 * 3600 * 1000).toISOString()
+  return { statusFilePresent: true, lastBackupAt: last, lastBackupResult: 'SUCCESS', lastBackupDetail: '演示备份完成', backupStale: true, backupStaleMessage: '已超过 3 天没有成功备份' }
+}
+function systemInfoData() {
+  const bs = backupStatusData()
+  return { appVersion: APP_VERSION, buildDate: BUILD_DATE, databaseVersion: 'PostgreSQL 16.x（演示值）', flywayVersion: 'V12（演示值）', installDir: 'C:\\IterationBoard（演示值）', dataDir: 'C:\\IterationBoard\\data（演示值）', dataDirSizeBytes: 128 * 1024 * 1024, lastBackupAt: bs.lastBackupAt, lastBackupResult: bs.lastBackupResult, backupStale: bs.backupStale, serviceStartType: '未知', serviceStartTypeNote: 'JVM 内无法判定 Windows 服务启动类型，请在服务器 services.msc 中查看', ai: { mode: 'mock', platformEnabled: false, configured: false, status: 'MOCK' }, lanAddresses: ['192.168.1.100'], serverPort: 8080 }
+}
+const RELEASE_NOTES = { version: APP_VERSION, title: '本次更新了什么', content: '## 本次更新（1.1.0）\n- 浏览器提醒三层：标签页标题未读数、favicon 红点角标、可选桌面通知与提示音\n- 新增「意见反馈」：可带截图提交、+1、评论，管理员可流转状态并导出\n- 成员离组前必须完成事项交接\n- 站会摘要显示数据截至时间，组长/PO 可刷新\n- 报告可导出 Word，也可复制为邮件正文\n- 平台管理新增系统信息与管理员授予/撤销' }
+const releaseReadBy = new Set<number>()
+function releaseNotesRoute(method: string, seg: string[], body: any) {
+  const u = me()
+  if (method === 'GET' && seg.length === 1) return { status: 200, data: { ...RELEASE_NOTES, read: releaseReadBy.has(u.id) } }
+  if (method === 'POST' && seg[1] === 'read') { releaseReadBy.add(u.id); return { status: 200, data: { version: RELEASE_NOTES.version, read: true } } }
+  throw err(404, 'NOT_FOUND', '接口不存在')
+}
+interface FeedbackComment { id: number; feedbackId: number; authorId: number; authorName: string; content: string; createdAt: string }
+interface FeedbackImage { id: number; fileName: string; contentType: string; sizeBytes: number }
+// 字段与后端 FeedbackController.toMap 对齐：submitter*、images[]、plusOneCount/myPlusOne、commentCount（评论走单独接口）。
+interface Feedback { id: number; submitterId: number; submitterName: string; submitterLoginName: string; type: string; title: string; description: string; status: string; plannedVersion: string | null; rejectReason: string | null; releasedVersion: string | null; officialReply: string | null; pageUrl: string | null; appVersion: string | null; browserInfo: string | null; images: FeedbackImage[]; plusOneUserIds: number[]; comments: FeedbackComment[]; createdAt: string; updatedAt: string }
+let feedbacks: Feedback[] = [
+  { id: 1, submitterId: 3, submitterName: '苏晴', submitterLoginName: 'member', type: 'SUGGESTION', title: '认领池希望能按截止日期排序', description: '事项多了以后找最急的要翻很久，希望认领池能按截止日期排序。', status: 'ANALYZING', plannedVersion: null, rejectReason: null, releasedVersion: null, officialReply: null, pageUrl: '/pool', appVersion: APP_VERSION, browserInfo: 'Chrome 130', images: [], plusOneUserIds: [4, 5], comments: [{ id: 1, feedbackId: 1, authorId: 4, authorName: '王启明', content: '同感，尤其是临期事项。', createdAt: '2026-11-18T10:00:00' }], createdAt: '2026-11-18T09:30:00', updatedAt: '2026-11-18T10:00:00' },
+  { id: 2, submitterId: 5, submitterName: '李安然', submitterLoginName: 'lianran', type: 'ISSUE', title: '站会页备注保存后偶尔不刷新', description: '保存站会备注后页面偶尔还是旧内容，刷新浏览器后正常。', status: 'NEW', plannedVersion: null, rejectReason: null, releasedVersion: null, officialReply: null, pageUrl: '/standup', appVersion: APP_VERSION, browserInfo: 'Edge 130', images: [{ id: 1, fileName: '站会备注截图.png', contentType: 'image/png', sizeBytes: 204800 }], plusOneUserIds: [], comments: [], createdAt: '2026-11-19T14:20:00', updatedAt: '2026-11-19T14:20:00' },
+]
+let feedbackSeq = 100, feedbackCommentSeq = 100, feedbackImageSeq = 100
+const feedbackView = (f: Feedback, uid: number) => { const { comments, plusOneUserIds, ...rest } = f; return { ...rest, plusOneCount: plusOneUserIds.length, myPlusOne: plusOneUserIds.includes(uid), commentCount: comments.length } }
+const FB_TRANSITIONS: Record<string, string[]> = { NEW: ['ANALYZING'], ANALYZING: ['ACCEPTED', 'REJECTED'], ACCEPTED: ['RELEASED'], REJECTED: [], RELEASED: [] }
+function feedbackRoute(method: string, seg: string[], body: any, q: URLSearchParams) {
+  const u = me()
+  if (method === 'POST' && seg[1] === 'export') { if (!u.platformAdmin) throw err(403, 'FORBIDDEN', '仅平台管理员可导出反馈')
+    const ids: number[] = body?.ids ?? []; const list = feedbacks.filter(f => ids.includes(f.id)); if (!list.length) throw err(400, 'VALIDATION', '请选择要导出的反馈')
+    const md = list.map(f => `## ${f.title}\n- 类型：${f.type} · 状态：${f.status} · +1：${f.plusOneUserIds.length}\n- 提交人：${f.submitterName}\n\n${f.description}`).join('\n\n')
+    return { status: 200, data: { filename: 'feedback-export.zip', itemCount: list.length, mockZip: true, summaryMarkdown: md } } }
+  if (method === 'GET' && seg.length === 1) { let list = [...feedbacks]
+    const st = q.get('status'); if (st) list = list.filter(f => f.status === st)
+    const tp = q.get('type'); if (tp) list = list.filter(f => f.type === tp)
+    list.sort(q.get('sort') === 'PLUS_ONES' ? (a, b) => b.plusOneUserIds.length - a.plusOneUserIds.length || b.id - a.id : (a, b) => b.createdAt.localeCompare(a.createdAt) || b.id - a.id)
+    return { status: 200, data: list.map(f => feedbackView(f, u.id)) } }
+  if (method === 'POST' && seg.length === 1) return idemWrap('feedback', () => {
+    if (!body?.title?.trim() || !body?.description?.trim()) throw err(400, 'VALIDATION', '标题与描述必填')
+    if (!['ISSUE', 'SUGGESTION', 'OTHER'].includes(body.type ?? '')) throw err(400, 'VALIDATION', 'type 须为 ISSUE / SUGGESTION / OTHER')
+    const imgs: any[] = body.images ?? []
+    if (imgs.length > 5) throw err(400, 'VALIDATION', '图片最多 5 张')
+    for (const im of imgs) { if (!String(im.contentType ?? '').startsWith('image/')) throw err(400, 'VALIDATION', '只允许图片'); const approx = Math.floor(String(im.contentBase64 ?? '').length * 3 / 4); if (approx > 5 * 1024 * 1024) throw err(400, 'VALIDATION', '每张图片不超过 5MB') }
+    const todayCount = feedbacks.filter(f => f.submitterId === u.id && f.createdAt.startsWith(todayStr())).length
+    if (todayCount >= 20) throw err(429, 'FEEDBACK_DAILY_LIMIT', '每人每天最多提交 20 条反馈，明天再来')
+    const f: Feedback = { id: feedbackSeq++, submitterId: u.id, submitterName: u.displayName, submitterLoginName: u.loginName, type: body.type, title: body.title.trim(), description: body.description.trim(), status: 'NEW', plannedVersion: null, rejectReason: null, releasedVersion: null, officialReply: null, pageUrl: body.pageUrl ?? null, appVersion: body.appVersion ?? APP_VERSION, browserInfo: body.browserInfo ?? null, images: imgs.map(im => ({ id: feedbackImageSeq++, fileName: im.fileName ?? '截图.png', contentType: im.contentType, sizeBytes: Math.floor(String(im.contentBase64 ?? '').length * 3 / 4) })), plusOneUserIds: [], comments: [], createdAt: new Date().toISOString(), updatedAt: new Date().toISOString() }
+    feedbacks.unshift(f); return { status: 201, data: feedbackView(f, u.id) } })
+  const f = feedbacks.find(x => x.id === Number(seg[1])); if (!f) throw err(404, 'NOT_FOUND', '反馈不存在')
+  if (method === 'GET' && seg.length === 2) return { status: 200, data: feedbackView(f, u.id) }
+  if (method === 'PATCH' && seg.length === 2) { if (f.submitterId !== u.id) throw err(403, 'FORBIDDEN', '只能修改自己提交的反馈'); if (f.status !== 'NEW') throw err(409, 'FEEDBACK_LOCKED', '反馈已开始处理，不能再修改')
+    if (body?.title?.trim()) f.title = body.title.trim(); if (body?.description?.trim()) f.description = body.description.trim(); if (body?.type && ['ISSUE', 'SUGGESTION', 'OTHER'].includes(body.type)) f.type = body.type
+    f.updatedAt = new Date().toISOString(); return { status: 200, data: feedbackView(f, u.id) } }
+  if (method === 'POST' && seg[2] === 'plus-one') { if (!f.plusOneUserIds.includes(u.id)) f.plusOneUserIds.push(u.id); f.updatedAt = new Date().toISOString(); return { status: 200, data: feedbackView(f, u.id) } }
+  if (method === 'DELETE' && seg[2] === 'plus-one') { f.plusOneUserIds = f.plusOneUserIds.filter(x => x !== u.id); f.updatedAt = new Date().toISOString(); return { status: 200, data: feedbackView(f, u.id) } }
+  if (method === 'GET' && seg[2] === 'comments') return { status: 200, data: f.comments }
+  if (method === 'POST' && seg[2] === 'comments') { if (!body?.content?.trim()) throw err(400, 'VALIDATION', '评论内容不能为空')
+    const c: FeedbackComment = { id: feedbackCommentSeq++, feedbackId: f.id, authorId: u.id, authorName: u.displayName, content: body.content.trim(), createdAt: new Date().toISOString() }; f.comments.push(c); f.updatedAt = new Date().toISOString(); return { status: 201, data: c } }
+  if (method === 'PATCH' && seg[2] === 'status') { if (!u.platformAdmin) throw err(403, 'FORBIDDEN', '仅平台管理员可变更反馈状态')
+    const st = body?.status; if (!st) throw err(400, 'VALIDATION', 'status 必填')
+    if (!(FB_TRANSITIONS[f.status] ?? []).includes(st)) throw err(422, 'ILLEGAL_TRANSITION', `反馈状态不能从 ${f.status} 直接变为 ${st}（流程：新提交→分析中→已采纳/不采纳→已上线）`)
+    if (st === 'ACCEPTED' && !body?.plannedVersion?.trim()) throw err(400, 'VALIDATION', '已采纳必须填写计划版本 plannedVersion')
+    if (st === 'REJECTED' && !body?.rejectReason?.trim()) throw err(400, 'VALIDATION', '不采纳必须填写原因 rejectReason')
+    if (st === 'RELEASED' && !body?.releasedVersion?.trim()) throw err(400, 'VALIDATION', '已上线必须填写上线版本 releasedVersion')
+    f.status = st; if (body?.plannedVersion) f.plannedVersion = body.plannedVersion; if (body?.rejectReason) f.rejectReason = body.rejectReason; if (body?.releasedVersion) f.releasedVersion = body.releasedVersion; if (body?.officialReply) f.officialReply = body.officialReply
+    f.updatedAt = new Date().toISOString()
+    const targets = new Set([f.submitterId, ...f.plusOneUserIds]); targets.delete(u.id)
+    for (const tid of targets) notify(tid, null, 'SYSTEM', null, `反馈「${f.title}」状态变更：${st}`, u.id)
+    return { status: 200, data: feedbackView(f, u.id) } }
+  if (method === 'PATCH' && seg[2] === 'official-reply') { if (!u.platformAdmin) throw err(403, 'FORBIDDEN', '仅平台管理员可官方回复'); if (!body?.officialReply?.trim()) throw err(400, 'VALIDATION', '官方回复不能为空')
+    f.officialReply = body.officialReply.trim(); f.updatedAt = new Date().toISOString(); if (f.submitterId !== u.id) notify(f.submitterId, null, 'SYSTEM', null, `反馈「${f.title}」有官方回复`, u.id); return { status: 200, data: feedbackView(f, u.id) } }
   throw err(404, 'NOT_FOUND', '接口不存在')
 }
 // ---------------- 平台管理（M5 Q6 审计日志） ----------------
@@ -197,11 +299,24 @@ function adminRoute(method: string, seg: string[], body: any, q: URLSearchParams
   // 平台管理新接口（1.0.4 J）：账号 / 小组列表，字段与前端 AdminView 约定一致；演示数据即种子虚构数据（云雀小组 SKY 等）。
   // StoredUser 无 createdAt 字段，演示口径统一回固定演示日期，不虚构逐个不同的注册时间。
   if (method === 'GET' && seg[1] === 'users') {
-    return { status: 200, data: users.map(x => ({ id: x.id, loginName: x.loginName, displayName: x.displayName, platformAdmin: x.platformAdmin, createdAt: '2026-11-01T09:00:00' })) }
+    return { status: 200, data: users.map(x => ({ id: x.id, loginName: x.loginName, displayName: x.displayName, platformAdmin: x.platformAdmin, status: (x as any).status ?? 'ACTIVE', createdAt: '2026-11-01T09:00:00' })) }
   }
   if (method === 'GET' && seg[1] === 'teams') {
     return { status: 200, data: allTeams().map(t => ({ id: t.id, name: t.name, code: t.code, memberCount: members.filter(m => m.teamId === t.id).length, createdAt: '2026-11-01T09:00:00' })) }
   }
+  if (method === 'PATCH' && seg[1] === 'users' && seg[3] === 'platform-admin') { const t = byId(Number(seg[2])); if (!t) throw err(404, 'NOT_FOUND', '账号不存在')
+    const want = body?.platformAdmin === true
+    if (!want && t.platformAdmin) { const activeAdmins = users.filter(x => x.platformAdmin && ((x as any).status ?? 'ACTIVE') === 'ACTIVE'); if (activeAdmins.length <= 1) throw err(400, 'LAST_PLATFORM_ADMIN', '不能撤销最后一名启用中的平台管理员') }
+    t.platformAdmin = want; return { status: 200, data: { id: t.id, platformAdmin: want } } }
+  if (method === 'PATCH' && seg[1] === 'users' && seg[3] === 'status') { const t = byId(Number(seg[2])); if (!t) throw err(404, 'NOT_FOUND', '账号不存在')
+    const st = body?.status; if (!['ACTIVE', 'DISABLED'].includes(st)) throw err(400, 'VALIDATION', 'status 须为 ACTIVE / DISABLED')
+    if (st === 'DISABLED') {
+      if (t.platformAdmin) { const activeAdmins = users.filter(x => x.platformAdmin && ((x as any).status ?? 'ACTIVE') === 'ACTIVE'); if (activeAdmins.length <= 1) throw err(400, 'LAST_PLATFORM_ADMIN', '不能停用最后一名启用中的平台管理员') }
+      for (const tid of [...new Set(members.filter(m => m.userId === t.id).map(m => m.teamId))]) { const pend = handoverPending(tid, t.id); if (pend.length > 0) throw err(409, 'HANDOVER_PENDING', `账号停用被拦截：该账号在小组 #${tid} 还有 ${pend.length} 项未交接，请先完成交接`, { pendingCount: pend.length, itemIds: pend.map(e => e.itemId) }) }
+    }
+    (t as any).status = st; return { status: 200, data: { id: t.id, status: st } } }
+  if (method === 'GET' && seg[1] === 'system-info') return { status: 200, data: systemInfoData() }
+  if (method === 'GET' && seg[1] === 'backup-status') return { status: 200, data: backupStatusData() }
   if (method === 'GET' && seg[1] === 'audit-logs') {
     const tid = q.get('teamId')
     return { status: 200, data: auditPage(tid ? auditLogs.filter(l => l.teamId === Number(tid)) : auditLogs, q) }
@@ -248,12 +363,55 @@ function auth(method: string, sub: string, body: any) {
     if (method === 'GET') return { status: 200, data: { ...prefsOf(u.id) } }
     if (method === 'PATCH') { const p = { ...prefsOf(u.id) }; for (const k of PREF_CATS) if (typeof body?.[k] === 'boolean') p[k] = body[k]; p.ASSIGNMENT = true; p.NUDGE = true; userPrefs.set(u.id, p); return { status: 200, data: { ...p } } }
   }
+  if (sub === 'notification-settings') {
+    const u = me()
+    if (method === 'GET') return { status: 200, data: { categories: { ...prefsOf(u.id) }, compactNotification: compactByUser.get(u.id) ?? false } }
+    if (method === 'PATCH') { if (body?.categories) { const p = { ...prefsOf(u.id) }; for (const k of PREF_CATS) if (typeof body.categories[k] === 'boolean') p[k] = body.categories[k]; p.ASSIGNMENT = true; p.NUDGE = true; userPrefs.set(u.id, p) }
+      if (typeof body?.compactNotification === 'boolean') compactByUser.set(u.id, body.compactNotification)
+      return { status: 200, data: { categories: { ...prefsOf(u.id) }, compactNotification: compactByUser.get(u.id) ?? false } } }
+  }
   if (method === 'POST' && sub === 'change-password') {
     const u = me(); if (u.password !== body.oldPassword) throw err(400, 'VALIDATION', '原密码不正确')
     if (!validPwd(body.newPassword ?? '')) throw err(400, 'VALIDATION', '新密码至少 8 位且同时含字母和数字')
     u.password = body.newPassword; u.mustChangePassword = false; return { status: 204, data: null }
   }
   throw err(404, 'NOT_FOUND', '接口不存在')
+}
+
+// ---------------- 离组交接（修订四 P05，契约与后端 HandoverService 对齐） ----------------
+// pending 为扁平条目：OWNED 本人独立负责的未完成事项 / ACCEPTOR 待其验收 / BATCH 其发出批次内的事项；共同负责不阻塞、移除时自动摘除。
+function handoverPending(teamId: number, userId: number) {
+  // 注：mock 的 Item 无 teamId 字段（种子事项均属云雀小组 1，极光小组无事项），故不按 teamId 过滤。
+  const live = items.filter(i => !i.deletedAt && !['DONE', 'CANCELLED'].includes(i.status))
+  const myBatchIds = new Set(batches.filter(b => b.teamId === teamId && b.creatorId === userId).map(b => b.id))
+  const out: { itemId: number; code: string; title: string; kind: string; status: string; batchId: number | null }[] = []
+  const seen = new Set<number>()
+  for (const i of live) if (i.ownerIds.length === 1 && i.ownerIds[0] === userId && !myBatchIds.has(i.batchId ?? -1)) { out.push({ itemId: i.id, code: i.code, title: i.title, kind: 'OWNED', status: i.status, batchId: i.batchId ?? null }); seen.add(i.id) }
+  for (const i of live) if (i.acceptorId === userId && i.status === 'IN_REVIEW' && !seen.has(i.id)) { out.push({ itemId: i.id, code: i.code, title: i.title, kind: 'ACCEPTOR', status: i.status, batchId: i.batchId ?? null }); seen.add(i.id) }
+  for (const i of live) if (i.batchId != null && myBatchIds.has(i.batchId) && !seen.has(i.id)) { out.push({ itemId: i.id, code: i.code, title: i.title, kind: 'BATCH', status: i.status, batchId: i.batchId }); seen.add(i.id) }
+  return out
+}
+function applyHandoverActions(teamId: number, actor: StoredUser, userId: number, actions: any[]) {
+  const pending = handoverPending(teamId, userId)
+  const leaderId = leaderOf(teamId)?.userId
+  const actOf = (id: number) => (actions ?? []).find(a => a.itemId === id)
+  const missing = pending.filter(e => !actOf(e.itemId)).map(e => e.itemId)
+  if (missing.length) throw err(400, 'VALIDATION', '还有条目未选择交接方式', { missingItemIds: missing })
+  for (const e of pending) {
+    const a = actOf(e.itemId); const raw = items.find(i => i.id === e.itemId)!
+    if (a.action === 'TRANSFER') { if (!a.targetUserId) throw err(400, 'VALIDATION', '转交必须选择接收人 targetUserId')
+      if (e.kind === 'ACCEPTOR') raw.acceptorId = a.targetUserId
+      else { raw.ownerIds = [a.targetUserId]; raw.assignedDirectly = true; if (e.kind === 'BATCH' && raw.batchId != null) { const b = batches.find(x => x.id === raw.batchId); if (b) b.creatorId = a.targetUserId } notify(a.targetUserId, teamId, 'ASSIGNMENT', raw, `交接转给你：${raw.code} ${raw.title}`, actor.id) }
+    } else if (a.action === 'RETURN_TO_POOL') {
+      if (e.kind === 'ACCEPTOR') raw.acceptorId = leaderId ?? raw.acceptorId
+      else { raw.ownerIds = []; raw.status = 'UNCLAIMED'; raw.assignedDirectly = false; if (e.kind === 'BATCH' && raw.batchId != null) { const b = batches.find(x => x.id === raw.batchId); if (b && leaderId) b.creatorId = leaderId } }
+    } else throw err(400, 'VALIDATION', 'action 须为 TRANSFER / RETURN_TO_POOL')
+    raw.version++
+  }
+  // 共同负责自动摘除（不阻塞）
+  for (const i of items) if (i.ownerIds.length > 1 && i.ownerIds.includes(userId)) { i.ownerIds = i.ownerIds.filter(o => o !== userId); i.version++ }
+  audit(teamId, actor, 'REMOVE_MEMBER', 'MEMBER', userId, `离组交接：处理 ${pending.length} 个条目`)
+  return { remaining: handoverPending(teamId, userId).length }
 }
 function teams(method: string, seg: string[], body: any, q: URLSearchParams) {
   if (method === 'GET' && seg[1] === 'mine') { const u = me(); return { status: 200, data: members.filter(m => m.userId === u.id).map(m => teamView(allTeams().find(x => x.id === m.teamId) ?? teamRow, u.id)) } }
@@ -300,7 +458,10 @@ function teams(method: string, seg: string[], body: any, q: URLSearchParams) {
   if (seg.length === 3 && seg[2] === 'leave' && method === 'POST') {
     const u = me(); const mine = memberOf(teamId, u.id); if (!mine) throw err(404, 'NOT_FOUND', '你不是该小组成员')
     if (mine.role === 'LEADER' && members.some(x => x.teamId === teamId && x.userId !== u.id)) throw err(400, 'VALIDATION', '组长需先移交组长职责再退出')
+    const lpend = handoverPending(teamId, u.id)
+    if (lpend.length > 0) throw err(409, 'HANDOVER_PENDING', `你还有 ${lpend.length} 项未交接，请先完成交接再退出`, { pendingCount: lpend.length, itemIds: lpend.map(e => e.itemId) })
     members = members.filter(x => !(x.teamId === teamId && x.userId === u.id))
+    for (const i of items) if (i.ownerIds.length > 1 && i.ownerIds.includes(u.id)) i.ownerIds = i.ownerIds.filter(o => o !== u.id)
     return { status: 204, data: null }
   }
   if (seg[2] === 'join-requests') {
@@ -309,6 +470,33 @@ function teams(method: string, seg: string[], body: any, q: URLSearchParams) {
     const req = joinRequests.find(r => r.id === Number(seg[3])); if (!req) throw err(404, 'NOT_FOUND', '申请不存在')
     if (seg[4] === 'approve') { req.status = 'APPROVED'; members.push({ teamId, userId: req.userId, role: body?.role ?? 'MEMBER', memberStatus: 'NORMAL', memberStatusStart: null, memberStatusEnd: null }) }
     if (seg[4] === 'reject') req.status = 'REJECTED'
+    return { status: 204, data: null }
+  }
+  if (seg[2] === 'members' && seg[4] === 'handover-pending' && method === 'GET') {
+    const { u, m } = requireMember(teamId); const targetId = Number(seg[3])
+    if (!(m.role === 'LEADER' || u.id === targetId)) throw err(403, 'FORBIDDEN', '只有组长或本人可查看交接清单')
+    return { status: 200, data: handoverPending(teamId, targetId) }
+  }
+  if (seg[2] === 'members' && seg[4] === 'handover' && method === 'POST') {
+    const { u, m } = requireMember(teamId); const targetId = Number(seg[3])
+    if (!(m.role === 'LEADER' || u.id === targetId)) throw err(403, 'FORBIDDEN', '只有组长或本人可执行交接')
+    if (seg[5] === 'return-all') { const all = handoverPending(teamId, targetId).map(e => ({ itemId: e.itemId, action: 'RETURN_TO_POOL' })); return { status: 200, data: applyHandoverActions(teamId, u, targetId, all) } }
+    return { status: 200, data: applyHandoverActions(teamId, u, targetId, body?.actions ?? []) }
+  }
+  if (seg[2] === 'members' && seg[4] === 'leave-due-items' && method === 'GET') {
+    requireMember(teamId); const targetId = Number(seg[3]); const start = q.get('start') ?? '', end = q.get('end') ?? ''
+    const list = items.filter(i => !i.deletedAt && i.ownerIds.includes(targetId) && i.dueDate && (!start || i.dueDate >= start) && (!end || i.dueDate <= end) && !['DONE', 'CANCELLED'].includes(i.status))
+    return { status: 200, data: list.map(i => ({ itemId: i.id, code: i.code, title: i.title, status: i.status, dueDate: i.dueDate })) }
+  }
+  if (seg[2] === 'members' && seg.length === 4 && method === 'DELETE') {
+    const { u, m } = requireMember(teamId); if (m.role !== 'LEADER') throw err(403, 'FORBIDDEN', '仅组长可移除成员')
+    const targetId = Number(seg[3]); const target = memberOf(teamId, targetId); if (!target) throw err(404, 'NOT_FOUND', '成员不存在')
+    if (targetId === u.id) throw err(400, 'VALIDATION', '不能移除自己，请使用退出小组')
+    const pend = handoverPending(teamId, targetId)
+    if (pend.length > 0) throw err(409, 'HANDOVER_PENDING', `该成员还有 ${pend.length} 项未交接，请先完成交接`, { pendingCount: pend.length, itemIds: pend.map(e => e.itemId) })
+    members = members.filter(x => !(x.teamId === teamId && x.userId === targetId))
+    for (const i of items) if (i.ownerIds.includes(targetId)) i.ownerIds = i.ownerIds.filter(o => o !== targetId)
+    audit(teamId, u, 'REMOVE_MEMBER', 'MEMBER', targetId, `移除成员 ${byId(targetId)?.displayName ?? targetId}`)
     return { status: 204, data: null }
   }
   if (seg[2] === 'members') {
@@ -393,6 +581,8 @@ function prevWorkday(ds: string, st: any) { const d = new Date(ds + 'T00:00:00')
 function awayOn(m: { memberStatus: string; memberStatusStart: string | null; memberStatusEnd: string | null }, ds: string) { if (m.memberStatus !== 'LEAVE' && m.memberStatus !== 'TRAVEL') return false; if (m.memberStatusStart && ds < m.memberStatusStart) return false; if (m.memberStatusEnd && ds > m.memberStatusEnd) return false; return true }
 function leaderOf(teamId: number) { return members.find(m => m.teamId === teamId && m.role === 'LEADER') }
 let nextIterationId = 100
+interface CloseSnapshot { at: number; prevIterationOf: Map<number, number | null>; createdItemIds: number[]; reportId: number }
+const closeSnapshots = new Map<number, CloseSnapshot>()
 function iterationRoute(method: string, teamId: number, seg: string[], body: any) {
   const { u, m } = requireMember(teamId)
   const canManage = m.role === 'LEADER' || m.role === 'PO'
@@ -415,6 +605,26 @@ function iterationRoute(method: string, teamId: number, seg: string[], body: any
     if (method === 'GET') return { status: 200, data: keyDates.filter(k => k.iterationId === it.id) }
     if (method === 'POST') { if (!body.title || !body.date) throw err(400, 'VALIDATION', '标题与日期必填'); const kd: KeyDate = { id: nextKeyDateId++, teamId, iterationId: it.id, title: body.title, date: body.date, category: body.category ?? 'OTHER' }; keyDates.push(kd); return { status: 201, data: kd } }
   }
+  if (seg[4] === 'close-preview' && method === 'GET') {
+    const unfinished0 = items.filter(i => !i.deletedAt && i.iterationId === it.id && i.type !== 'TASK' && i.status !== 'DONE' && i.status !== 'CANCELLED')
+    const next0 = iterations.filter(x => x.teamId === teamId && x.status === 'PLANNING').sort((a, b) => a.id - b.id)[0]
+    return { status: 200, data: { iteration: it, unfinishedCount: unfinished0.length, defaultAction: next0 ? 'NEXT' : 'BACKLOG_OR_CREATE_NEXT', hasPlanningIteration: !!next0, items: unfinished0.map(i => ({ itemId: i.id, code: i.code, title: i.title, status: i.status })), willGenerate: ['迭代总结报告（类型 ITERATION_SUMMARY，含「迭代外工作」单列）', '按请求中 improvements 列表逐条生成复盘改进项（未传则不生成）', '未完成事项按 decisions 结转到下一迭代（默认）或退回待办池（BACKLOG）'], undoWindowHours: 24 } }
+  }
+  if (seg[4] === 'undo-close' && method === 'POST') {
+    if (!isLeader) throw err(403, 'FORBIDDEN', '仅组长可撤销结束迭代')
+    const snap = closeSnapshots.get(it.id); if (!snap) throw err(422, 'ILLEGAL_TRANSITION', '没有可撤销的结束记录')
+    if (Date.now() - snap.at > 24 * 3600 * 1000) throw err(422, 'UNDO_EXPIRED', '已超过 24 小时，不能撤销结束')
+    let restoredItems = 0; const deletedImprovementIds: number[] = [], keptImprovementIds: number[] = []
+    for (const [itemId, prevIter] of snap.prevIterationOf) { const x = items.find(i => i.id === itemId); if (x) { x.iterationId = prevIter; restoredItems++ } }
+    for (const cid of snap.createdItemIds) { const x = items.find(i => i.id === cid); if (!x) continue
+      if (progressList.some(pr => pr.itemId === cid) || comments.some(cm => cm.itemId === cid)) { keptImprovementIds.push(cid); continue }
+      deletedImprovementIds.push(cid); items.splice(items.indexOf(x), 1) }
+    let reportDeleted = false
+    const rep = reports.find(r => r.id === snap.reportId)
+    if (rep) { if (!rep.editedByHuman) { reports.splice(reports.indexOf(rep), 1); reportDeleted = true } }
+    it.status = 'ACTIVE'; closeSnapshots.delete(it.id)
+    return { status: 200, data: { iteration: it, restoredItems, deletedImprovementIds, keptImprovementIds, reportDeleted, nextIterationDeleted: false } }
+  }
   if (seg[4] === 'close' && method === 'POST') return idemWrap(`iteration-close|${it.id}`, () => {
     if (!isLeader) throw err(403, 'FORBIDDEN', '仅组长可结束迭代')
     if (it.status !== 'ACTIVE') throw err(422, 'ILLEGAL_TRANSITION', '只有进行中的迭代可以结束')
@@ -425,11 +635,14 @@ function iterationRoute(method: string, teamId: number, seg: string[], body: any
     if (needNext && !next && !body.createNextIteration) throw err(422, 'VALIDATION', '没有可承接的下一迭代，且未同意自动新建')
     if (needNext && !next) { const st = new Date(it.endDate + 'T00:00:00'); st.setDate(st.getDate() + 3); const en = new Date(st); en.setDate(en.getDate() + (allTeams().find(t => t.id === teamId)?.iterationWeeks ?? 2) * 7 - 3); const f = (d: Date) => `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`; next = { id: nextIterationId++, teamId, name: '下一迭代（自动新建）', goal: '', startDate: f(st), endDate: f(en), status: 'PLANNING' }; iterations.push(next) }
     let movedNext = 0, movedBacklog = 0
-    for (const i of unfinished) { const a = decisions.find(d => d.itemId === i.id)?.action ?? 'NEXT'; if (a === 'NEXT' && next) { i.iterationId = next.id; movedNext++ } else { i.iterationId = null; movedBacklog++ } i.version++ }
+    const prevIterOf = new Map<number, number | null>()
+    for (const i of unfinished) { prevIterOf.set(i.id, i.iterationId); const a = decisions.find(d => d.itemId === i.id)?.action ?? 'NEXT'; if (a === 'NEXT' && next) { i.iterationId = next.id; movedNext++ } else { i.iterationId = null; movedBacklog++ } i.version++ }
     it.status = 'FINISHED'
     const improvements: string[] = (body.improvements ?? []).filter((s: string) => s && s.trim())
-    if (next) for (const imp of improvements) createItemCore(teamId, u, m.role, { type: 'ADHOC', title: imp.trim(), destination: 'POOL', iterationId: next.id, labelNames: ['改进项'] })
+    const createdImpIds: number[] = []
+    if (next) for (const imp of improvements) createdImpIds.push(createItemCore(teamId, u, m.role, { type: 'ADHOC', title: imp.trim(), destination: 'POOL', iterationId: next.id, labelNames: ['改进项'] }).id)
     const summary = createReport(teamId, u.id, 'ITERATION_SUMMARY', null, null)
+    closeSnapshots.set(it.id, { at: Date.now(), prevIterationOf: prevIterOf, createdItemIds: createdImpIds, reportId: summary.id })
     for (const mm of members.filter(x => x.teamId === teamId)) notify(mm.userId, teamId, 'SYSTEM', null, `迭代「${it.name}」已结束，总结报告已生成`, u.id)
     return { status: 200, data: { iteration: it, movedToNext: movedNext, movedToBacklog: movedBacklog, nextIterationId: next?.id ?? null, reportId: summary.id } }
   })
@@ -447,8 +660,13 @@ function burndownOf(teamId: number, it: any) {
   const points = days.filter(ds => ds <= lastDay).map(ds => ({ date: ds, remainingEstimate: Math.round((total - inIter.filter(i => i.status === 'DONE' && (i.lastProgressAt ?? '') <= ds + 'T23:59:59').reduce((n, i) => n + (i.estimate ?? 0), 0)) * 10) / 10, remainingCount: null, doneCount: null, live: ds === todayStr() }))
   return { iteration: it, points, ideal, totalEstimate: total }
 }
+const standupRefreshAt = new Map<number, number>()
 function standupRoute(method: string, teamId: number, seg: string[], body: any, q: URLSearchParams) {
   requireMember(teamId); const st = settingsOf(teamId)
+  if (method === 'POST' && seg[3] === 'refresh') { const { m } = requireMember(teamId); if (!(m.role === 'LEADER' || m.role === 'PO')) throw err(403, 'FORBIDDEN', '仅组长或 PO 可刷新站会摘要')
+    const last = standupRefreshAt.get(teamId) ?? 0; const wait = 60 - Math.floor((Date.now() - last) / 1000)
+    if (last && wait > 0) throw err(429, 'RATE_LIMITED', `刷新过于频繁，请 ${wait} 秒后再试`, { retryAfterSeconds: wait })
+    standupRefreshAt.set(teamId, Date.now()); return { status: 200, data: standupOf(teamId, q.get('date') ?? todayStr()) } }
   if (method === 'PUT' && seg[3] === 'note') { const d = body.date ?? todayStr(); standupNotes.set(`${teamId}|${d}`, body.content ?? ''); return { status: 200, data: standupOf(teamId, d) } }
   if (method === 'GET' && seg.length === 3) { const d = q.get('date') ?? todayStr(); return { status: 200, data: standupOf(teamId, d) } }
   throw err(404, 'NOT_FOUND', '接口不存在')
@@ -462,7 +680,7 @@ function standupOf(teamId: number, date: string) {
     todayItems: items.filter(i => !i.deletedAt && i.ownerIds.includes(m.userId) && (i.status === 'IN_PROGRESS' || i.status === 'NOT_STARTED')).map(view),
     blockedItems: items.filter(i => !i.deletedAt && i.ownerIds.includes(m.userId) && i.blocked).map(view),
   }))
-  return { date, previousWorkday: prev, members: ms, note: standupNotes.get(`${teamId}|${date}`) ?? null }
+  return { date, previousWorkday: prev, members: ms, note: standupNotes.get(`${teamId}|${date}`) ?? null, dataAsOf: new Date().toISOString() }
 }
 function riskSignals(teamId: number) {
   const st = settingsOf(teamId); const th = st.reminderThresholds; const today = todayStr(); const out: any[] = []
@@ -471,7 +689,8 @@ function riskSignals(teamId: number) {
     if (i.blocked) out.push({ rule: 'BLOCKED_LONG', severity: 'HIGH', itemId: i.id, itemCode: i.code, userId: null, message: `${i.code} ${i.title} 已阻塞：${i.blockReason ?? ''}` })
     if (i.dueDate && i.dueDate < today) out.push({ rule: 'OVERDUE', severity: 'HIGH', itemId: i.id, itemCode: i.code, userId: null, message: `${i.code} ${i.title} 已逾期（截止 ${i.dueDate}）` })
     else if (i.dueDate && workdaysBetween(today, i.dueDate, st) <= th.dueSoonWorkdays && i.dueDate >= today) out.push({ rule: 'DUE_SOON', severity: 'MEDIUM', itemId: i.id, itemCode: i.code, userId: null, message: `${i.code} ${i.title} 将在 ${i.dueDate} 到期` })
-    if (i.status === 'IN_PROGRESS' && i.lastProgressAt && workdaysBetween(i.lastProgressAt.slice(0, 10), today, st) > th.staleInProgressWorkdays) out.push({ rule: 'STALE', severity: 'MEDIUM', itemId: i.id, itemCode: i.code, userId: null, message: `${i.code} ${i.title} 长期未更新` })
+    const inPlanningIter = i.iterationId != null && iterations.find(x => x.id === i.iterationId)?.status === 'PLANNING'
+    if (!inPlanningIter && i.status === 'IN_PROGRESS' && i.lastProgressAt && workdaysBetween(i.lastProgressAt.slice(0, 10), today, st) > th.staleInProgressWorkdays) out.push({ rule: 'STALE', severity: 'MEDIUM', itemId: i.id, itemCode: i.code, userId: null, message: `${i.code} ${i.title} 长期未更新` })
     if (i.status === 'UNCLAIMED' && (i.priority === 'P0' || i.priority === 'P1')) out.push({ rule: 'UNCLAIMED_PRIORITY', severity: 'MEDIUM', itemId: i.id, itemCode: i.code, userId: null, message: `${i.code} ${i.title} 高优先级仍无人认领` })
     if (i.nudgeCount >= 3) out.push({ rule: 'NUDGED_OFTEN', severity: 'LOW', itemId: i.id, itemCode: i.code, userId: null, message: `${i.code} ${i.title} 已被催 ${i.nudgeCount} 次` })
   }
@@ -484,7 +703,7 @@ function overview(teamId: number) {
     const mine = items.filter(i => !i.deletedAt && i.ownerIds.includes(mm.userId) && i.status !== 'DONE' && i.status !== 'CANCELLED')
     const inProg = mine.filter(i => i.status === 'IN_PROGRESS')
     const remainingCapacity = active ? Math.round(workdaysBetween(today, active.endDate, st) * Number(st.capacityPointsPerWorkday) * 10) / 10 : null
-    return { userId: mm.userId, memberStatus: mm.memberStatus, memberStatusStart: mm.memberStatusStart, memberStatusEnd: mm.memberStatusEnd, inProgressItems: inProg.map(view), lastProgressAt: mine.map(i => i.lastProgressAt).filter(Boolean).sort().pop() ?? null, staleCount: inProg.filter(i => !i.lastProgressAt || workdaysBetween(i.lastProgressAt.slice(0, 10), today, st) > st.reminderThresholds.staleInProgressWorkdays).length, remainingPoints: mine.reduce((n, i) => n + (i.estimate ?? 0), 0), remainingCapacityPoints: remainingCapacity, free: inProg.length === 0 && !awayOn(mm, today) }
+    return { userId: mm.userId, memberStatus: mm.memberStatus, memberStatusStart: mm.memberStatusStart, memberStatusEnd: mm.memberStatusEnd, independentCount: mine.filter(i => i.iterationId == null && i.type !== 'TASK').length, inProgressItems: inProg.map(view), lastProgressAt: mine.map(i => i.lastProgressAt).filter(Boolean).sort().pop() ?? null, staleCount: inProg.filter(i => !i.lastProgressAt || workdaysBetween(i.lastProgressAt.slice(0, 10), today, st) > st.reminderThresholds.staleInProgressWorkdays).length, remainingPoints: mine.reduce((n, i) => n + (i.estimate ?? 0), 0), remainingCapacityPoints: remainingCapacity, free: inProg.length === 0 && !awayOn(mm, today) }
   })
   let health: any = null
   if (active) {
@@ -595,6 +814,9 @@ function reportTopRoute(method: string, seg: string[], body: any) {
   const mm = memberOf(r.teamId, u.id); if (!mm) throw err(404, 'NOT_FOUND', '报告不存在')
   if (method === 'POST' && seg[2] === 'restore') { if (!canEditReport(r, u, mm)) throw err(403, 'FORBIDDEN', '无权恢复该报告'); r.deletedAt = null; r.version++; r.updatedAt = new Date().toISOString(); return { status: 200, data: reportView(r) } }
   if (r.deletedAt) throw err(404, 'NOT_FOUND', '报告不存在')
+  if (method === 'GET' && seg[2] === 'export-docx') { if (!canViewReport(r, u, mm)) throw err(404, 'NOT_FOUND', '报告不存在')
+    const html = r.content.split('\n').map(ln => { const t = ln.trim(); if (t.startsWith('## ')) return `<h2>${t.slice(3)}</h2>`; if (t.startsWith('# ')) return `<h1>${t.slice(2)}</h1>`; if (t.startsWith('- ')) return `<li>${t.slice(2)}</li>`; return t ? `<p>${t}</p>` : '' }).join('')
+    return { status: 200, data: { filename: r.title + '.docx', contentHtml: `<html><body>${html}</body></html>`, mockDocx: true } } }
   if (method === 'GET' && seg.length === 2) { if (!canViewReport(r, u, mm)) throw err(404, 'NOT_FOUND', '报告不存在'); return { status: 200, data: reportView(r) } }
   if (method === 'POST' && seg[2] === 'regenerate') {
     if (!canGenReport(r.kind, u, mm) || (r.kind === 'PERSONAL_WEEKLY' && r.ownerId !== u.id)) throw err(403, 'FORBIDDEN', '无权重新生成该报告')
@@ -670,7 +892,7 @@ function createItemCore(teamId: number, creator: StoredUser, role: string, body:
     status: body.type === 'TASK' ? 'NOT_STARTED' : dest === 'ASSIGN' ? 'NOT_STARTED' : 'UNCLAIMED',
     priority: body.priority ?? 'P2', creatorId: creator.id,
     ownerIds: body.type === 'TASK' ? [] : dest === 'ASSIGN' ? ownerIds : [],
-    acceptorId: body.type === 'TASK' ? null : body.acceptorId ?? creator.id,
+    acceptorId: body.type === 'TASK' ? null : body.acceptorId ?? null,
     storyCategory: body.type === 'STORY' ? body.storyCategory : null,
     poId: body.type === 'TASK' ? body.poId ?? creator.id : null,
     batchId: body.batchId ?? null, assignedDirectly: dest === 'ASSIGN' && body.type !== 'TASK',
@@ -682,7 +904,17 @@ function createItemCore(teamId: number, creator: StoredUser, role: string, body:
     nudgeCount: 0, labels: body.labelNames ?? [], childCount: 0, childDoneCount: 0, commentCount: 0, version: 1,
     createdAt: new Date().toISOString(), updatedAt: new Date().toISOString(), lastProgressAt: null, deletedAt: null, checklist: [],
   }
-  nextItemId++; items.push(it); act(it.id, creator.id, 'CREATE', null, it.status, '创建事项')
+  nextItemId++; items.push(it)
+  if (it.type !== 'TASK' && it.acceptorId == null) {
+    if (it.type === 'STORY') {
+      const st = settingsOf(teamId); const want = (st as any).storyAcceptRole ?? 'PO'; const other = want === 'PO' ? 'LEADER' : 'PO'
+      const pick = (r: string) => members.find(x => x.teamId === teamId && x.role === r)?.userId
+      let acc = pick(want)
+      if (acc != null && it.ownerIds.includes(acc)) { const alt = pick(other); if (alt != null && !it.ownerIds.includes(alt)) { acc = alt; (it as any).acceptorAutoTransferred = true } }
+      it.acceptorId = acc ?? creator.id
+    } else it.acceptorId = creator.id
+  }
+  act(it.id, creator.id, 'CREATE', null, it.status, '创建事项')
   for (const oid of it.ownerIds) if (oid !== creator.id) notify(oid, teamId, 'ASSIGNMENT', it, `你被指派了 ${it.code} ${it.title}`, creator.id)
   // 邀请认领通知（1.0.4 J，对齐设计 3.7「被邀请认领要通知」）：destination=INVITE 建项时逐个通知 inviteeIds。
   if (dest === 'INVITE') for (const iid of it.inviteeIds) if (iid !== creator.id) notify(iid, teamId, 'ASSIGNMENT', it, `${creator.displayName} 邀请你认领 ${it.code} ${it.title}`, creator.id)
@@ -825,7 +1057,7 @@ function itemsRoute(method: string, teamId: number, seg: string[], body: any, q:
     if (!mine) throw err(404, 'NOT_FOUND', '没有待回应的催')
     const label = body.response === 'SOON' ? '马上更新' : body.response === 'TODAY' ? '今天搞定' : body.response === 'BLOCKED' ? '卡住了' : null
     if (!label) throw err(400, 'VALIDATION', 'response 须为 SOON / TODAY / BLOCKED')
-    if (body.response === 'BLOCKED') { it.blocked = true; it.blockReason = '被催办后反馈：卡住了'; const ld = leaderOf(teamId); if (ld) notify(ld.userId, teamId, 'ITEM_UPDATE', it, `${u.displayName} 回应催办：${it.code} 卡住了`, u.id) }
+    if (body.response === 'BLOCKED') { if (!body.blockReason?.trim()) throw err(400, 'VALIDATION', '反馈「卡住了」必须填写一句话原因（P15）'); it.blocked = true; it.blockReason = body.blockReason.trim(); const ld = leaderOf(teamId); if (ld) notify(ld.userId, teamId, 'ITEM_UPDATE', it, `${u.displayName} 回应催办：${it.code} 卡住了`, u.id) }
     notify(mine.fromUserId, teamId, 'NUDGE', it, `${u.displayName} 回应了对 ${it.code} 的催办：${label}`, u.id)
     nudges = nudges.filter(n => n.id !== mine.id)
     return { status: 200, data: { itemId: it.id, response: body.response } }
@@ -1080,7 +1312,7 @@ function aiRoute(method: string, teamId: number, seg: string[], body: any) {
     aiLog(teamId, u.id, 'quick-update', t0); return { status: 200, data: { actions, unmatched } } }
   if (sub === 'split-stories' && method === 'POST') { const t0 = Date.now(); requireAi(teamId, 'splitStories')
     const task = items.find(i => i.id === Number(body?.itemId) && !i.deletedAt); if (!task || task.type !== 'TASK') throw err(404, 'NOT_FOUND', '任务不存在')
-    if (m.role !== 'PO') throw err(403, 'FORBIDDEN', '仅 PO 可使用 AI 拆故事')
+    if (m.role !== 'PO' && m.role !== 'LEADER') throw err(403, 'FORBIDDEN', '仅组长或 PO 可使用 AI 拆故事')
     const base = task.title
     const stories = [
       { title: `${base}：方案与范围确认`, storyCategory: 'ANALYSIS', estimate: 1 },

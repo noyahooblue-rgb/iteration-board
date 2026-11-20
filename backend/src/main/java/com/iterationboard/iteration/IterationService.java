@@ -39,10 +39,12 @@ public class IterationService {
     private final ItemService itemService;
     private final PlatformTime platformTime;
     private final ReportRepo reportRepo;
+    private final ItemOwnerRepo ownerRepo;
 
     public IterationService(IterationRepo iterationRepo, ItemRepo itemRepo, IterationSnapshotRepo snapshotRepo,
                             KeyDateRepo keyDateRepo, TeamMemberRepo memberRepo, TeamService teamService,
-                            NotifyService notifyService, ItemService itemService, ReportRepo reportRepo, PlatformTime platformTime) {
+                            NotifyService notifyService, ItemService itemService, ReportRepo reportRepo, PlatformTime platformTime,
+                            ItemOwnerRepo ownerRepo) {
         this.iterationRepo = iterationRepo;
         this.itemRepo = itemRepo;
         this.snapshotRepo = snapshotRepo;
@@ -53,6 +55,7 @@ public class IterationService {
         this.itemService = itemService;
         this.reportRepo = reportRepo;
         this.platformTime = platformTime;
+        this.ownerRepo = ownerRepo;
     }
 
     private void requireLeaderOrPo(Long teamId, AppUser user) {
@@ -202,6 +205,7 @@ public class IterationService {
         List<Item> unfinished = iterationItems(it).stream()
                 .filter(i -> i.getStatus() != ItemStatus.DONE && i.getStatus() != ItemStatus.CANCELLED)
                 .toList();
+        boolean createdNextIteration = false;
         boolean anyNext = unfinished.stream()
                 .anyMatch(i -> "NEXT".equals(decisionMap.getOrDefault(i.getId(), "NEXT")));
         Iteration next = null;
@@ -218,10 +222,23 @@ public class IterationService {
                 LocalDate ns = it.getEndDate() == null ? platformTime.today() : it.getEndDate().plusDays(1);
                 int weeks = Math.max(1, team.getIterationWeeks());
                 next = doCreate(teamId, it.getName() + "（续）", it.getGoal(), ns, ns.plusWeeks(weeks).minusDays(1));
+                createdNextIteration = true;
             }
         }
         // 先拍关闭快照（反映结转前的燃尽终点），再执行结转
         takeSnapshot(it, platformTime.today());
+        // P18 结束快照：记录每个未完成事项结转前的迭代归属，供 24 小时内撤销结束恢复
+        tools.jackson.databind.ObjectMapper snapMapper = new tools.jackson.databind.ObjectMapper();
+        tools.jackson.databind.node.ObjectNode snap = snapMapper.createObjectNode();
+        snap.put("closedAt", Instant.now().toString());
+        snap.put("previousStatus", it.getStatus());
+        snap.put("createdNextIteration", createdNextIteration);
+        tools.jackson.databind.node.ArrayNode snapItems = snap.putArray("items");
+        for (Item item : unfinished) {
+            tools.jackson.databind.node.ObjectNode n = snapItems.addObject();
+            n.put("itemId", item.getId());
+            n.put("fromIterationId", it.getId());
+        }
         int toNext = 0, toBacklog = 0;
         for (Item item : unfinished) {
             String action = decisionMap.getOrDefault(item.getId(), "NEXT");
@@ -234,27 +251,152 @@ public class IterationService {
             }
             itemRepo.save(item);
         }
+        snap.put("nextIterationId", next == null ? null : next.getId());
+        tools.jackson.databind.node.ArrayNode snapImprovements = snap.putArray("improvementItemIds");
         int improvementCreated = 0;
         if (improvements != null) {
             for (String title : improvements) {
                 if (title == null || title.isBlank()) continue;
-                itemService.create(teamId, user, new ItemService.CreateItemCmd(
+                Item created = itemService.create(teamId, user, new ItemService.CreateItemCmd(
                         ItemType.ADHOC, title, "迭代复盘改进项", null, "POOL",
                         null, null, null, null, null, null,
                         next == null ? null : next.getId(), List.of("改进项"), null, null));
+                snapImprovements.add(created.getId());
                 improvementCreated++;
             }
         }
         it.setStatus("FINISHED");
         it.setClosedAt(Instant.now());
-        iterationRepo.save(it);
         Report report = reportService.generateIterationSummary(team, it, user);
+        snap.put("reportId", report.getId());
+        try {
+            it.setCloseSnapshotJson(snapMapper.writeValueAsString(snap));
+        } catch (Exception e) {
+            throw new IllegalStateException("结束快照序列化失败", e);
+        }
+        iterationRepo.save(it);
         for (TeamMember m : memberRepo.findByTeamId(teamId)) {
             notifyService.notifyInTeam(m.getUser(), "ITERATION_FINISHED", null, team, user,
                     "迭代「" + it.getName() + "」已结束，总结报告已生成");
         }
         return new CloseResult(Dtos.IterationDto.of(it), report.getId(),
                 next == null ? null : next.getId(), toNext, toBacklog, improvementCreated, false);
+    }
+
+    /** P18：结束迭代确认数据——将结转/退回的事项数、将生成的改进项与总结说明。 */
+    @Transactional(readOnly = true)
+    public Map<String, Object> closePreview(Long teamId, Long iterationId, AppUser user) {
+        requireLeader(teamId, user);
+        Iteration it = requireIteration(teamId, iterationId);
+        List<Item> unfinished = iterationItems(it).stream()
+                .filter(i -> i.getStatus() != ItemStatus.DONE && i.getStatus() != ItemStatus.CANCELLED)
+                .toList();
+        boolean hasNext = iterationRepo.findByTeamIdOrderByStartDateDescIdDesc(teamId).stream()
+                .anyMatch(x -> !x.getId().equals(iterationId) && "PLANNING".equals(x.getStatus()));
+        Map<String, Object> out = new LinkedHashMap<>();
+        out.put("iteration", Dtos.IterationDto.of(it));
+        out.put("unfinishedCount", unfinished.size());
+        out.put("defaultAction", hasNext ? "NEXT" : "BACKLOG_OR_CREATE_NEXT");
+        out.put("hasPlanningIteration", hasNext);
+        out.put("items", unfinished.stream().map(i -> {
+            Map<String, Object> m = new LinkedHashMap<>();
+            m.put("itemId", i.getId());
+            m.put("code", i.getCode());
+            m.put("title", i.getTitle());
+            m.put("status", i.getStatus().name());
+            return m;
+        }).toList());
+        out.put("willGenerate", List.of(
+                "迭代总结报告（类型 ITERATION_SUMMARY，含「迭代外工作」单列）",
+                "按请求中 improvements 列表逐条生成复盘改进项（未传则不生成）",
+                "未完成事项按 decisions 结转到下一迭代（默认）或退回待办池（BACKLOG）"));
+        out.put("undoWindowHours", 24);
+        return out;
+    }
+
+    public record UndoCloseResult(Dtos.IterationDto iteration, int restoredItems,
+                                  List<Long> deletedImprovementIds, List<Long> keptImprovementIds,
+                                  boolean reportDeleted, boolean nextIterationDeleted) {}
+
+    /** P18：撤销结束——结束 24 小时内组长可恢复结转前状态；已被人操作过的改进项保留并提示。 */
+    @Transactional
+    public UndoCloseResult undoClose(Long teamId, Long iterationId, AppUser user) {
+        requireLeader(teamId, user);
+        Iteration it = requireIteration(teamId, iterationId);
+        if (!"FINISHED".equals(it.getStatus())) {
+            throw new ApiException(HttpStatus.UNPROCESSABLE_ENTITY, "ILLEGAL_TRANSITION", "迭代未结束，不能撤销结束");
+        }
+        if (it.getClosedAt() == null || it.getClosedAt().plus(24, java.time.temporal.ChronoUnit.HOURS).isBefore(Instant.now())) {
+            throw new ApiException(HttpStatus.UNPROCESSABLE_ENTITY, "UNDO_WINDOW_EXPIRED", "已超过结束 24 小时的撤销窗口");
+        }
+        if (it.getCloseSnapshotJson() == null || it.getCloseSnapshotJson().isBlank()) {
+            throw new ApiException(HttpStatus.UNPROCESSABLE_ENTITY, "NO_CLOSE_SNAPSHOT", "该迭代没有结束快照（1.1.0 之前结束的迭代不支持撤销）");
+        }
+        tools.jackson.databind.ObjectMapper snapMapper = new tools.jackson.databind.ObjectMapper();
+        tools.jackson.databind.JsonNode snap;
+        try {
+            snap = snapMapper.readTree(it.getCloseSnapshotJson());
+        } catch (Exception e) {
+            throw new IllegalStateException("结束快照解析失败", e);
+        }
+        int restored = 0;
+        for (tools.jackson.databind.JsonNode n : snap.path("items")) {
+            Long itemId = n.path("itemId").asLong();
+            Item item = itemRepo.findByIdAndTeamId(itemId, teamId).orElse(null);
+            if (item == null || item.getDeletedAt() != null) continue;
+            item.setIteration(it);
+            itemRepo.save(item);
+            restored++;
+        }
+        List<Long> deletedImprovements = new ArrayList<>();
+        List<Long> keptImprovements = new ArrayList<>();
+        for (tools.jackson.databind.JsonNode n : snap.path("improvementItemIds")) {
+            Long itemId = n.asLong();
+            Item item = itemRepo.findByIdAndTeamId(itemId, teamId).orElse(null);
+            if (item == null) continue;
+            boolean operated = item.getDeletedAt() != null || item.getLastProgressAt() != null
+                    || item.getStatus() != ItemStatus.UNCLAIMED
+                    || !ownerRepoEmpty(itemId);
+            if (operated) {
+                keptImprovements.add(itemId);
+            } else {
+                // 删除口径与平台一致：软删除进回收站（活动/标签等关联保留，留存清理到期后物理删除）
+                item.setDeletedAt(Instant.now());
+                item.setDeletedById(user.getId());
+                itemRepo.save(item);
+                deletedImprovements.add(itemId);
+            }
+        }
+        boolean reportDeleted = false;
+        long reportId = snap.path("reportId").asLong(0);
+        if (reportId > 0) {
+            var report = reportRepo.findById(reportId).orElse(null);
+            if (report != null && report.getDeletedAt() == null) {
+                report.setDeletedAt(Instant.now());
+                report.setDeletedById(user.getId());
+                reportRepo.save(report);
+                reportDeleted = true;
+            }
+        }
+        boolean nextDeleted = false;
+        long nextId = snap.path("nextIterationId").asLong(0);
+        if (snap.path("createdNextIteration").asBoolean(false) && nextId > 0) {
+            var next = iterationRepo.findByIdAndTeamId(nextId, teamId).orElse(null);
+            if (next != null && "PLANNING".equals(next.getStatus()) && iterationItems(next).isEmpty()) {
+                iterationRepo.delete(next);
+                nextDeleted = true;
+            }
+        }
+        it.setStatus("ACTIVE");
+        it.setClosedAt(null);
+        it.setCloseSnapshotJson(null);
+        iterationRepo.save(it);
+        return new UndoCloseResult(Dtos.IterationDto.of(it), restored,
+                deletedImprovements, keptImprovements, reportDeleted, nextDeleted);
+    }
+
+    private boolean ownerRepoEmpty(Long itemId) {
+        return ownerRepo.findByItemId(itemId).isEmpty();
     }
 
     /** 迭代内事项（非任务、未删除）。 */

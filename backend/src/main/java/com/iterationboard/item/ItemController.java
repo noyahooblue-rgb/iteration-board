@@ -41,7 +41,7 @@ public class ItemController {
     public record ReorderRequest(List<Long> orderedIds) {}
     public record ProgressRequest(String text, Integer percent, Boolean blocked, String blockReason, String nextStep, String kind,
                                   List<Long> mentionIds) {}
-    public record NudgeRespondRequest(String response) {}
+    public record NudgeRespondRequest(String response, String reason) {}
     public record CommentRequest(String content, List<Long> mentionIds) {}
     public record ChecklistCreateRequest(String text, Integer sortOrder) {}
     public record ChecklistPatchRequest(String text, Boolean done, Integer sortOrder) {}
@@ -219,7 +219,7 @@ public class ItemController {
             var replay = idempotency.replay(u.getId(), scope, idemKey);
             if (replay.isPresent()) return replay.get();
         }
-        var result = nudgeService.respond(teamId, itemId, u, req.response());
+        var result = nudgeService.respond(teamId, itemId, u, req.response(), req.reason());
         if (idemKey != null) return idempotency.remember(u.getId(), scope, idemKey, HttpStatus.OK.value(), result);
         return ResponseEntity.ok(result);
     }

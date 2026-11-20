@@ -22,6 +22,7 @@ const router = createRouter({ history: createWebHistory(), routes: [
   { path: '/search', component: () => import('../views/SearchView.vue'), meta: { auth: true, team: true } },
   { path: '/trash', component: () => import('../views/TrashView.vue'), meta: { auth: true, team: true } },
   { path: '/admin', component: () => import('../views/AdminView.vue'), meta: { auth: true, admin: true } },
+  { path: '/feedback', component: () => import('../views/FeedbackView.vue'), meta: { auth: true, team: true } },
   // 组件展示（1.0.4 C）：__IB_SHOWCASE__ 为构建期常量（vite.config define）。正式构建为 false，
   // 本分支被静态消除、ShowcaseView 不进 dist；仅 dev / 演示构建（VITE_API_MODE=mock）/ VITE_SHOWCASE=1 才包含。
   // 运行时再叠一层守卫（下方 beforeEach）：包含该路由的构建里也只有 demoMode 或 DEV 可访问。

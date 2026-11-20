@@ -124,13 +124,15 @@ class M1IntegrationTest {
     }
 
     // ---------- 1. 注册→登录→改密→新密码登录；第一个账号 platformAdmin ----------
+    // 1.1.0 修订（P01/q3tbdxut）：取消「第一个注册自动成为平台管理员」，自助注册永不授予平台管理员，
+    // 故此处断言由 isTrue 改为 isFalse（规则变更，见 V110IntegrationTest 的引导创建 admin 覆盖）。
 
     @Test
-    void registerLoginChangePassword_firstUserIsPlatformAdmin() throws Exception {
+    void registerLoginChangePassword_firstUserIsNotPlatformAdmin() throws Exception {
         MockHttpSession s = register("alice", "爱丽丝", "passw0rd1");
         MvcResult me = mvc.perform(get("/api/v1/auth/me").session(s)).andExpect(status().isOk()).andReturn();
         String body = me.getResponse().getContentAsString();
-        assertThat((Boolean) JsonPath.read(body, "$.platformAdmin")).isTrue();
+        assertThat((Boolean) JsonPath.read(body, "$.platformAdmin")).isFalse();
         assertThat((String) JsonPath.read(body, "$.loginName")).isEqualTo("alice");
 
         mvc.perform(post("/api/v1/auth/change-password").session(s).with(csrf())

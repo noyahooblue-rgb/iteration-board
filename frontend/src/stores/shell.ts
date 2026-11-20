@@ -3,6 +3,7 @@ import { api, subscribeEvents } from '../api/http'
 import type { Item, NotificationItem } from '../api/types'
 import { useTeam } from './team'
 import { useAuth } from './auth'
+import { applyUnreadBadge, saveNotifyPrefs, loadNotifyPrefs } from '../utils/browserNotify'
 
 // 全局计数 store（1.0.4 A）：所有「需要我处理」的数字统一在应用外壳层加载与维护，任何页面都显示，
 // 不再由某个视图通过 prop 传入（旧实现只有 Pool/Board 传 unclaimed，切到其他页角标就消失）。
@@ -31,7 +32,7 @@ export const useShell = defineStore('shell', {
   actions: {
     async loadUnread() {
       const team = useTeam(); if (!team.currentId) return
-      try { const r = await api.get(`/notifications/unread-count?teamId=${team.currentId}`); this.unread = r.unread ?? 0 } catch {}
+      try { const r = await api.get(`/notifications/unread-count?teamId=${team.currentId}`); this.unread = r.unread ?? 0 } catch {} this.syncBadge()
     },
     async loadNotifs() {
       const team = useTeam(); if (!team.currentId) return
@@ -52,6 +53,10 @@ export const useShell = defineStore('shell', {
         try { const reqs = await api.get(`/teams/${team.currentId}/join-requests`); this.pendingJoins = Array.isArray(reqs) ? reqs.length : 0 } catch { this.pendingJoins = 0 }
       } else this.pendingJoins = 0
     },
+    // 浏览器通知第 1/2 层（1.1.0）：标题未读数 + favicon 角标随未读数实时同步，归零恢复。
+    syncBadge() { applyUnreadBadge(this.unread) },
+    // 桌面通知/提示音是浏览器本地偏好（后端偏好接口无此字段），以 localStorage 为准，此处仅确保默认值就位，不覆盖用户已保存的选择。
+    async loadNotifPrefs() { saveNotifyPrefs(loadNotifyPrefs()) },
     // 挂载时启动 SSE 订阅：收到事件先本地 +1 铃铛（即时反馈），再防抖全量刷新所有计数。
     start(onNotify?: (n: any) => void) {
       if (this._unsub) return
@@ -62,6 +67,7 @@ export const useShell = defineStore('shell', {
           return
         }
         this.unread += 1
+        this.syncBadge()
         if (onNotify) onNotify(n)
         clearTimeout(this._timer)
         this._timer = setTimeout(() => { this.refresh(); }, 400)
@@ -70,13 +76,13 @@ export const useShell = defineStore('shell', {
     stop() { if (this._unsub) { this._unsub(); this._unsub = null } },
     async markRead(n: NotificationItem) {
       if (n.readAt !== null) return
-      try { await api.post(`/notifications/${n.id}/read`); n.readAt = new Date().toISOString(); this.unread = Math.max(0, this.unread - 1) } catch {}
+      try { await api.post(`/notifications/${n.id}/read`); n.readAt = new Date().toISOString(); this.unread = Math.max(0, this.unread - 1); this.syncBadge() } catch {}
     },
     async markAllRead() {
       const team = useTeam()
       try {
         await api.post('/notifications/read-all', { teamId: team.currentId })
-        this.notifs.forEach(n => n.readAt = n.readAt ?? new Date().toISOString()); this.unread = 0
+        this.notifs.forEach(n => n.readAt = n.readAt ?? new Date().toISOString()); this.unread = 0; this.syncBadge()
         return true
       } catch { return false }
     },

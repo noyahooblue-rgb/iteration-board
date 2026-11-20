@@ -18,7 +18,8 @@ public final class NotificationView {
             case "MENTION" -> "MENTION";
             case "SUBMIT", "APPROVE", "REJECT", "BLOCK", "DECLINE", "RELEASE", "PROGRESS",
                  "CLAIM", "CANCEL", "COMMENT" -> "ITEM_UPDATE";
-            case "JOIN", "JOIN_REQUEST", "JOIN_APPROVED", "JOIN_REJECTED", "ITERATION_STARTED", "ITERATION_FINISHED", "SYSTEM" -> "SYSTEM";
+            case "JOIN", "JOIN_REQUEST", "JOIN_APPROVED", "JOIN_REJECTED", "ITERATION_STARTED", "ITERATION_FINISHED", "SYSTEM",
+                 "FEEDBACK_STATUS", "FEEDBACK_COMMENT", "FEEDBACK_PLUS_ONE" -> "SYSTEM";
             default -> type.startsWith("REMINDER") ? "REMINDER" : "ITEM_UPDATE";
         };
     }

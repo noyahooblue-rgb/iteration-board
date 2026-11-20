@@ -28,9 +28,15 @@ if errorlevel 1 (
   exit /b 1
 )
 
+rem --- resolve the backup directory (config backup.dir, 1.1.0) -
+set "BKROOT=%ROOT%\backup"
+for /f "usebackq delims=" %%V in (`powershell -NoProfile -Command "$c = Get-Content '%ROOT%\config\application.yml' -Raw -ErrorAction SilentlyContinue; if ($c -match '(?ms)^backup:[ \t]*\r?\n[ \t]+dir:[ \t]*\"([^\"]*)\"') { $Matches[1] } elseif ($c -match '(?m)^[ \t]+dir:[ \t]*(\S+)[ \t]*$') { $Matches[1] }"`) do set "BKROOT=%%V"
+if not "%BKROOT%"=="" if not "%BKROOT:~1,1%"==":" set "BKROOT=%ROOT%\%BKROOT%"
+if "%BKROOT%"=="" set "BKROOT=%ROOT%\backup"
+
 if "%SEL%"=="" (
-  echo Available backups in backup\ :
-  dir /B /AD "%ROOT%\backup" 2>nul
+  echo Available backups in %BKROOT% :
+  dir /B /AD "%BKROOT%" 2>nul
   set /p "SEL=Type the backup folder name to restore: "
 )
 if "%SEL%"=="" (
@@ -38,7 +44,8 @@ if "%SEL%"=="" (
   call :ib_pause
   exit /b 1
 )
-set "SRC=%ROOT%\backup\%SEL%"
+set "SRC=%BKROOT%\%SEL%"
+if exist "%SEL%\db.dump" set "SRC=%SEL%"
 if not exist "%SRC%\db.dump" (
   echo [ERROR] %SRC%\db.dump not found.
   call :ib_pause

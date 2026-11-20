@@ -90,6 +90,10 @@ public class Item {
     @Column(name = "updated_at", nullable = false)
     private Instant updatedAt = Instant.now();
 
+    /** P17：验收人自动转交说明（仅本次响应携带，不落库）。 */
+    @Transient
+    private String acceptorNote;
+
     @PreUpdate void touch() { updatedAt = Instant.now(); }
 
     public Long getId() { return id; }
@@ -169,4 +173,6 @@ public class Item {
     public Instant getCreatedAt() { return createdAt; }
     public Instant getUpdatedAt() { return updatedAt; }
     public Instant getDeletedAt() { return deletedAt; }
+    public String getAcceptorNote() { return acceptorNote; }
+    public void setAcceptorNote(String v) { acceptorNote = v; }
 }

@@ -258,10 +258,13 @@ public class AiFeatureService {
         } catch (Exception e) { return ItemType.ADHOC; }
     }
 
-    // ---------- 7.5 AI 拆故事（仅 PO；绝不输出建议负责人） ----------
+    // ---------- 7.5 AI 拆故事（修订四 P06：组长和 PO 都可；绝不输出建议负责人） ----------
     @Transactional // D-1：经 AiGateway 写 ai_call_log，必须可写事务（只读事务会让日志 INSERT 失败并毒化外层事务）
     public Map<String, Object> splitStories(Long teamId, AppUser user, Long taskId) {
-        requirePo(teamId, user);
+        TeamMember me = teamService.requireMember(teamId, user);
+        if (me.getRole() != Role.PO && me.getRole() != Role.LEADER) {
+            throw ApiException.forbidden("只有组长或 PO 可以使用 AI 拆故事");
+        }
         Item task = itemService.get(teamId, taskId, user);
         if (task.getType() != ItemType.TASK) throw ApiException.validation("AI 拆故事只针对任务");
         ObjectNode payload = om.createObjectNode();

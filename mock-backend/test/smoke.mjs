@@ -344,7 +344,7 @@ r = await req('POST', `/teams/${T}/ai/quick-update`, { text: '那个做到 50% �
 await login('po')
 r = await req('POST', `/teams/${T}/ai/split-stories`, { itemId: 1 }); check('M4 AI 拆故事返回草稿与待澄清问题（clarifyingQuestions/taskId）', r.status === 200 && r.data.taskId === 1 && r.data.stories.length >= 3 && r.data.clarifyingQuestions.length >= 1 && r.data.acceptancePoints.length >= 1)
 await login('leader')
-r = await req('POST', `/teams/${T}/ai/split-stories`, { itemId: 1 }); check('M5 AI 拆故事组长 403（仅 PO，与真实后端一致）', r.status === 403)
+r = await req('POST', `/teams/${T}/ai/split-stories`, { itemId: 1 }); check('M5 AI 拆故事组长可用（P06：组长与 PO 均可，与真实后端一致）', r.status === 200 && r.data.taskId === 1)
 await login('member')
 r = await req('POST', `/teams/${T}/ai/split-stories`, { itemId: 1 }); check('M4 AI 拆故事成员 403', r.status === 403)
 await login('leader')
@@ -415,6 +415,114 @@ await login('member') // 苏晴 user3，SKY-8 已由其认领并进行中（见 
 r = await req('POST', `/teams/${T}/items/8/progress`, { text: '进展冒烟 @王启明 看一下', mentionIds: [4] })
 check('1.0.4 进展接受 mentionIds 并回显', r.status === 201 && Array.isArray(r.data.mentionIds) && r.data.mentionIds.includes(4), JSON.stringify(r.data))
 check('1.0.4 进展 @ 已通知被提及人（王启明）', __testHooks.notifications().some(n => n.itemId === 8 && n.userId === 4 && n.category === 'MENTION'))
+
+// ---------- 1.1.0 新增：反馈 / 系统信息 / 管理员授予撤销 / 交接 / 站会刷新 / 撤销结束 / 更新说明 / 精简通知 ----------
+await login('member')
+r = await req('POST', '/feedback', { type: 'SUGGESTION', title: '冒烟反馈标题', description: '冒烟反馈描述', pageUrl: '/pool', images: [{ fileName: 'a.png', contentType: 'image/png', contentBase64: 'QUJD' }] }, { 'Idempotency-Key': 'fb-smoke-1' })
+check('1.1.0 反馈创建 201 且状态 NEW（内联图片）', r.status === 201 && r.data.status === 'NEW' && r.data.plusOneCount === 0 && r.data.submitterName === '苏晴' && r.data.images[0].fileName === 'a.png', JSON.stringify(r.data))
+const fb = r.data
+const fbDup = await req('POST', '/feedback', { type: 'SUGGESTION', title: '冒烟反馈标题', description: '冒烟反馈描述' }, { 'Idempotency-Key': 'fb-smoke-1' })
+check('1.1.0 反馈创建幂等：同键返回同一条', fbDup.data.id === fb.id)
+r = await req('POST', '/feedback', { type: 'ISSUE', title: 'x', description: 'y', images: [1,2,3,4,5,6].map(i => ({ fileName: i + '.png', contentType: 'image/png', contentBase64: 'QUJD' })) }); check('1.1.0 反馈图片超 5 张 400', r.status === 400)
+r = await req('POST', '/feedback', { type: 'ISSUE', title: 'x', description: 'y', images: [{ fileName: 'a.png', contentType: 'image/png', contentBase64: 'A'.repeat(9000000) }] }); check('1.1.0 反馈单图超 5MB 400', r.status === 400)
+r = await req('POST', '/feedback', { type: 'BUG', title: 'x', description: 'y' }); check('1.1.0 反馈旧类型 BUG 已废弃 400（现为 ISSUE）', r.status === 400)
+r = await req('POST', '/feedback', { type: 'ISSUE', title: '缺描述' }); check('1.1.0 反馈缺描述 400', r.status === 400)
+await login('wangqm')
+r = await req('POST', `/feedback/${fb.id}/plus-one`); check('1.1.0 反馈 +1 成功', r.status === 200 && r.data.plusOneCount === 1 && r.data.myPlusOne === true)
+r = await req('POST', `/feedback/${fb.id}/plus-one`); check('1.1.0 反馈重复 +1 幂等不重复计数（防重复）', r.status === 200 && r.data.plusOneCount === 1 && r.data.myPlusOne === true)
+r = await req('DELETE', `/feedback/${fb.id}/plus-one`); check('1.1.0 反馈取消 +1（DELETE）', r.status === 200 && r.data.plusOneCount === 0 && r.data.myPlusOne === false)
+r = await req('POST', `/feedback/${fb.id}/plus-one`); check('1.1.0 反馈再次 +1', r.status === 200 && r.data.plusOneCount === 1)
+r = await req('POST', `/feedback/${fb.id}/comments`, { content: '冒烟评论' }); check('1.1.0 反馈评论 201', r.status === 201 && r.data.feedbackId === fb.id)
+r = await req('GET', `/feedback/${fb.id}/comments`); check('1.1.0 反馈评论单独接口可读', r.status === 200 && r.data.some(c => c.content === '冒烟评论'))
+r = await req('GET', '/feedback?sort=PLUS_ONES'); check('1.1.0 反馈列表按 +1 排序且带计数（列表不内嵌评论）', r.status === 200 && r.data[0].plusOneCount >= r.data[r.data.length - 1].plusOneCount && 'commentCount' in r.data[0] && !('comments' in r.data[0]))
+r = await req('GET', '/feedback?status=NEW&type=SUGGESTION'); check('1.1.0 反馈按状态/类型筛选', r.status === 200 && r.data.every(x => x.status === 'NEW' && x.type === 'SUGGESTION'))
+r = await req('PATCH', `/feedback/${fb.id}/status`, { status: 'ACCEPTED', plannedVersion: '1.2.0' }); check('1.1.0 非管理员改反馈状态 403', r.status === 403)
+await login('member')
+r = await req('PATCH', `/feedback/${fb.id}`, { title: '冒烟反馈标题（已编辑）' }); check('1.1.0 提交人可编辑自己 NEW 状态反馈', r.status === 200 && r.data.title.includes('已编辑'))
+await login('admin')
+r = await req('PATCH', `/feedback/${fb.id}/status`, { status: 'ACCEPTED', plannedVersion: '1.2.0' }); check('1.1.0 状态流转 NEW→ACCEPTED 直跳 422 ILLEGAL_TRANSITION', r.status === 422 && r.data.code === 'ILLEGAL_TRANSITION', JSON.stringify(r.data))
+r = await req('PATCH', `/feedback/${fb.id}/status`, { status: 'ANALYZING' }); check('1.1.0 管理员 NEW→分析中', r.status === 200 && r.data.status === 'ANALYZING')
+r = await req('PATCH', `/feedback/${fb.id}/status`, { status: 'ACCEPTED' }); check('1.1.0 已采纳缺计划版本 400', r.status === 400)
+r = await req('PATCH', `/feedback/${fb.id}/status`, { status: 'REJECTED' }); check('1.1.0 不采纳缺原因 400', r.status === 400)
+r = await req('PATCH', `/feedback/${fb.id}/status`, { status: 'ACCEPTED', plannedVersion: '1.2.0' }); check('1.1.0 管理员采纳填计划版本', r.status === 200 && r.data.status === 'ACCEPTED' && r.data.plannedVersion === '1.2.0')
+check('1.1.0 状态变化已通知提交人', __testHooks.notifications().some(n => n.userId === 3 && n.content.includes('冒烟反馈')))
+r = await req('PATCH', `/feedback/${fb.id}/official-reply`, { officialReply: '已排入 1.2.0' }); check('1.1.0 管理员官方回复（PATCH）', r.status === 200 && r.data.officialReply === '已排入 1.2.0')
+await login('member')
+r = await req('PATCH', `/feedback/${fb.id}`, { title: '再改' }); check('1.1.0 非 NEW 状态反馈不可编辑 409 FEEDBACK_LOCKED', r.status === 409 && r.data.code === 'FEEDBACK_LOCKED', JSON.stringify(r.data))
+await login('admin')
+r = await req('POST', '/feedback/export', { ids: [fb.id] }); check('1.1.0 管理员导出反馈（mock zip 摘要）', r.status === 200 && r.data.itemCount === 1 && r.data.summaryMarkdown.includes('冒烟反馈'))
+r = await req('GET', '/admin/system-info'); check('1.1.0 系统信息含版本/数据库/AI/局域网地址', r.status === 200 && r.data.appVersion === '1.1.0' && !!r.data.databaseVersion && r.data.ai.status === 'MOCK' && r.data.lanAddresses[0] === '192.168.1.100' && r.data.serverPort === 8080, JSON.stringify(r.data).slice(0, 200))
+r = await req('GET', '/admin/backup-status'); check('1.1.0 备份状态：超 3 天 backupStale=true（P23）', r.status === 200 && r.data.backupStale === true && (r.data.backupStaleMessage ?? '').includes('3 天'), JSON.stringify(r.data))
+r = await req('GET', '/release-notes'); check('1.1.0 更新说明未读', r.status === 200 && r.data.version === '1.1.0' && r.data.read === false && typeof r.data.content === 'string')
+r = await req('POST', '/release-notes/read'); check('1.1.0 更新说明标记已读', r.status === 200 && r.data.read === true)
+r = await req('GET', '/release-notes'); check('1.1.0 更新说明已读持久', r.status === 200 && r.data.read === true)
+// 管理员授予/撤销与最后一名保护
+r = await req('GET', '/admin/users'); const adminCount = r.data.filter(u => u.platformAdmin && u.status !== 'DISABLED').length
+check('1.1.0 初始启用中管理员仅 1 名（演示口径）', adminCount === 1, 'count=' + adminCount)
+r = await req('PATCH', '/admin/users/10/platform-admin', { platformAdmin: false }); check('1.1.0 最后一名管理员不可撤销 400 LAST_PLATFORM_ADMIN', r.status === 400 && r.data.code === 'LAST_PLATFORM_ADMIN', JSON.stringify(r.data))
+r = await req('PATCH', '/admin/users/3/platform-admin', { platformAdmin: true }); check('1.1.0 授予平台管理员（PATCH）', r.status === 200 && r.data.platformAdmin === true)
+r = await req('PATCH', '/admin/users/10/platform-admin', { platformAdmin: false }); check('1.1.0 有两名管理员时可撤销其一', r.status === 200 && r.data.platformAdmin === false)
+await login('member') // 苏晴此时是平台管理员，用她恢复 admin 并撤销自己（撤销后原会话即失去管理员权限，属预期行为）
+r = await req('PATCH', '/admin/users/10/platform-admin', { platformAdmin: true }); check('1.1.0 恢复 admin 管理员身份', r.status === 200 && r.data.platformAdmin === true)
+r = await req('PATCH', '/admin/users/3/platform-admin', { platformAdmin: false }); check('1.1.0 撤销冒烟授予', r.status === 200 && r.data.platformAdmin === false)
+// 停用拦截：郑楠(9)在云雀有未交接事项，管理员停用应被 409 HANDOVER_PENDING 拦截
+await login('admin')
+r = await req('PATCH', '/admin/users/9/status', { status: 'DISABLED' }); check('1.1.0 P05 停用有未交接事项的账号被拦 409', r.status === 409 && r.data.code === 'HANDOVER_PENDING' && r.data.detail.pendingCount > 0, JSON.stringify(r.data))
+// P04 同名：极光小组两名张三
+await login('zhangsan')
+r = await req('GET', '/teams/999/members'); check('1.1.0 P04 极光小组有两名同名「张三」且登录名不同', r.status === 200 && r.data.filter(m => m.displayName === '张三').length === 2 && new Set(r.data.filter(m => m.displayName === '张三').map(m => m.loginName)).size === 2, JSON.stringify(r.data))
+// 交接（P05）：用新注册受限，改用现有成员——让王启明(4)在云雀的事项做交接清单检查
+await login('leader')
+r = await req('GET', `/teams/${T}/members/4/handover-pending`); check('1.1.0 P05 交接清单为扁平条目且含未完成事项', r.status === 200 && Array.isArray(r.data) && r.data.length > 0 && r.data.every(e => 'kind' in e && 'itemId' in e), JSON.stringify(r.data).slice(0, 200))
+r = await req('POST', `/teams/${T}/members/4/handover`, { actions: [] }); check('1.1.0 P05 交接条目未选全 400', r.status === 400, JSON.stringify(r.data))
+r = await req('DELETE', `/teams/${T}/members/9`); check('1.1.0 P05 未交接完成移除被拦 409 HANDOVER_PENDING', r.status === 409 && r.data.code === 'HANDOVER_PENDING' && r.data.detail.pendingCount > 0, JSON.stringify(r.data))
+await login('zhengnan')
+r = await req('POST', `/teams/${T}/leave`); check('1.1.0 P05 有未交接事项退出被拦 409', r.status === 409 && r.data.code === 'HANDOVER_PENDING', JSON.stringify(r.data))
+await login('leader')
+// 站会刷新（P12）：组长刷新成功、二次立即刷新 429
+r = await req('POST', `/teams/${T}/standup/refresh`); check('1.1.0 P12 站会刷新返回 dataAsOf', r.status === 200 && typeof r.data.dataAsOf === 'string', JSON.stringify(r.data).slice(0, 160))
+r = await req('POST', `/teams/${T}/standup/refresh`); check('1.1.0 P12 站会刷新 1 分钟节流 429', r.status === 429 && r.data.code === 'RATE_LIMITED')
+await login('wangqm') // 王启明是普通成员（苏晴在前面用例已被升为组长，不能用她测 403）
+r = await req('POST', `/teams/${T}/standup/refresh`); check('1.1.0 P12 普通成员刷新 403', r.status === 403)
+// 精简通知（P25）：开启后 ITEM_UPDATE 普通动态被过滤、ASSIGNMENT 仍达
+await login('wangqm')
+r = await req('PATCH', '/auth/notification-settings', { compactNotification: true }); check('1.1.0 P25 精简通知开关可存（notification-settings）', r.status === 200 && r.data.compactNotification === true && r.data.categories.ASSIGNMENT === true)
+r = await req('PATCH', '/auth/notification-settings', { compactNotification: false }); check('1.1.0 P25 精简通知恢复关闭', r.status === 200 && r.data.compactNotification === false)
+// P17：PO 建故事未指定验收人时按小组设置（故事默认验收角色 PO）解析，且不落到负责人本人
+await login('po')
+r = await req('POST', `/teams/${T}/items`, { type: 'STORY', title: 'P17 验收解析冒烟故事', destination: 'ASSIGN', parentId: 1, storyCategory: 'DEV', ownerIds: [2], iterationId: 2 })
+check('1.1.0 P17 验收人是负责人本人时自动转另一角色（组长）', r.status === 201 && r.data.acceptorId === 1 && r.data.acceptorAutoTransferred === true, JSON.stringify(r.data))
+// P18：结束迭代预览 + 撤销结束（用新建迭代走完整流程，避免动种子迭代状态）
+await login('leader')
+r = await req('POST', `/teams/${T}/iterations`, { name: 'P18冒烟迭代', startDate: '2026-12-21', endDate: '2026-12-31' }); const p18 = r.data
+r = await req('POST', `/teams/${T}/iterations/${p18.id}/start`); check('1.1.0 P18 冒烟迭代可开始（迭代1已在前面用例结束）', r.status === 200, JSON.stringify(r.data))
+r = await req('GET', `/teams/${T}/iterations/${p18.id}/close-preview`); check('1.1.0 P18 结束预览含后果清单', r.status === 200 && typeof r.data.unfinishedCount === 'number' && Array.isArray(r.data.willGenerate) && r.data.undoWindowHours === 24)
+r = await req('POST', `/teams/${T}/iterations/${p18.id}/close`, { decisions: [], improvements: ['P18冒烟改进项'], createNextIteration: true }); check('1.1.0 P18 结束迭代成功', r.status === 200 && r.data.iteration.status === 'FINISHED', JSON.stringify(r.data))
+r = await req('POST', `/teams/${T}/iterations/${p18.id}/undo-close`); check('1.1.0 P18 24h 内撤销结束恢复 ACTIVE', r.status === 200 && r.data.iteration.status === 'ACTIVE' && typeof r.data.restoredItems === 'number' && Array.isArray(r.data.keptImprovementIds), JSON.stringify(r.data))
+// P19：请假期间到期事项清单（郑楠 user9 请假 2026-11-16~20，名下 SKY-22 截止 11-19）
+r = await req('GET', `/teams/${T}/members/9/leave-due-items?start=2026-11-16&end=2026-11-20`); check('1.1.0 P19 请假到期事项清单命中 SKY-22（数组形）', r.status === 200 && Array.isArray(r.data) && r.data.some(i => i.itemId === 22), JSON.stringify(r.data))
+// P20：报告导出 Word（mock 返回 contentHtml）
+const anyReport = (await req('GET', `/teams/${T}/reports`)).data[0]
+r = await req('GET', `/reports/${anyReport.id}/export-docx`); check('1.1.0 P20 报告导出 Word 返回 docx 数据', r.status === 200 && r.data.filename.endsWith('.docx') && r.data.contentHtml.includes('<h'), JSON.stringify(r.data).slice(0, 160))
+// P13：总览成员含独立事项计数
+r = await req('GET', `/teams/${T}/overview`); check('1.1.0 P13 总览成员带 independentCount（独立事项计入负载）', r.status === 200 && r.data.members.every(m => typeof m.independentCount === 'number'), JSON.stringify(r.data.members?.[0]).slice(0, 160))
+
+// P15 补充：卡住了无原因 400、带原因 200 且落阻塞原因
+await login('po')
+r = await req('POST', `/teams/${T}/items/5/nudge`); check('1.1.0 P15 前置：催 SKY-5 成功', r.status === 200, JSON.stringify(r.data))
+await login('member')
+r = await req('POST', `/teams/${T}/items/5/nudge/respond`, { response: 'BLOCKED' }); check('1.1.0 P15 卡住了无原因 400', r.status === 400 && r.data.code === 'VALIDATION', JSON.stringify(r.data))
+r = await req('POST', `/teams/${T}/items/5/nudge/respond`, { response: 'BLOCKED', blockReason: '等联调环境恢复' }); check('1.1.0 P15 卡住了带原因 200', r.status === 200 && r.data.response === 'BLOCKED')
+r = await req('GET', `/teams/${T}/items/5`); check('1.1.0 P15 阻塞原因已落到事项', r.status === 200 && r.data.blocked === true && r.data.blockReason === '等联调环境恢复', JSON.stringify(r.data.blockReason))
+
+// P05 完整交接流程（放最后，避免影响前面的用例状态）：郑楠(9)全部退回认领池 → remaining=0 → 组长可移除 → 管理员可停用
+await login('leader')
+r = await req('POST', `/teams/${T}/members/9/handover/return-all`); check('1.1.0 P05 一键全部退回认领池后 remaining=0', r.status === 200 && r.data.remaining === 0, JSON.stringify(r.data))
+r = await req('GET', `/teams/${T}/members/9/handover-pending`); check('1.1.0 P05 交接后清单为空', r.status === 200 && Array.isArray(r.data) && r.data.length === 0)
+r = await req('DELETE', `/teams/${T}/members/9`); check('1.1.0 P05 交接完成后可移除成员 204', r.status === 204, JSON.stringify(r.data))
+await login('admin')
+r = await req('PATCH', '/admin/users/9/status', { status: 'DISABLED' }); check('1.1.0 P05 交接完成后停用不再被拦', r.status === 200 && r.data.status === 'DISABLED', JSON.stringify(r.data))
+r = await req('PATCH', '/admin/users/9/status', { status: 'ACTIVE' }); check('1.1.0 账号可重新启用', r.status === 200 && r.data.status === 'ACTIVE')
 
 console.log(results.join('\n'))
 console.log(`\n冒烟结果：${pass} 通过 / ${fail} 失败 / 共 ${pass + fail}`)

@@ -21,18 +21,21 @@ public class TeamService {
     private final UserRepo userRepo;
     private final com.iterationboard.common.AuditService auditService;
     private final com.iterationboard.item.NotifyService notifyService;
+    private final HandoverService handoverService;
     private final SecureRandom random = new SecureRandom();
 
     public TeamService(TeamRepo teamRepo, TeamMemberRepo memberRepo,
                        JoinRequestRepo joinRequestRepo, UserRepo userRepo,
                        com.iterationboard.common.AuditService auditService,
-                       com.iterationboard.item.NotifyService notifyService) {
+                       com.iterationboard.item.NotifyService notifyService,
+                       HandoverService handoverService) {
         this.teamRepo = teamRepo;
         this.memberRepo = memberRepo;
         this.joinRequestRepo = joinRequestRepo;
         this.userRepo = userRepo;
         this.auditService = auditService;
         this.notifyService = notifyService;
+        this.handoverService = handoverService;
     }
 
     /** 成员身份校验：非成员一律 404，不泄露小组存在性。 */
@@ -106,7 +109,13 @@ public class TeamService {
     /** 事务内映射：TeamMember.user 为 LAZY 代理，同上。 */
     @Transactional(readOnly = true)
     public List<com.iterationboard.config.Dtos.MemberDto> memberDtos(Long teamId, AppUser user) {
-        return members(teamId, user).stream().map(com.iterationboard.config.Dtos.MemberDto::of).toList();
+        List<TeamMember> all = members(teamId, user);
+        // P04：同组重名标记（前端在 duplicateName=true 时附带显示 loginName，MemberDto 已含 loginName）
+        java.util.Map<String, Long> nameCounts = new java.util.HashMap<>();
+        all.forEach(m -> nameCounts.merge(m.getUser().getDisplayName(), 1L, Long::sum));
+        return all.stream()
+                .map(m -> com.iterationboard.config.Dtos.MemberDto.of(m, nameCounts.getOrDefault(m.getUser().getDisplayName(), 0L) > 1))
+                .toList();
     }
 
     @Transactional(readOnly = true)
@@ -282,7 +291,25 @@ public class TeamService {
         if (m.getRole() == Role.LEADER && memberRepo.countByTeamIdAndRole(teamId, Role.LEADER) <= 1) {
             throw new ApiException(HttpStatus.BAD_REQUEST, "LAST_LEADER", "你是小组唯一的组长，请先指定其他组长后再退出");
         }
+        // P05：退出前必须完成离组交接；共同负责自动摘除
+        handoverService.assertCleared(teamId, user.getId());
+        handoverService.removeCollaborations(teamId, user.getId());
         memberRepo.delete(m);
+    }
+
+    /** P05：组长移出成员——同样先过交接校验。 */
+    @Transactional
+    public void removeMember(Long teamId, Long targetUserId, AppUser leader) {
+        requireLeader(teamId, leader);
+        TeamMember target = memberRepo.findByTeamIdAndUserId(teamId, targetUserId)
+                .orElseThrow(() -> ApiException.notFound("该用户不是小组成员"));
+        if (target.getRole() == Role.LEADER && memberRepo.countByTeamIdAndRole(teamId, Role.LEADER) <= 1) {
+            throw new ApiException(HttpStatus.BAD_REQUEST, "LAST_LEADER", "小组至少保留一名组长，不能移出最后一名组长");
+        }
+        handoverService.assertCleared(teamId, targetUserId);
+        handoverService.removeCollaborations(teamId, targetUserId);
+        memberRepo.delete(target);
+        auditService.log(teamId, leader, "REMOVE_MEMBER", "MEMBER", targetUserId, "移出成员");
     }
 
     /** 事务内映射版 setMemberStatus：返回的 TeamMember.user 为 LAZY 代理，DTO 映射必须在事务内（修订二场景测试发现的 500 修复）。 */

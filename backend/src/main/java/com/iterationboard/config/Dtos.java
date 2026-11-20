@@ -33,11 +33,17 @@ public final class Dtos {
     }
 
     public record MemberDto(Long userId, String displayName, String loginName, String avatarColor,
-                            String role, String memberStatus, LocalDate memberStatusStart, LocalDate memberStatusEnd) {
+                            String role, String memberStatus, LocalDate memberStatusStart, LocalDate memberStatusEnd,
+                            boolean duplicateName) {
         public static MemberDto of(TeamMember m) {
+            return of(m, false);
+        }
+
+        /** P04：同组重名时 duplicateName=true，前端据此在显示姓名后附带 loginName。 */
+        public static MemberDto of(TeamMember m, boolean duplicateName) {
             AppUser u = m.getUser();
             return new MemberDto(u.getId(), u.getDisplayName(), u.getLoginName(), u.getAvatarColor(),
-                    m.getRole().name(), m.getMemberStatus(), m.getStatusStart(), m.getStatusEnd());
+                    m.getRole().name(), m.getMemberStatus(), m.getStatusStart(), m.getStatusEnd(), duplicateName);
         }
     }
 
@@ -58,7 +64,7 @@ public final class Dtos {
                           String storyCategory, Long poId, Long batchId, boolean assignedDirectly,
                           int sortOrder, String taskStatus, List<Long> inviteeIds,
                           String source, String externalSystem, String externalId, String externalUrl,
-                          boolean externalClosed, List<String> allowedActions) {}
+                          boolean externalClosed, List<String> allowedActions, String acceptorNote) {}
 
     public record BatchMemberDto(Long userId, Long itemId, String status) {}
 

@@ -122,10 +122,19 @@ public class NudgeService {
 
     @Transactional
     public Map<String, Object> respond(Long teamId, Long itemId, AppUser user, String response) {
+        return respond(teamId, itemId, user, response, null);
+    }
+
+    /** P15：被催点「卡住了」（BLOCKED）必须带一句话原因，写入事项阻塞原因。 */
+    @Transactional
+    public Map<String, Object> respond(Long teamId, Long itemId, AppUser user, String response, String reason) {
         teamService.requireMember(teamId, user);
         Item item = requireItem(teamId, itemId);
         if (!List.of("SOON", "TODAY", "BLOCKED").contains(response)) {
             throw ApiException.validation("response 须为 SOON / TODAY / BLOCKED");
+        }
+        if ("BLOCKED".equals(response) && (reason == null || reason.isBlank())) {
+            throw new ApiException(HttpStatus.BAD_REQUEST, "REASON_REQUIRED", "点「卡住了」必须填写一句话原因");
         }
         var pending = nudgeRepo.findFirstByItemIdAndTargetIdAndResponseIsNullOrderByCreatedAtDesc(itemId, user.getId());
         if (pending.isEmpty()) {
@@ -152,20 +161,24 @@ public class NudgeService {
         };
         notifyService.notify(nudge.getNudger(), "NUDGE_RESPONSE", item, user,
                 "对催一下的回应：" + label);
-        if ("BLOCKED".equals(response) && !item.isBlocked()) {
-            // 快捷回应「卡住了」同步标记阻塞并通知组长
+        if ("BLOCKED".equals(response)) {
+            // 同步标记阻塞，阻塞原因 = 用户填写的一句话原因；通知组长
+            boolean wasBlocked = item.isBlocked();
             item.setBlocked(true);
-            item.setBlockReason("快捷回应：卡住了");
+            item.setBlockReason(reason.trim());
             item.setBlockedAt(Instant.now());
             itemRepo.save(item);
-            activityRepo.save(new Activity(item, user, "BLOCK", item.getStatus().name(), item.getStatus().name(), "快捷回应：卡住了"));
-            memberRepo.findByTeamId(teamId).stream()
-                    .filter(m -> m.getRole() == Role.LEADER)
-                    .forEach(m -> notifyService.notify(m.getUser(), "BLOCK", item, user, "事项被标记阻塞：快捷回应"));
+            if (!wasBlocked) {
+                activityRepo.save(new Activity(item, user, "BLOCK", item.getStatus().name(), item.getStatus().name(), reason.trim()));
+                memberRepo.findByTeamId(teamId).stream()
+                        .filter(m -> m.getRole() == Role.LEADER)
+                        .forEach(m -> notifyService.notify(m.getUser(), "BLOCK", item, user, "事项被标记阻塞：" + reason.trim()));
+            }
         }
         Map<String, Object> out = new LinkedHashMap<>();
         out.put("itemId", item.getId());
         out.put("response", response);
+        out.put("blockReason", item.getBlockReason());
         out.put("respondedAt", nudge.getRespondedAt());
         return out;
     }

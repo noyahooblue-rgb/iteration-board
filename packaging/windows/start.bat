@@ -27,6 +27,36 @@ if errorlevel 1 (
   call :ib_pause
   exit /b 1
 )
+rem P23 (1.1.0): if the last successful backup is more than
+rem 24 hours old (or none was ever recorded), back up BEFORE
+rem starting the application. PostgreSQL is already running,
+rem which is all backup.bat needs. A failed backup does NOT
+rem block the start; it only prints a warning.
+set "IB_BK_STALE="
+for /f "usebackq delims=" %%S in (`powershell -NoProfile -Command "$f = '%ROOT%\data\backup-status.json'; $stale = $true; if (Test-Path $f) { try { $j = Get-Content $f -Raw | ConvertFrom-Json; if ($j.lastSuccessTime) { if ((Get-Date).ToUniversalTime() -lt ([DateTimeOffset]::Parse($j.lastSuccessTime)).UtcDateTime.AddHours(24)) { $stale = $false } } } catch {} }; if ($stale) { 'yes' }"`) do set "IB_BK_STALE=%%S"
+if "%IB_BK_STALE%"=="yes" (
+  echo [INFO] Last successful backup is over 24 hours old - backing up before start ...
+  call "%ROOT%\backup.bat" auto
+  if errorlevel 1 echo [WARN] The pre-start backup failed. Starting anyway - run backup.bat manually later.
+)
+rem P01 (1.1.0): once the admin account has changed its initial
+rem password, the backend clears app_user.must_change_password;
+rem that flag is the ground truth, so when it is false and the
+rem initial-password file still exists, delete the file here.
+if exist "%ROOT%\config\admin-initial-password.txt" (
+  set "IB_ADMIN_CHANGED="
+  set "DBPWD="
+  for /f "tokens=1,2" %%A in ('findstr /C:"password:" "%ROOT%\config\application.yml"') do set "DBPWD=%%B"
+  if not "%DBPWD%"=="" (
+    set "PGPASSWORD=%DBPWD%"
+    for /f "usebackq delims=" %%R in (`"%ROOT%\runtime\pgsql\bin\psql.exe" -h 127.0.0.1 -p 15432 -U postgres -d iteration_board -t -A -c "SELECT must_change_password FROM app_user WHERE login_name = 'admin'"`) do set "IB_ADMIN_CHANGED=%%R"
+    set "PGPASSWORD="
+  )
+  if "%IB_ADMIN_CHANGED%"=="f" (
+    del /Q "%ROOT%\config\admin-initial-password.txt" >nul 2>&1
+    echo [INFO] Removed config\admin-initial-password.txt - the admin password has been changed.
+  )
+)
 net start IterationBoardApp >nul 2>&1
 sc query IterationBoardApp | findstr /C:"RUNNING" >nul 2>&1
 if errorlevel 1 (

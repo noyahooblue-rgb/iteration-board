@@ -46,7 +46,15 @@ public class BatchService {
 
     public record BatchCmd(ItemType type, String title, String description, Priority priority,
                            List<Long> memberIds, StoryCategory storyCategory, Long parentId,
-                           LocalDate dueDate, BigDecimal estimate, Long iterationId) {}
+                           LocalDate dueDate, BigDecimal estimate, Long iterationId,
+                           Boolean includeCreator) {
+        public BatchCmd(ItemType type, String title, String description, Priority priority,
+                        List<Long> memberIds, StoryCategory storyCategory, Long parentId,
+                        LocalDate dueDate, BigDecimal estimate, Long iterationId) {
+            this(type, title, description, priority, memberIds, storyCategory, parentId,
+                    dueDate, estimate, iterationId, null);
+        }
+    }
 
     @Transactional
     public Dtos.BatchSummaryDto create(Long teamId, AppUser creator, BatchCmd cmd) {
@@ -54,13 +62,21 @@ public class BatchService {
         if (cmd.type() == null) throw ApiException.validation("事项类型不能为空");
         if (cmd.type() == ItemType.TASK) throw ApiException.validation("任务不能批量下发（每人一份只适用于故事与独立事项）");
         if (cmd.memberIds() == null || cmd.memberIds().isEmpty()) throw ApiException.validation("至少选择一名成员");
+        // P14：每人一份默认不含发布人本人；includeCreator=true 时才把发布人加入名单
+        List<Long> effectiveMemberIds = new java.util.ArrayList<>(new java.util.LinkedHashSet<>(cmd.memberIds()));
+        if (Boolean.TRUE.equals(cmd.includeCreator())) {
+            if (!effectiveMemberIds.contains(creator.getId())) effectiveMemberIds.add(creator.getId());
+        } else {
+            effectiveMemberIds.removeIf(uid -> uid.equals(creator.getId()));
+        }
+        if (effectiveMemberIds.isEmpty()) throw ApiException.validation("至少选择一名成员（默认不含发布人本人）");
         DispatchBatch batch = new DispatchBatch();
         batch.setTeam(teamService.requireTeam(teamId));
         batch.setCreator(creator);
         batch.setTitle(cmd.title());
         batch.setItemType(cmd.type().name());
         batchRepo.save(batch);
-        for (Long uid : cmd.memberIds()) {
+        for (Long uid : effectiveMemberIds) {
             // 复用单建逻辑（含 STORY 仅 PO、父任务与类别校验、直接指派 assignedDirectly=true）
             Item item = itemService.create(teamId, creator, new ItemService.CreateItemCmd(
                     cmd.type(), cmd.title(), cmd.description(), cmd.priority(), "ASSIGN",

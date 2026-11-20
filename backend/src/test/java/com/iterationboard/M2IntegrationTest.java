@@ -222,11 +222,11 @@ class M2IntegrationTest {
         Fixture f = fixture("sp", "STP", 1);
         long teamId = f.team().teamId();
 
-        // 任务：成员 403、组长（非 PO）403、PO 201
+        // 任务：成员 403、PO 201；组长 1.1.0 起也可创建（修订四 P06：组长和 PO 都可创建任务/故事，原「组长 403」断言随规则变更调整）
         assertThat(createItemRaw(f.members().get(0), teamId,
                 "{\"type\":\"TASK\",\"title\":\"成员建任务\",\"destination\":\"POOL\"}").getResponse().getStatus()).isEqualTo(403);
         assertThat(createItemRaw(f.leader(), teamId,
-                "{\"type\":\"TASK\",\"title\":\"组长建任务\",\"destination\":\"POOL\"}").getResponse().getStatus()).isEqualTo(403);
+                "{\"type\":\"TASK\",\"title\":\"组长建任务\",\"destination\":\"POOL\"}").getResponse().getStatus()).isEqualTo(201);
         long taskId = createItem(f.po(), teamId,
                 "{\"type\":\"TASK\",\"title\":\"PO的任务\",\"destination\":\"POOL\"}");
         String taskJson = getItemJson(f.po(), teamId, taskId);

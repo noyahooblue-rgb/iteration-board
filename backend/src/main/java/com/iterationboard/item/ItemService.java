@@ -105,9 +105,10 @@ public class ItemService {
     public Item create(Long teamId, AppUser creator, CreateItemCmd cmd) {
         TeamMember member = teamService.requireMember(teamId, creator);
         if (cmd.type() == null) throw ApiException.validation("事项类型不能为空");
-        // 修订一：TASK 与 STORY 仅 PO 可创建（接口层拒绝）
-        if ((cmd.type() == ItemType.TASK || cmd.type() == ItemType.STORY) && member.getRole() != Role.PO) {
-            throw ApiException.forbidden("只有 PO 可以创建" + (cmd.type() == ItemType.TASK ? "任务" : "故事"));
+        // 修订四 P06：TASK 与 STORY 由组长和 PO 都可创建（修订一「仅 PO」放宽）
+        if ((cmd.type() == ItemType.TASK || cmd.type() == ItemType.STORY)
+                && member.getRole() != Role.PO && member.getRole() != Role.LEADER) {
+            throw ApiException.forbidden("只有组长或 PO 可以创建" + (cmd.type() == ItemType.TASK ? "任务" : "故事"));
         }
         if (cmd.title() == null || cmd.title().isBlank() || cmd.title().length() > 200) throw ApiException.validation("标题不能为空且不超过 200 字");
         String dest = cmd.destination() == null ? "POOL" : cmd.destination();
@@ -152,9 +153,16 @@ public class ItemService {
             if (cmd.iterationId() != null) {
                 item.setIteration(requirePlannableIteration(teamId, cmd.iterationId()));
             }
-            item.setAcceptor(cmd.acceptorId() != null
-                    ? requireTeamUser(teamId, cmd.acceptorId(), "验收人")
-                    : creator);
+            // P17：废弃「故事默认验收人=创建人」——故事未指定验收人时按小组设置「故事默认验收角色」
+            // （默认 PO）取该角色成员；独立事项维持未指定时为创建人。
+            if (cmd.acceptorId() != null) {
+                item.setAcceptor(requireTeamUser(teamId, cmd.acceptorId(), "验收人"));
+            } else if (cmd.type() == ItemType.STORY) {
+                item.setAcceptor(resolveDefaultAcceptor(teamId, creator,
+                        com.iterationboard.team.TeamSettings.from(teamRepo.findById(teamId).orElse(null)).storyAcceptorRole));
+            } else {
+                item.setAcceptor(creator);
+            }
             switch (dest) {
                 case "POOL", "INVITE" -> item.setStatus(ItemStatus.UNCLAIMED);
                 case "ASSIGN" -> item.setStatus(ItemStatus.NOT_STARTED);
@@ -230,6 +238,17 @@ public class ItemService {
                     return true;
                 })
                 .toList();
+    }
+
+    /** P17 默认验收人解析：取指定角色的第一位成员；无该角色时依次回落组长、PO；再无则创建人。 */
+    private AppUser resolveDefaultAcceptor(Long teamId, AppUser creator, String roleName) {
+        List<TeamMember> members = memberRepo.findByTeamId(teamId);
+        for (String role : new String[]{roleName, "LEADER", "PO"}) {
+            for (TeamMember m : members) {
+                if (m.getRole().name().equals(role)) return m.getUser();
+            }
+        }
+        return creator;
     }
 
     public record PatchCmd(int version, String title, String description, Priority priority, Long acceptorId,
@@ -797,6 +816,6 @@ public class ItemService {
                 item.getType() == ItemType.TASK ? TaskDerivationService.toTaskStatus(item).name() : null,
                 inviteeRepo.findByItemId(item.getId()).stream().map(iv -> iv.getUser().getId()).toList(),
                 item.getSource(), item.getExternalSystem(), item.getExternalId(), item.getExternalUrl(),
-                item.isExternalClosed(), allowedActions(item, user));
+                item.isExternalClosed(), allowedActions(item, user), item.getAcceptorNote());
     }
 }

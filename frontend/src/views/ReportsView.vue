@@ -41,6 +41,8 @@
       <div class="rhead"><h2>{{current.title}}</h2><AiBadge v-if="current.aiGenerated" :ai-generated="true" :edited="current.editedByHuman"/><span style="flex:1"/>
         <AppButton variant="ghost" @click="copyMd">复制 Markdown</AppButton>
         <AppButton variant="ghost" @click="downloadMd">导出 .md</AppButton>
+        <AppButton variant="ghost" @click="exportWord">导出 Word</AppButton>
+        <AppButton variant="ghost" @click="copyAsEmail">复制为邮件正文</AppButton>
         <AppButton v-if="canEditCurrent" variant="ghost" :disabled="regenBusy" @click="regenerate">{{ regenBusy ? '重新生成中…' : '重新生成' }}</AppButton>
         <AppButton v-if="canEditCurrent" variant="ghost" :disabled="saving" @click="saveEdit">{{ saving ? '保存中…' : '保存编辑' }}</AppButton>
         <AppButton v-if="canEditCurrent" variant="danger" :disabled="deleting" @click="removeReport">{{ deleting ? '删除中…' : '删除' }}</AppButton></div>
@@ -68,7 +70,7 @@ import { ref, computed, onMounted, watch } from 'vue'
 import { FileSpreadsheet } from 'lucide-vue-next'
 import AiBadge from '../components/AiBadge.vue'; import { useAi } from '../stores/ai'
 import AppShell from '../components/AppShell.vue'; import GlassPanel from '../components/GlassPanel.vue'; import AppButton from '../components/AppButton.vue'
-import { api, ApiError, newIdempotencyKey } from '../api/http'; import type { ReportItem, ReportVersion, Iteration } from '../api/types'
+import { api, apiMode, ApiError, newIdempotencyKey } from '../api/http'; import type { ReportItem, ReportVersion, Iteration } from '../api/types'
 import { useTeam } from '../stores/team'; import { useAuth } from '../stores/auth'; import { useToast } from '../stores/toast'
 import { fmtDateTime } from '../utils/datetime'
 const team = useTeam(), auth = useAuth(), toast = useToast()
@@ -178,6 +180,16 @@ async function restoreVersion(v:ReportVersion){ const r = current.value; if (!r 
   restoring.value = true
   try { const fresh: ReportItem = await api.post(`/teams/${team.currentId}/reports/${r.id}/versions/${v.id}/restore`); toast.show('已恢复该版本'); await load(); const f = reports.value.find(x=>x.id===fresh.id); if (f) openReport(f); versions.value = null }
   catch(e){ toast.show(e instanceof ApiError ? e.message : '恢复失败') } finally { restoring.value = false } }
+async function exportWord(){ const r = current.value; if (!r) return
+  try { if (apiMode === 'mock') { const d: any = await api.get(`/reports/${r.id}/export-docx`); const blob = new Blob([d.contentHtml ?? ''], { type: 'application/msword' }); const a = document.createElement('a'); a.href = URL.createObjectURL(blob); a.download = d.filename ?? (r.title + '.docx'); a.click(); URL.revokeObjectURL(a.href); toast.show('演示模式：已导出 Word 可打开的 .docx（HTML 封装）') ; return }
+    window.location.href = `/api/v1/reports/${r.id}/export-docx` } catch(e){ toast.show(e instanceof ApiError ? e.message : '导出失败') } }
+async function copyAsEmail(){ if (!current.value) return
+  // 复制富文本 HTML 到剪贴板（保留标题/列表/表格），粘到邮件正文即带格式；不支持富文本剪贴板时退回纯文本。
+  const html = '<div>' + rendered.value + '</div>'
+  try {
+    if (typeof ClipboardItem !== 'undefined' && navigator.clipboard?.write) { await navigator.clipboard.write([new ClipboardItem({ 'text/html': new Blob([html], { type: 'text/html' }), 'text/plain': new Blob([contentOf(current.value)], { type: 'text/plain' }) })]) }
+    else await navigator.clipboard.writeText(contentOf(current.value))
+    toast.show('已复制为邮件正文（富文本）') } catch { toast.show('复制失败，请手动选择原文') } }
 async function copyMd(){ if(!current.value) return; try { await navigator.clipboard.writeText(contentOf(current.value)); toast.show('已复制 Markdown') } catch { toast.show('复制失败，请手动选择原文') } }
 function downloadMd(){ if(!current.value) return; const blob = new Blob([contentOf(current.value)], { type: 'text/markdown' }); const a = document.createElement('a'); a.href = URL.createObjectURL(blob); a.download = current.value.title + '.md'; a.click(); URL.revokeObjectURL(a.href) }
 async function exportExcel(){ try { const r:any = await api.get(`/teams/${team.currentId}/items/export`)

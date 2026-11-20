@@ -75,7 +75,8 @@ public class SecurityConfig {
             .addFilterAfter(new CsrfTokenMaterializationFilter(), CsrfFilter.class)
             .sessionManagement(sm -> sm.sessionCreationPolicy(SessionCreationPolicy.IF_REQUIRED))
             .authorizeHttpRequests(auth -> auth
-                    .requestMatchers("/api/v1/meta", "/api/v1/auth/captcha", "/api/v1/auth/register", "/api/v1/auth/login").permitAll()
+                    .requestMatchers("/api/v1/meta", "/api/v1/auth/captcha", "/api/v1/auth/register", "/api/v1/auth/login",
+                            "/api/v1/admin/bootstrap", "/api/v1/admin/bootstrap/status", "/api/v1/admin/reset-admin").permitAll()
                     .requestMatchers("/v3/api-docs/**", "/v3/api-docs.yaml", "/swagger-ui/**", "/swagger-ui.html", "/openapi.yaml").permitAll()
                     // 1.0.3 修复（实测第四轮）：只对 /api/** 要求认证；/api/** 以外是
                     // 前端静态资源与 SPA 路由，全部放行（否则未登录打开首页直接 401

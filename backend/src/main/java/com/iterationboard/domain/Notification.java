@@ -38,6 +38,8 @@ public class Notification {
     public Item getItem() { return item; }
     public AppUser getActor() { return actor; }
     public String getContent() { return content; }
+    public void setContent(String v) { content = v; }
+    public void setCreatedAt(Instant v) { createdAt = v; }
     public Instant getReadAt() { return readAt; }
     public void setReadAt(Instant v) { readAt = v; }
     public Instant getCreatedAt() { return createdAt; }

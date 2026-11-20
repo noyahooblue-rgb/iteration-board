@@ -30,6 +30,12 @@ spring:
     locations: classpath:db/migration
 
 app:
+  # 程序版本（1.1.0）：与 pom 版本一致；构建日期由 spring-boot build-info 注入（见 VersionInfo）。
+  version: 1.1.0
+  # 数据目录（贴图等运行期文件与 backup-status.json 所在目录；脚本侧约定，见 BackupStatusService）
+  data-dir: ${APP_DATA_DIR:data}
+  # 安装/升级脚本调用管理员引导与 reset-admin 的共享口令（可选）：设置后脚本须带 X-Bootstrap-Token 头。
+  bootstrap-token: ${APP_BOOTSTRAP_TOKEN:}
   # 平台时区（1.0.4）：所有「今天/昨天/本周/工作日/逾期/定时任务」等日期口径按此时区计算（PlatformTime 组件），
   # 可经环境变量 APP_TIMEZONE 覆盖；与 Asia/Singapore 同为 UTC+8。数据库存储仍为 UTC（见上方 hibernate.jdbc.time_zone 注释）。
   timezone: ${APP_TIMEZONE:Asia/Shanghai}

@@ -27,17 +27,27 @@ public class ScheduledJobs {
     private final IterationService iterationService;
     private final ReportService reportService;
     private final com.iterationboard.retention.RetentionPurgeService retentionPurgeService;
+    private final LeaveReminderService leaveReminderService;
     private final PlatformTime platformTime;
 
     public ScheduledJobs(ReminderService reminderService, IterationRepo iterationRepo, IterationService iterationService,
                          ReportService reportService,
-                         com.iterationboard.retention.RetentionPurgeService retentionPurgeService, PlatformTime platformTime) {
+                         com.iterationboard.retention.RetentionPurgeService retentionPurgeService,
+                         LeaveReminderService leaveReminderService, PlatformTime platformTime) {
         this.reminderService = reminderService;
         this.iterationRepo = iterationRepo;
         this.iterationService = iterationService;
         this.reportService = reportService;
         this.retentionPurgeService = retentionPurgeService;
+        this.leaveReminderService = leaveReminderService;
         this.platformTime = platformTime;
+    }
+
+    /** P19：每日 9:00 检查「请假开始前一个工作日」并提醒本人与组长（平台时区口径见 PlatformTime/LeaveReminderService）。 */
+    @Scheduled(cron = "0 0 9 * * *", zone = "Asia/Shanghai")
+    public void leaveReminders() {
+        int sent = leaveReminderService.remindAll();
+        if (sent > 0) log.info("请假前提醒发送 {} 条", sent);
     }
 
     /** M5（Q4）：回收站 30 天 / 通知 90 天 / 审计日志 180 天物理清理（保留期见 app.retention.*）。 */

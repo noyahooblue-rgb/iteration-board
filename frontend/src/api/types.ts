@@ -5,12 +5,12 @@ export type StoryCategory='DEV'|'ANALYSIS'|'TEST'|'OTHER'
 export type ItemStatus='UNCLAIMED'|'NOT_STARTED'|'IN_PROGRESS'|'IN_REVIEW'|'DONE'|'CANCELLED'
 export type TaskStatus='NOT_STARTED'|'IN_PROGRESS'|'PENDING_ACCEPTANCE'|'DONE'|'CANCELLED'
 export interface User{id:number;loginName:string;displayName:string;avatarColor:string;platformAdmin:boolean;mustChangePassword:boolean}
-export interface TeamSettings{capacityPointsPerWorkday:number;reminderThresholds:{staleInProgressWorkdays:number;notStartedWorkdays:number;reviewPendingWorkdays:number;unclaimedWorkdays:number;blockedWorkdays:number;dueSoonWorkdays:number};specialHolidays:string[];specialWorkdays:string[]}
+export interface TeamSettings{storyAcceptRole?:string;taskAcceptRole?:string;capacityPointsPerWorkday:number;reminderThresholds:{staleInProgressWorkdays:number;notStartedWorkdays:number;reviewPendingWorkdays:number;unclaimedWorkdays:number;blockedWorkdays:number;dueSoonWorkdays:number};specialHolidays:string[];specialWorkdays:string[]}
 export interface Team{id:number;name:string;code:string;inviteCode?:string;joinApproval:boolean;iterationWeeks:number;estimateUnit:string;themeColor:string;status:string;myRole?:Role;description?:string|null;settings?:TeamSettings}
 export interface Member{userId:number;displayName:string;loginName:string;avatarColor:string;role:Role;memberStatus:string;memberStatusStart?:string|null;memberStatusEnd?:string|null}
 export interface JoinRequest{id:number;userId:number;displayName:string;loginName:string;status:string;createdAt:string}
 export interface ChecklistEntry{id:number;itemId:number;text:string;done:boolean;sortOrder:number}
-export interface Item{allowedActions?:string[];id:number;code:string;type:ItemType;title:string;description:string;status:ItemStatus;priority:string;creatorId:number;ownerIds:number[];acceptorId:number|null;storyCategory:StoryCategory|null;poId:number|null;batchId:number|null;assignedDirectly:boolean;sortOrder:number;taskStatus:TaskStatus|null;collaboratorIds:number[];inviteeIds?:number[];parentId:number|null;iterationId:number|null;dueDate:string|null;estimate:number|null;progressPercent:number;blocked:boolean;blockReason:string|null;nudgeCount:number;labels:string[];childCount:number;childDoneCount:number;commentCount:number;version:number;createdAt:string;updatedAt:string;lastProgressAt:string|null;deletedAt?:string|null;checklist?:ChecklistEntry[]}
+export interface Item{allowedActions?:string[];acceptorAutoTransferred?:boolean;id:number;code:string;type:ItemType;title:string;description:string;status:ItemStatus;priority:string;creatorId:number;ownerIds:number[];acceptorId:number|null;storyCategory:StoryCategory|null;poId:number|null;batchId:number|null;assignedDirectly:boolean;sortOrder:number;taskStatus:TaskStatus|null;collaboratorIds:number[];inviteeIds?:number[];parentId:number|null;iterationId:number|null;dueDate:string|null;estimate:number|null;progressPercent:number;blocked:boolean;blockReason:string|null;nudgeCount:number;labels:string[];childCount:number;childDoneCount:number;commentCount:number;version:number;createdAt:string;updatedAt:string;lastProgressAt:string|null;deletedAt?:string|null;checklist?:ChecklistEntry[]}
 export interface ProgressUpdate{id:number;itemId:number;authorId:number;text:string;percent:number|null;blocked:boolean;blockReason:string|null;nextStep:string|null;kind:string;createdAt:string;mentionIds?:number[]}
 export interface Comment{id:number;itemId:number;authorId:number;content:string;mentionIds:number[];createdAt:string}
 export interface Activity{id:number;itemId:number;actorId:number;action:string;fromStatus:string|null;toStatus:string|null;detail:string|null;createdAt:string}
@@ -27,16 +27,16 @@ export interface KeyDate{id:number;iterationId:number;title:string;date:string;c
 export interface BurndownPoint{date:string;remainingEstimate:number;remainingCount:number|null;doneCount:number|null;live?:boolean}
 export interface Burndown{iteration:Iteration;points:BurndownPoint[];ideal:BurndownPoint[];totalEstimate:number|null}
 export interface StandupMember{userId:number;memberStatus:string;yesterdayProgress:ProgressUpdate[];yesterdayDone:Item[];todayItems:Item[];blockedItems:Item[]}
-export interface StandupData{date:string;previousWorkday:string;members:StandupMember[];note:string|null}
+export interface StandupData{date:string;previousWorkday:string;members:StandupMember[];note:string|null;dataAsOf?:string}
 export interface RiskSignal{rule:string;severity:string;itemId:number|null;itemCode:string|null;userId:number|null;message:string}
-export interface OverviewMember{userId:number;memberStatus:string;memberStatusStart:string|null;memberStatusEnd:string|null;inProgressItems:Item[];lastProgressAt:string|null;staleCount:number;remainingPoints:number;remainingCapacityPoints:number|null;free:boolean}
+export interface OverviewMember{userId:number;independentCount?:number;memberStatus:string;memberStatusStart:string|null;memberStatusEnd:string|null;inProgressItems:Item[];lastProgressAt:string|null;staleCount:number;remainingPoints:number;remainingCapacityPoints:number|null;free:boolean}
 export interface OverviewData{members:OverviewMember[];canViewRisks:boolean;risks:RiskSignal[];iterationHealth:{iteration:Iteration;completionRate:number;remainingEstimate:number;idealRemainingEstimate:number;behind:boolean;blockedCount:number;staleCount:number}|null}
 // 报告（）：kind 与后端 ReportService 对齐——STANDUP_SUMMARY 站会摘要 / WEEKLY 周报 /
 // ITERATION_SUMMARY 迭代总结 / PERSONAL_WEEKLY 我的周报 / RISK_SUMMARY 风险摘要（旧前端曾把站会误写为 STANDUP，已纠正）。
 // 正文契约字段为 contentMd（兼容旧字段 content）；editedByHuman 表示被人工改过；version 为乐观锁版本；existed 表示 generate 命中已有报告。
 export interface ReportItem{allowedActions?:string[];id:number;teamId:number;kind:string;title:string;periodStart:string|null;periodEnd:string|null;ownerId:number|null;content:string;contentMd?:string;aiGenerated:boolean;edited:boolean;editedByHuman?:boolean;version?:number;deletedAt?:string|null;existed?:boolean;createdAt:string;updatedAt:string}
 export interface ReportVersion{id:number;reportId:number;title:string;contentMd?:string;content?:string;editedByHuman:boolean;createdAt:string}
-export type NotificationPrefs = Record<'ASSIGNMENT'|'NUDGE'|'MENTION'|'ITEM_UPDATE'|'REMINDER'|'SYSTEM', boolean>
+export type NotificationPrefs = Record<'ASSIGNMENT'|'NUDGE'|'MENTION'|'ITEM_UPDATE'|'REMINDER'|'SYSTEM', boolean> & { COMPACT_NOTIFICATIONS?: boolean; DESKTOP_NOTIFICATIONS?: boolean; NOTIFICATION_SOUND?: boolean }
 export const NOTIFICATION_CATEGORY_META:Record<string,string>={ASSIGNMENT:'指派',NUDGE:'催办',MENTION:'提及',ITEM_UPDATE:'事项动态',REMINDER:'自动提醒',SYSTEM:'系统'}
 // 分类色（修订一 ）：任务蓝；故事按类别；缺陷粉；独立分析紫；临时橙。
 export const TYPE_META:Record<ItemType,{label:string;color:string}>={TASK:{label:'任务',color:'#007AFF'},STORY:{label:'故事',color:'#30B0C7'},DEFECT:{label:'缺陷',color:'#FF2D55'},ANALYSIS:{label:'分析',color:'#AF52DE'},ADHOC:{label:'临时事项',color:'#FF9500'}}
@@ -73,3 +73,17 @@ export interface AuditLogPage{items:AuditLog[];total:number;page:number;size:num
 export const AUDIT_ACTION_LABELS:Record<string,string>={DELETE_ITEM:'删除事项',RESTORE_ITEM:'恢复事项',GENERATE_REPORT:'生成报告',DELETE_REPORT:'删除报告',REPORT_REGENERATE_FROM_TRASH:'恢复已删报告',CHANGE_ROLE:'调整角色',UPDATE_MEMBER_STATUS:'修改成员状态',REMOVE_MEMBER:'移除成员',UPDATE_TEAM_SETTINGS:'修改小组设置',RESET_INVITE_CODE:'重置邀请码',CREATE_ITEM:'新建事项',EDIT_ITEM:'编辑事项'}
 export const auditActionLabel=(a:string)=>AUDIT_ACTION_LABELS[a]??a
 export const auditTargetLabel=(l:AuditLog)=>{const t:Record<string,string>={ITEM:'事项',MEMBER:'成员',REPORT:'报告',TEAM:'小组'};return `${t[l.targetType]??l.targetType}${l.targetId!=null?' #'+l.targetId:''}`}
+
+// 1.1.0 新增类型
+export type FeedbackType = 'ISSUE' | 'SUGGESTION' | 'OTHER'
+export type FeedbackStatus = 'NEW' | 'ANALYZING' | 'ACCEPTED' | 'REJECTED' | 'RELEASED'
+export const FEEDBACK_TYPE_LABELS: Record<FeedbackType, string> = { ISSUE: '问题', SUGGESTION: '建议', OTHER: '其他' }
+export const FEEDBACK_STATUS_LABELS: Record<FeedbackStatus, string> = { NEW: '新提交', ANALYZING: '分析中', ACCEPTED: '已采纳', REJECTED: '不采纳', RELEASED: '已上线' }
+export interface FeedbackCommentItem { id: number; feedbackId: number; authorId: number; authorName: string; content: string; createdAt: string }
+export interface FeedbackImage { id: number; fileName: string; contentType: string; sizeBytes: number }
+export interface FeedbackItem { id: number; submitterId: number; submitterName: string; submitterLoginName: string; type: FeedbackType; title: string; description: string; status: FeedbackStatus; plannedVersion: string | null; rejectReason: string | null; releasedVersion: string | null; officialReply: string | null; pageUrl: string | null; appVersion: string | null; browserInfo: string | null; images: FeedbackImage[]; plusOneCount: number; myPlusOne: boolean; commentCount: number; createdAt: string; updatedAt: string }
+export interface SystemInfo { appVersion: string; buildDate: string; databaseVersion: string; flywayVersion: string; installDir: string; dataDir: string; dataDirSizeBytes: number; lastBackupAt: string | null; lastBackupResult: string | null; backupStale: boolean; serviceStartType: string; serviceStartTypeNote?: string; ai: { mode: string; platformEnabled: boolean; configured: boolean; status: string }; lanAddresses: string[]; serverPort: number }
+export interface BackupStatus { statusFilePresent: boolean; lastBackupAt: string | null; lastBackupResult: string | null; lastBackupDetail: string | null; backupStale: boolean; backupStaleMessage: string | null }
+export interface ReleaseNotes { version: string; title: string; content: string; read: boolean }
+export interface HandoverPendingEntry { itemId: number; code: string; title: string; kind: 'OWNED' | 'ACCEPTOR' | 'BATCH'; status: string; batchId: number | null }
+export interface ClosePreview { unfinishedCount: number; defaultAction: string; hasPlanningIteration: boolean; items: { itemId: number; code: string; title: string; status: string }[]; willGenerate: string[]; undoWindowHours: number }

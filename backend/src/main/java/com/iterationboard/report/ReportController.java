@@ -176,6 +176,29 @@ public class ReportController {
                 .body(r.getContent());
     }
 
+    /** P20：报告导出 Word（.docx）。 */
+    @GetMapping("/reports/{reportId}/export-docx")
+    public ResponseEntity<byte[]> exportDocx(@PathVariable Long teamId, @PathVariable Long reportId) {
+        AppUser u = currentUser.require();
+        Report r = reportService.get(teamId, reportId, u);
+        String filename = URLEncoder.encode(r.getTitle(), StandardCharsets.UTF_8).replace("+", "%20") + ".docx";
+        return ResponseEntity.ok()
+                .header(HttpHeaders.CONTENT_DISPOSITION, "attachment; filename*=UTF-8''" + filename)
+                .contentType(MediaType.parseMediaType("application/vnd.openxmlformats-officedocument.wordprocessingml.document"))
+                .body(exportService.exportReportDocx(r));
+    }
+
+    /** P20：「复制为邮件正文」所需的结构化 HTML（保留标题/列表/表格）。 */
+    @GetMapping("/reports/{reportId}/export-html")
+    public Map<String, Object> exportHtml(@PathVariable Long teamId, @PathVariable Long reportId) {
+        AppUser u = currentUser.require();
+        Report r = reportService.get(teamId, reportId, u);
+        Map<String, Object> out = new LinkedHashMap<>();
+        out.put("title", r.getTitle());
+        out.put("html", ExportService.markdownToHtml(r.getContent()));
+        return out;
+    }
+
     @GetMapping("/items/export")
     public ResponseEntity<byte[]> exportItems(@PathVariable Long teamId,
                                               @RequestParam(required = false) Long iterationId,

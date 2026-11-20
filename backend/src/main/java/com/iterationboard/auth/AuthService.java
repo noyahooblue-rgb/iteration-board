@@ -79,8 +79,9 @@ public class AuthService {
         u.setDisplayName(displayName);
         u.setPasswordHash(encoder.encode(password));
         u.setAvatarColor(AVATAR_COLORS[Math.floorMod(loginName.hashCode(), AVATAR_COLORS.length)]);
-        // 第一个注册的账号自动成为平台管理员
-        u.setPlatformAdmin(userRepo.count() == 0);
+        // 自助注册永不授予平台管理员；平台管理员由安装引导创建的 admin
+        // 或由已有管理员在平台管理中授予。
+        u.setPlatformAdmin(false);
         userRepo.save(u);
         establishSession(u, request, response);
         return u;
@@ -92,6 +93,9 @@ public class AuthService {
         AppUser u = userRepo.findByLoginName(loginName).orElse(null);
         if (u == null) {
             throw new ApiException(HttpStatus.UNAUTHORIZED, "INVALID_CREDENTIALS", "登录名或密码不正确");
+        }
+        if (!"ACTIVE".equals(u.getStatus()) || u.getDeletedAt() != null) {
+            throw new ApiException(HttpStatus.FORBIDDEN, "ACCOUNT_DISABLED", "账号已停用，请联系平台管理员");
         }
         Instant now = Instant.now();
         if (u.getLockedUntil() != null && u.getLockedUntil().isAfter(now)) {

@@ -20,10 +20,13 @@ import java.util.List;
 public class TaskDerivationService {
     private final ItemRepo itemRepo;
     private final NotifyService notifyService;
+    private final com.iterationboard.repo.TeamMemberRepo memberRepo;
 
-    public TaskDerivationService(ItemRepo itemRepo, NotifyService notifyService) {
+    public TaskDerivationService(ItemRepo itemRepo, NotifyService notifyService,
+                                 com.iterationboard.repo.TeamMemberRepo memberRepo) {
         this.itemRepo = itemRepo;
         this.notifyService = notifyService;
+        this.memberRepo = memberRepo;
     }
 
     public static TaskStatus toTaskStatus(Item task) {
@@ -65,9 +68,25 @@ public class TaskDerivationService {
         task.setProgressPercent(progressOf(stories));
         itemRepo.save(task);
         if (derived == TaskStatus.PENDING_ACCEPTANCE && before != TaskStatus.PENDING_ACCEPTANCE) {
-            notifyService.notify(task.getPo(), "TASK_PENDING_ACCEPTANCE", task, null,
-                    "任务「" + task.getTitle() + "」的故事已全部完成，待验收");
+            // P17：故事全部完成 → 任务进入待验收，通知任务验收人（小组设置「任务默认验收角色」，默认组长）；
+            // 任务 PO 与验收人不同人时一并通知 PO（保持既有口径）。
+            AppUser acceptor = resolveTaskAcceptor(task);
+            if (acceptor != null) {
+                notifyService.notify(acceptor, "TASK_PENDING_ACCEPTANCE", task, null,
+                        "任务「" + task.getTitle() + "」的故事已全部完成，待你验收");
+            }
+            if (task.getPo() != null && (acceptor == null || !task.getPo().getId().equals(acceptor.getId()))) {
+                notifyService.notify(task.getPo(), "TASK_PENDING_ACCEPTANCE", task, null,
+                        "任务「" + task.getTitle() + "」的故事已全部完成，待验收");
+            }
         }
+    }
+
+    private AppUser resolveTaskAcceptor(Item task) {
+        String role = com.iterationboard.team.TeamSettings.from(task.getTeam()).taskAcceptorRole;
+        return memberRepo.findByTeamId(task.getTeam().getId()).stream()
+                .filter(m -> m.getRole().name().equals(role))
+                .map(TeamMember::getUser).findFirst().orElse(null);
     }
 
     /** 进度：故事点加权；总点为 0 时按件数。 */

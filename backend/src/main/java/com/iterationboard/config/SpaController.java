@@ -41,6 +41,7 @@ public class SpaController {
             "/settings",
             "/me/settings",
             "/admin",
+            "/feedback",
             "/teams/new",
             "/teams/pending",
             "/task/{id}",

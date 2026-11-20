@@ -326,13 +326,73 @@ if errorlevel 1 (
 )
 echo [INFO] Application verified: http://127.0.0.1:%APP_PORT%/ answers 200.
 
+rem --- 9. P01: create the built-in admin account (1.1.0) --------
+rem Revision 4 / P01 replaces the old "first registered account
+rem becomes administrator" rule: the installer creates a fixed
+rem login "admin" with a random password, shown at the end of
+rem this script and written to config\admin-initial-password.txt.
+rem HOW IT CONNECTS (assumption, same as reset-admin.bat): the
+rem backend has no local bootstrap endpoint yet, so this follows
+rem the established direct-PostgreSQL pattern of the backup
+rem scripts. The hash comes from pgcrypto crypt() with
+rem gen_salt('bf'), a $2a$ BCrypt hash the backend's Spring
+rem BCryptPasswordEncoder verifies. The account is created
+rem only when no login_name 'admin' row exists, so re-running
+rem install.bat never resets it. An audit_log row
+rem (ADMIN_BOOTSTRAP_VIA_INSTALL, actor = the new account) is
+rem written in the same transaction. must_change_password is
+rem set: the first login forces a password change, and once
+rem that flag is cleared start.bat deletes the password file.
+set "ADMIN_CREATED=0"
+set "ADMIN_PW="
+if "%DBPWD%"=="" (
+  for /f "tokens=1,2" %%A in ('findstr /C:"password:" "%CFG%"') do set "DBPWD=%%B"
+)
+set "PGPASSWORD=%DBPWD%"
+set "EXISTS="
+for /f "usebackq delims=" %%R in (`"%ROOT%\runtime\pgsql\bin\psql.exe" -h 127.0.0.1 -p 15432 -U postgres -d iteration_board -t -A -c "SELECT count(*) FROM app_user WHERE login_name = 'admin'"`) do set "EXISTS=%%R"
+if "%EXISTS%"=="0" (
+  call :gen_password
+  if not "%ADMIN_PW%"=="" (
+    "%ROOT%\runtime\pgsql\bin\psql.exe" -h 127.0.0.1 -p 15432 -U postgres -d iteration_board -v ON_ERROR_STOP=1 -v pw="%ADMIN_PW%" -c "BEGIN; CREATE EXTENSION IF NOT EXISTS pgcrypto; INSERT INTO app_user (login_name, display_name, password_hash, platform_admin, status, must_change_password) VALUES ('admin', E'\u5e73\u53f0\u7ba1\u7406\u5458', crypt(:'pw', gen_salt('bf', 10)), TRUE, 'ACTIVE', TRUE); INSERT INTO audit_log (team_id, actor_id, action, target_type, target_id, detail) SELECT NULL, id, 'ADMIN_BOOTSTRAP_VIA_INSTALL', 'USER', id, 'Built-in admin account created by install.bat (P01)' FROM app_user WHERE login_name = 'admin'; COMMIT;" >nul 2>&1
+    if not errorlevel 1 set "ADMIN_CREATED=1"
+  )
+)
+set "PGPASSWORD="
+if "%ADMIN_CREATED%"=="1" (
+  powershell -NoProfile -Command "[IO.File]::WriteAllText('%ROOT%\config\admin-initial-password.txt', \"admin initial password: %ADMIN_PW%`r`nCreated by install.bat. This file is deleted automatically after the admin password is changed.`r`n\", [Text.Encoding]::ASCII)"
+  echo [INFO] Built-in administrator account created - details below.
+) else (
+  if "%EXISTS%"=="0" (
+    echo [WARN] The built-in admin account could not be created.
+    echo [WARN] Register a normal account, then see reset-admin.bat.
+  ) else (
+    echo [INFO] An admin account already exists - left unchanged.
+  )
+)
+
 echo.
 echo ============================================================
 echo  Installation complete.
 echo  Open in a browser:  http://localhost:%APP_PORT%/
 echo  From other PCs on the LAN:  http://^<this-PC-IP^>:%APP_PORT%/
-echo  IMPORTANT: the FIRST account registered becomes the
-echo  administrator. Register it right away.
+if "%ADMIN_CREATED%"=="1" (
+  echo  Platform administrator account:  admin
+  echo  Initial password:  %ADMIN_PW%
+  echo  The same password is in config\admin-initial-password.txt
+  echo  Log in as admin NOW and change the password - the first
+  echo  login forces a change, and the password file is deleted
+  echo  automatically once the password has been changed.
+  echo  Advice: after logging in as admin, also grant platform
+  echo  administrator to your personal account and use that one
+  echo  day to day. Keep at least TWO platform administrators,
+  echo  so a forgotten password never locks everyone out.
+) else (
+  echo  Log in with the existing administrator account. New
+  echo  self-registered accounts are normal users; platform
+  echo  administrator rights are granted inside Platform Admin.
+  echo  Keep at least TWO platform administrators.
+)
 if "%AUTOSTART%"=="1" (
   echo  Both services start automatically at boot.
 ) else (
@@ -348,6 +408,11 @@ call :ib_pause
 exit /b 0
 
 rem --- subroutines ----------------------------------------------
+:gen_password
+set "ADMIN_PW="
+for /f "usebackq delims=" %%P in (`powershell -NoProfile -Command "$rng = [Security.Cryptography.RNGCryptoServiceProvider]::Create(); $sets = @('ABCDEFGHJKLMNPQRSTUVWXYZ','abcdefghijkmnpqrstuvwxyz','23456789'); $all = $sets -join ''; $pw = ''; do { $bytes = New-Object byte[] 64; $rng.GetBytes($bytes); $pw = -join (0..19 | ForEach-Object { $all[$bytes[$_] %% $all.Length] }) } while (-not ($pw -cmatch '[A-Z]' -and $pw -cmatch '[a-z]' -and $pw -match '[0-9]')); $pw"`) do set "ADMIN_PW=%%P"
+exit /b 0
+
 :ib_pause
 if "%NOPAUSE%"=="0" pause
 exit /b 0

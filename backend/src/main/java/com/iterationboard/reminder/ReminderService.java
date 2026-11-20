@@ -61,6 +61,8 @@ public class ReminderService {
         List<Item> items = itemRepo.findByTeamId(team.getId()).stream()
                 .filter(i -> i.getDeletedAt() == null && i.getType() != ItemType.TASK)
                 .filter(i -> i.getStatus() != ItemStatus.DONE && i.getStatus() != ItemStatus.CANCELLED)
+                // 修订四 P07：未开始（PLANNING）迭代里的事项不参与未动工/未更新等提醒，迭代开始后才计时
+                .filter(i -> i.getIteration() == null || !"PLANNING".equals(i.getIteration().getStatus()))
                 .toList();
         int created = 0;
         for (Item i : items) {

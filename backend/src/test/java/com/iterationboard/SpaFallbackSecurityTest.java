@@ -49,6 +49,10 @@ class SpaFallbackSecurityTest {
         mvc.perform(get("/admin"))
                 .andExpect(status().isOk())
                 .andExpect(content().string(containsString("TEST-INDEX-MARKER")));
+        // 1.1.0 新增前端路由 /feedback（意见反馈）同理必须在回退清单内。
+        mvc.perform(get("/feedback"))
+                .andExpect(status().isOk())
+                .andExpect(content().string(containsString("TEST-INDEX-MARKER")));
     }
 
     @Test

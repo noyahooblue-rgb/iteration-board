@@ -6,7 +6,7 @@ function readPref(userId?: number | null): boolean | null {
   try { const v = localStorage.getItem(key(userId)); return v === null ? null : v === '1' } catch { return null }
 }
 export const useUi = defineStore('ui', {
-  state: () => ({ createOpen: false, collapsed: false, searchOpen: false, createPreset: null as any, _userId: null as number | null, _hydrated: false }),
+  state: () => ({ createOpen: false, collapsed: false, searchOpen: false, feedbackOpen: false, releaseNotesOpen: false, createPreset: null as any, _userId: null as number | null, _hydrated: false }),
   actions: {
     hydrate(userId: number | null) {
       this._userId = userId

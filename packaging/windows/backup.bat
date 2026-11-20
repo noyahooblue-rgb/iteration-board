@@ -1,21 +1,45 @@
 @echo off
 setlocal EnableExtensions
 rem ============================================================
-rem  Iteration Board - backup (design 10.4)
-rem  Creates backup\<yyyyMMdd-HHmmss>\ with:
+rem  Iteration Board - backup (design 10.4, 1.1.0 update)
+rem  Creates <backup-dir>\<yyyyMMdd-HHmmss>\ with:
 rem    db.dump        pg_dump custom-format dump
 rem    uploads\       uploaded image files (if the folder exists)
 rem    application.yml  config copy (contains the DB password -
 rem                     keep backup folders private!)
-rem  Backups older than 30 days are deleted.
+rem  The backup directory defaults to backup\ inside the
+rem  install folder and can be redirected in
+rem  config\application.yml (backup.dir, 1.1.0 - see the
+rem  deployment manual). Backups older than 30 days in the
+rem  ACTIVE backup directory are deleted.
+rem  Every run (success, failure or skip) records its result in
+rem  data\backup-status.json - format agreed with the backend
+rem  (1.1.0, P23): ISO-8601 UTC timestamps plus a success flag.
+rem  The file carries BOTH field namings so the backend reader
+rem  (lastAttemptAt/lastSuccessAt/result/detail) and the script
+rem  side (lastAttemptTime/lastSuccessTime/lastResult/success/
+rem  lastBackupPath) read the same file:
+rem    {"lastAttemptTime":"...Z","lastSuccessTime":"...Z",
+rem     "lastResult":"success|failed|skipped","success":true,
+rem     "lastBackupPath":"<folder of the newest good backup>",
+rem     "lastAttemptAt":"...Z","lastSuccessAt":"...Z",
+rem     "result":"SUCCESS|FAILED|SKIPPED","detail":"..."}
+rem  lastSuccessTime is only moved forward by a successful run.
 rem  Runs unattended from Task Scheduler as SYSTEM, and can
 rem  also be run manually (no pause in scheduled mode: pass
 rem  the argument "auto").
 rem ============================================================
 set "ROOT=%~dp0"
 if "%ROOT:~-1%"=="\" set "ROOT=%ROOT:~0,-1%"
-if not exist "%ROOT%\backup" mkdir "%ROOT%\backup"
 if not exist "%ROOT%\logs" mkdir "%ROOT%\logs"
+if not exist "%ROOT%\data" mkdir "%ROOT%\data"
+
+rem --- resolve the backup directory (config backup.dir) -------
+set "BKROOT=%ROOT%\backup"
+for /f "usebackq delims=" %%V in (`powershell -NoProfile -Command "$c = Get-Content '%ROOT%\config\application.yml' -Raw -ErrorAction SilentlyContinue; if ($c -match '(?ms)^backup:[ \t]*\r?\n[ \t]+dir:[ \t]*\"([^\"]*)\"') { $Matches[1] } elseif ($c -match '(?m)^[ \t]+dir:[ \t]*(\S+)[ \t]*$') { $Matches[1] }"`) do set "BKROOT=%%V"
+if not "%BKROOT%"=="" if not "%BKROOT:~1,1%"==":" set "BKROOT=%ROOT%\%BKROOT%"
+if "%BKROOT%"=="" set "BKROOT=%ROOT%\backup"
+if not exist "%BKROOT%" mkdir "%BKROOT%"
 
 rem --- the services must be running ----------------------------
 rem Since 1.0.3 both services default to MANUAL start, so at
@@ -30,6 +54,7 @@ if errorlevel 1 goto :svc_skip
 goto :svc_ok
 :svc_skip
 echo %DATE% %TIME% [SKIP] PostgreSQL service is not running; backup skipped. >> "%ROOT%\logs\backup.log"
+call :write_status skipped
 if "%~1"=="auto" exit /b 0
 echo [INFO] The PostgreSQL service is not running, so there is nothing to back up.
 echo [INFO] Start the services first - run start.bat - then run backup.bat again.
@@ -42,11 +67,12 @@ set "DBPWD="
 for /f "tokens=1,2" %%A in ('findstr /C:"password:" "%ROOT%\config\application.yml"') do set "DBPWD=%%B"
 if "%DBPWD%"=="" (
   echo [ERROR] Could not read DB password from config\application.yml >> "%ROOT%\logs\backup.log"
+  call :write_status failed
   exit /b 1
 )
 
 for /f "usebackq delims=" %%T in (`powershell -NoProfile -Command "Get-Date -Format yyyyMMdd-HHmmss"`) do set "TS=%%T"
-set "DEST=%ROOT%\backup\%TS%"
+set "DEST=%BKROOT%\%TS%"
 mkdir "%DEST%"
 set "PGPASSWORD=%DBPWD%"
 "%ROOT%\runtime\pgsql\bin\pg_dump.exe" -h 127.0.0.1 -p 15432 -U postgres -Fc -f "%DEST%\db.dump" iteration_board
@@ -54,6 +80,7 @@ set "IBRC=%ERRORLEVEL%"
 set "PGPASSWORD="
 if not "%IBRC%"=="0" (
   echo [ERROR] pg_dump failed with code %IBRC% >> "%ROOT%\logs\backup.log"
+  call :write_status failed
   if not "%~1"=="auto" pause
   exit /b 1
 )
@@ -61,14 +88,26 @@ if exist "%ROOT%\data\uploads" (
   robocopy "%ROOT%\data\uploads" "%DEST%\uploads" /E /NFL /NDL /NJH /NJS >nul
   if errorlevel 8 (
     echo [ERROR] uploads copy failed. >> "%ROOT%\logs\backup.log"
+    call :write_status failed
     exit /b 1
   )
 )
 copy /Y "%ROOT%\config\application.yml" "%DEST%\application.yml" >nul
 echo %DATE% %TIME% backup OK: %DEST% >> "%ROOT%\logs\backup.log"
+set "LASTBACKUP=%DEST%"
+call :write_status success
 
 rem --- keep only the last 30 days ------------------------------
-powershell -NoProfile -Command "Get-ChildItem '%ROOT%\backup' -Directory | Where-Object { $_.LastWriteTime -lt (Get-Date).AddDays(-30) } | Remove-Item -Recurse -Force"
+powershell -NoProfile -Command "Get-ChildItem '%BKROOT%' -Directory | Where-Object { $_.LastWriteTime -lt (Get-Date).AddDays(-30) } | Remove-Item -Recurse -Force"
 echo [INFO] Backup complete: %DEST%
 if not "%~1"=="auto" pause
+exit /b 0
+
+rem --- subroutine: record the run in data\backup-status.json ---
+rem %1 = success | failed | skipped. Merges with the previous
+rem file so lastSuccessTime survives failed or skipped runs.
+:write_status
+set "IB_BK_RESULT=%~1"
+set "IB_BK_PATH=%LASTBACKUP%"
+powershell -NoProfile -Command "$f = '%ROOT%\data\backup-status.json'; $now = (Get-Date).ToUniversalTime().ToString('yyyy-MM-ddTHH:mm:ssZ'); $prev = $null; if (Test-Path $f) { try { $prev = Get-Content $f -Raw | ConvertFrom-Json } catch {} }; $o = [ordered]@{}; $o.lastAttemptTime = $now; if ($env:IB_BK_RESULT -eq 'success') { $o.lastSuccessTime = $now } elseif ($prev -and $prev.lastSuccessTime) { $o.lastSuccessTime = $prev.lastSuccessTime } else { $o.lastSuccessTime = $null }; $o.lastResult = $env:IB_BK_RESULT; $o.success = ($env:IB_BK_RESULT -eq 'success'); if ($env:IB_BK_RESULT -eq 'success') { $o.lastBackupPath = $env:IB_BK_PATH } elseif ($prev -and $prev.lastBackupPath) { $o.lastBackupPath = $prev.lastBackupPath } else { $o.lastBackupPath = $null }; $o.lastAttemptAt = $o.lastAttemptTime; $o.lastSuccessAt = $o.lastSuccessTime; $o.result = $env:IB_BK_RESULT.ToUpper(); $o.detail = $o.lastResult; [IO.File]::WriteAllText($f, ($o | ConvertTo-Json -Compress), [Text.Encoding]::ASCII)"
 exit /b 0

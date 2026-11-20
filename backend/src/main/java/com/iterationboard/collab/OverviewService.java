@@ -104,6 +104,9 @@ public class OverviewService {
                     && m.isAwayOn(today);
             Map<String, Object> mm = new LinkedHashMap<>();
             mm.put("userId", uid);
+            // P04：附带显示姓名与登录名（同组重名时前端附带登录名区分）
+            mm.put("displayName", m.getUser().getDisplayName());
+            mm.put("loginName", m.getUser().getLoginName());
             mm.put("memberStatus", m.getMemberStatus());
             mm.put("memberStatusStart", m.getStatusStart());
             mm.put("memberStatusEnd", m.getStatusEnd());

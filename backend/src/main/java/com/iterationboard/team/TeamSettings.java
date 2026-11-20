@@ -20,6 +20,9 @@ public final class TeamSettings {
 
     public final BigDecimal capacityPointsPerWorkday;
     public final Thresholds thresholds;
+    /** P17：故事/任务默认验收角色（settings_json 的 storyAcceptorRole / taskAcceptorRole，默认 PO 验故事、组长验任务）。 */
+    public final String storyAcceptorRole;
+    public final String taskAcceptorRole;
     public final Set<LocalDate> specialHolidays;
     public final Set<LocalDate> specialWorkdays;
 
@@ -29,15 +32,28 @@ public final class TeamSettings {
     }
 
     private TeamSettings(BigDecimal cap, Thresholds t, Set<LocalDate> hol, Set<LocalDate> work) {
+        this(cap, t, hol, work, "PO", "LEADER");
+    }
+
+    private TeamSettings(BigDecimal cap, Thresholds t, Set<LocalDate> hol, Set<LocalDate> work,
+                         String storyAcceptorRole, String taskAcceptorRole) {
         this.capacityPointsPerWorkday = cap;
         this.thresholds = t;
         this.specialHolidays = hol;
         this.specialWorkdays = work;
+        this.storyAcceptorRole = storyAcceptorRole;
+        this.taskAcceptorRole = taskAcceptorRole;
+    }
+
+    private static String validRole(String v, String fallback) {
+        return ("LEADER".equals(v) || "PO".equals(v)) ? v : fallback;
     }
 
     public static TeamSettings from(Team team) {
         BigDecimal cap = BigDecimal.ONE;
         Thresholds t = Thresholds.defaults();
+        String storyRole = "PO";
+        String taskRole = "LEADER";
         Set<LocalDate> hol = new LinkedHashSet<>();
         Set<LocalDate> work = new LinkedHashSet<>();
         String json = team == null ? null : team.getSettingsJson();
@@ -57,13 +73,15 @@ public final class TeamSettings {
                             th.path("blockedWorkdays").asInt(t.blockedWorkdays()),
                             th.path("dueSoonWorkdays").asInt(t.dueSoonWorkdays()));
                 }
+                storyRole = validRole(root.path("storyAcceptorRole").asText(null), storyRole);
+                taskRole = validRole(root.path("taskAcceptorRole").asText(null), taskRole);
                 readDates(root.get("specialHolidays"), hol);
                 readDates(root.get("specialWorkdays"), work);
             } catch (Exception ignored) {
                 // 设置 JSON 损坏时回落默认值，不阻断业务
             }
         }
-        return new TeamSettings(cap, t, hol, work);
+        return new TeamSettings(cap, t, hol, work, storyRole, taskRole);
     }
 
     private static void readDates(JsonNode node, Set<LocalDate> out) {
@@ -85,6 +103,8 @@ public final class TeamSettings {
         th.put("unclaimedWorkdays", thresholds.unclaimedWorkdays());
         th.put("blockedWorkdays", thresholds.blockedWorkdays());
         th.put("dueSoonWorkdays", thresholds.dueSoonWorkdays());
+        root.put("storyAcceptorRole", storyAcceptorRole);
+        root.put("taskAcceptorRole", taskAcceptorRole);
         ArrayNode hol = root.putArray("specialHolidays");
         specialHolidays.forEach(d -> hol.add(d.toString()));
         ArrayNode work = root.putArray("specialWorkdays");

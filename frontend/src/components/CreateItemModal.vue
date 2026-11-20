@@ -27,17 +27,18 @@
     </div>
   </div>
   <div v-if="form.destination==='ASSIGN'" class="fld">负责人（单选）
-    <div class="chips"><button v-for="m in team.members" :key="m.userId" class="mchip press" :class="{on:form.ownerIds.includes(m.userId)}" @click="form.ownerIds=[m.userId]"><Avatar :name="m.displayName" :color="m.avatarColor" :size="20"/>{{m.displayName}}<span class="tiny">{{memberNote(m)}}</span></button></div>
+    <div class="chips"><button v-for="m in team.members" :key="m.userId" class="mchip press" :class="{on:form.ownerIds.includes(m.userId)}" @click="form.ownerIds=[m.userId]"><Avatar :name="m.displayName" :color="m.avatarColor" :size="20"/>{{memberLabel(team.members, m)}}<span class="tiny">{{memberNote(m)}}</span></button></div>
   </div>
   <div v-if="form.destination==='COOWN'" class="fld">共同负责人（多选，权限相同）
-    <div class="chips"><button v-for="m in team.members" :key="m.userId" class="mchip press" :class="{on:form.ownerIds.includes(m.userId)}" @click="toggleId(form.ownerIds, m.userId)"><Avatar :name="m.displayName" :color="m.avatarColor" :size="20"/>{{m.displayName}}<span class="tiny">{{memberNote(m)}}</span></button></div>
+    <div class="chips"><button v-for="m in team.members" :key="m.userId" class="mchip press" :class="{on:form.ownerIds.includes(m.userId)}" @click="toggleId(form.ownerIds, m.userId)"><Avatar :name="m.displayName" :color="m.avatarColor" :size="20"/>{{memberLabel(team.members, m)}}<span class="tiny">{{memberNote(m)}}</span></button></div>
   </div>
   <div v-if="form.destination==='INVITE'" class="fld">邀请谁认领（多选，任意一人认领即可）
-    <div class="chips"><button v-for="m in team.members" :key="m.userId" class="mchip press" :class="{on:form.inviteeIds.includes(m.userId)}" @click="toggleId(form.inviteeIds, m.userId)"><Avatar :name="m.displayName" :color="m.avatarColor" :size="20"/>{{m.displayName}}</button></div>
+    <div class="chips"><button v-for="m in team.members" :key="m.userId" class="mchip press" :class="{on:form.inviteeIds.includes(m.userId)}" @click="toggleId(form.inviteeIds, m.userId)"><Avatar :name="m.displayName" :color="m.avatarColor" :size="20"/>{{memberLabel(team.members, m)}}</button></div>
   </div>
   <div v-if="form.destination==='EVERYONE'" class="fld">每人一份：勾选成员（或全组），每人生成一个独立事项并直接指派给本人
     <div class="chips"><button class="mchip press" :class="{on:allSelected}" @click="toggleAll">全组 {{team.members.length}} 人</button>
-    <button v-for="m in team.members" :key="m.userId" class="mchip press" :class="{on:form.memberIds.includes(m.userId)}" @click="toggleId(form.memberIds, m.userId)"><Avatar :name="m.displayName" :color="m.avatarColor" :size="20"/>{{m.displayName}}</button></div>
+    <button v-for="m in team.members" :key="m.userId" class="mchip press" :class="{on:form.memberIds.includes(m.userId)}" @click="toggleId(form.memberIds, m.userId)"><Avatar :name="m.displayName" :color="m.avatarColor" :size="20"/>{{memberLabel(team.members, m)}}</button></div>
+    <label class="small" style="display:block;margin-top:8px"><input type="checkbox" v-model="includeSelf"/> 包含我自己（默认不含发布人本人；不勾时即使全选也会自动排除我）</label>
   </div>
   <p v-if="err" class="err">{{err}}</p>
   <div class="foot"><label class="small"><input type="checkbox" v-model="keepOpen"/> 连续新建</label>
@@ -51,6 +52,10 @@ import { reactive, ref, computed, watch } from 'vue'
 import Modal from './Modal.vue'; import AppButton from './AppButton.vue'; import AppInput from './AppInput.vue'; import Avatar from './Avatar.vue'
 import { api, ApiError, newIdempotencyKey } from '../api/http'; import { TYPE_META, STORY_CAT_META, MEMBER_STATUS_META, estimateUnitLabel, type Item, type ItemType, type Member } from '../api/types'
 import { useUi } from '../stores/ui'; import { useTeam } from '../stores/team'; import { useToast } from '../stores/toast'
+import { memberLabel } from '../utils/memberLabel'; import { useAuth } from '../stores/auth'
+const auth = useAuth()
+// P14：每人一份默认不含发布人自己，可勾选包含。
+const includeSelf = ref(false)
 const ui = useUi(), team = useTeam(), toast = useToast()
 const emit = defineEmits(['created'])
 const keepOpen = ref(false), err = ref(''), errTitle = ref(''), tasks = ref<Item[]>([])
@@ -63,7 +68,7 @@ const unit = computed(()=> estimateUnitLabel(team.current))
 const form = reactive<any>({ type: 'DEFECT', title: '', description: '', priority: 'P2', dueDate: '', estimate: null, iterationId: '', destination: 'POOL', parentId: 0, storyCategory: 'DEV', ownerIds: [] as number[], inviteeIds: [] as number[], memberIds: [] as number[] })
 const allSelected = computed(()=> team.members.length > 0 && form.memberIds.length === team.members.length)
 function toggleId(list:number[], id:number){ const i = list.indexOf(id); i >= 0 ? list.splice(i,1) : list.push(id) }
-function toggleAll(){ form.memberIds = allSelected.value ? [] : team.members.map(m=>m.userId) }
+function toggleAll(){ if (allSelected.value) { form.memberIds = []; return } form.memberIds = team.members.map(m=>m.userId).filter(id => includeSelf.value || id !== auth.user?.id) }
 function memberNote(m: Member){ return m.memberStatus !== 'NORMAL' ? MEMBER_STATUS_META[m.memberStatus] : '' }
 watch(()=> ui.createOpen, async (open)=>{ if (!open) { idemKey = ''; return } idemKey = newIdempotencyKey(); err.value = ''; errTitle.value = ''
   if (team.currentId) tasks.value = await api.get(`/teams/${team.currentId}/items?scope=all&type=TASK`).catch(()=>[])
@@ -79,8 +84,9 @@ async function submit(){
   try {
     if (!idemKey) idemKey = newIdempotencyKey()
     if (form.destination === 'EVERYONE') {
-      if (!form.memberIds.length) { err.value = '请至少勾选一位成员'; return }
-      const b = await api.postKey(`/teams/${team.currentId}/dispatch-batches`, { ...base, memberIds: [...form.memberIds] }, idemKey)
+      const memberIds = includeSelf.value ? [...form.memberIds] : form.memberIds.filter((id:number) => id !== auth.user?.id)
+      if (!memberIds.length) { err.value = '请至少勾选一位成员（未勾「包含我自己」时不能只选自己）'; submitting.value = false; return }
+      const b = await api.postKey(`/teams/${team.currentId}/dispatch-batches`, { ...base, memberIds }, idemKey)
       toast.show(`已批量下发：${b.total} 人各一份`)
     } else {
       const body:any = { ...base, destination: form.destination === 'COOWN' ? 'ASSIGN' : form.destination }

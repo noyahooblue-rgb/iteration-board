@@ -63,4 +63,6 @@ public class AppUser {
     public String getPreferencesJson() { return preferencesJson; }
     public void setPreferencesJson(String v) { preferencesJson = v; }
     public Instant getCreatedAt() { return createdAt; }
+    public Instant getDeletedAt() { return deletedAt; }
+    public void setDeletedAt(Instant v) { deletedAt = v; }
 }

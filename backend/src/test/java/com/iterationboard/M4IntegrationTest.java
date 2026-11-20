@@ -300,10 +300,10 @@ class M4IntegrationTest {
         assertThat(((Number) JsonPath.read(itemJson(f.members().get(0), teamId, itemId), "$.progressPercent")).intValue()).isEqualTo(50);
     }
 
-    // ---------- AI 拆故事（仅 PO，无建议负责人） ----------
+    // ---------- AI 拆故事（1.1.0 修订四 P06：组长和 PO 都可，原「仅 PO」断言随规则变更调整；无建议负责人不变） ----------
 
     @Test
-    void splitStoriesPoOnlyNoOwnerSuggestion() throws Exception {
+    void splitStoriesLeaderAndPoNoOwnerSuggestion() throws Exception {
         Fixture f = fixture("ss", "SSA", 1);
         long teamId = f.team().teamId();
         long taskId = createItem(f.po(), teamId, "{\"type\":\"TASK\",\"title\":\"支付对账功能\"}");
@@ -312,7 +312,7 @@ class M4IntegrationTest {
                 .getResponse().getStatus())).isEqualTo(403);
         assertThat(Integer.valueOf(postJson(f.leader(),
                 "/api/v1/teams/" + teamId + "/ai/split-stories", "{\"itemId\":" + taskId + "}")
-                .getResponse().getStatus())).isEqualTo(403);
+                .getResponse().getStatus())).isEqualTo(200);
         MvcResult r = postJson(f.po(), "/api/v1/teams/" + teamId + "/ai/split-stories", "{\"itemId\":" + taskId + "}");
         assertThat(Integer.valueOf(r.getResponse().getStatus())).isEqualTo(200);
         String body = r.getResponse().getContentAsString();

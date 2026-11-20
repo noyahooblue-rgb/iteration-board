@@ -16,6 +16,7 @@
             <option value="LEADER">组长</option><option value="PO">PO</option><option value="MEMBER">成员</option>
           </select>
           <span v-else class="rolepill">{{roleName(m.role)}}</span>
+          <AppButton v-if="isLeader && m.userId !== auth.user?.id" variant="ghost" @click="openRemove(m)">移除</AppButton>
           <span v-if="isLeader" class="statusctl">
             <select v-model="statusDraft[m.userId].status" aria-label="成员状态">
               <option value="NORMAL">正常</option><option value="LEAVE">请假</option><option value="TRAVEL">出差</option><option value="SECONDMENT">外借</option>
@@ -37,6 +38,13 @@
           <label class="small">估算单位<select v-model="basic.estimateUnit" class="flexin"><option value="POINT">点</option><option value="HOUR">小时</option><option value="DAY">人天</option></select></label>
         </div>
         <AppButton style="margin-top:14px" @click="saveBasic">保存基本设置</AppButton>
+        <h3 style="margin-top:20px">默认验收角色（修订四 P17）</h3>
+        <p class="small">新建故事/任务时默认由哪个角色验收；任何人不能验收自己负责的事项，此时会自动转交给另一角色并在事项上提示。</p>
+        <div class="frow">
+          <label class="small">故事默认验收角色<select v-model="settings.storyAcceptRole" class="flexin"><option value="PO">PO</option><option value="LEADER">组长</option></select></label>
+          <label class="small">任务默认验收角色<select v-model="settings.taskAcceptRole" class="flexin"><option value="LEADER">组长</option><option value="PO">PO</option></select></label>
+        </div>
+        <AppButton style="margin-top:12px" @click="saveAcceptRoles">保存验收设置</AppButton>
       </template>
       <template v-else-if="tab==='remind'">
         <h2>容量与自动提醒</h2>
@@ -112,11 +120,19 @@
           <p><b>归档小组</b><br/><span class="small">归档后小组只读（仅组长可归档）。</span></p>
           <AppButton variant="danger" :disabled="!isLeader || team.current?.status==='ARCHIVED'" @click="archiveTeam">{{team.current?.status==='ARCHIVED' ? '已归档' : '归档小组'}}</AppButton>
           <p style="margin-top:14px"><b>退出小组</b><br/><span class="small">退出后将看不到本小组的任何事项；组长退出需先移交组长职责。</span></p>
-          <AppButton variant="ghost" @click="leaveTeam">退出小组</AppButton>
+          <AppButton variant="ghost" @click="leaveOpen=true">退出小组</AppButton>
         </div>
       </template>
     </GlassPanel>
   </div>
+  <Modal :open="!!removeTarget" @close="removeTarget=null">
+    <h2>移除成员 · {{removeTarget?.displayName}}</h2>
+    <HandoverPanel v-if="removeTarget && team.currentId" :team-id="team.currentId" :user-id="removeTarget.userId" confirm-label="确认移除" @cancel="removeTarget=null" @confirm="confirmRemove"/>
+  </Modal>
+  <Modal :open="leaveOpen" @close="leaveOpen=false">
+    <h2>退出小组前交接</h2>
+    <HandoverPanel v-if="auth.user && team.currentId" :team-id="team.currentId" :user-id="auth.user.id" confirm-label="确认退出" @cancel="leaveOpen=false" @confirm="confirmLeave"/>
+  </Modal>
 </AppShell>
 </template>
 <script setup lang="ts">
@@ -158,15 +174,22 @@ function gotoAudit(p: number){ auditPage.value = p; loadAudit() }
 function setScope(s: 'team'|'all'){ auditScope.value = s; reloadAudit() }
 watch(tab, t => { if (t === 'audit') { auditPage.value = 1; loadAudit() } })
 const basic = reactive({ name: '', description: '', themeColor: '#0071E3', iterationWeeks: 2, joinApproval: true, estimateUnit: 'POINT' })
-const settings = reactive<TeamSettings>({ capacityPointsPerWorkday: 1, reminderThresholds: { staleInProgressWorkdays: 2, notStartedWorkdays: 2, reviewPendingWorkdays: 2, unclaimedWorkdays: 3, blockedWorkdays: 2, dueSoonWorkdays: 1 }, specialHolidays: [], specialWorkdays: [] })
+const settings = reactive<TeamSettings>({ storyAcceptRole: 'PO', taskAcceptRole: 'LEADER', capacityPointsPerWorkday: 1, reminderThresholds: { staleInProgressWorkdays: 2, notStartedWorkdays: 2, reviewPendingWorkdays: 2, unclaimedWorkdays: 3, blockedWorkdays: 2, dueSoonWorkdays: 1 }, specialHolidays: [], specialWorkdays: [] })
 const specialOffText = ref(''), specialWorkText = ref('')
 const statusDraft = reactive<Record<number,{status:string;start:string;end:string}>>({})
 function syncForms(){ const t = team.current; if (!t) return
   basic.name = t.name; basic.description = t.description ?? ''; basic.themeColor = t.themeColor ?? '#0071E3'; basic.iterationWeeks = t.iterationWeeks ?? 2; basic.joinApproval = !!t.joinApproval; basic.estimateUnit = (t.estimateUnit ?? 'POINT').toUpperCase()
-  if (t.settings) { settings.capacityPointsPerWorkday = t.settings.capacityPointsPerWorkday; Object.assign(settings.reminderThresholds, t.settings.reminderThresholds ?? {}); settings.specialHolidays = t.settings.specialHolidays ?? []; settings.specialWorkdays = t.settings.specialWorkdays ?? [] }
+  if (t.settings) { settings.storyAcceptRole = t.settings.storyAcceptRole ?? 'PO'; settings.taskAcceptRole = t.settings.taskAcceptRole ?? 'LEADER'; settings.capacityPointsPerWorkday = t.settings.capacityPointsPerWorkday; Object.assign(settings.reminderThresholds, t.settings.reminderThresholds ?? {}); settings.specialHolidays = t.settings.specialHolidays ?? []; settings.specialWorkdays = t.settings.specialWorkdays ?? [] }
   specialOffText.value = (settings.specialHolidays ?? []).join('\n'); specialWorkText.value = (settings.specialWorkdays ?? []).join('\n')
   for (const m of team.members) statusDraft[m.userId] ??= { status: m.memberStatus, start: m.memberStatusStart ?? '', end: m.memberStatusEnd ?? '' } }
 async function saveBasic(){ try { await api.patch(`/teams/${team.currentId}`, { ...basic }); toast.show('基本设置已保存'); await team.loadTeams(); await team.loadTeamData(); syncForms() } catch(e){ toast.show(e instanceof ApiError ? e.message : '保存失败') } }
+async function saveAcceptRoles(){ try { await api.patch(`/teams/${team.currentId}`, { settings: { ...settings } }); toast.show('验收设置已保存'); await team.loadTeams(); syncForms() } catch(e){ toast.show(e instanceof ApiError ? e.message : '保存失败') } }
+// 移除成员 / 退出小组（P05）：先开交接面板，pendingCount=0 后才真正移除/退出。
+import Modal from '../components/Modal.vue'; import HandoverPanel from '../components/HandoverPanel.vue'
+const removeTarget = ref<Member | null>(null), leaveOpen = ref(false)
+function openRemove(m: Member){ removeTarget.value = m }
+async function confirmRemove(){ if (!removeTarget.value) return; try { await api.del(`/teams/${team.currentId}/members/${removeTarget.value.userId}`); toast.show('成员已移除'); removeTarget.value = null; await team.loadTeamData(); load() } catch(e){ toast.show(e instanceof ApiError ? e.message : '移除失败') } }
+async function confirmLeave(){ try { await api.post(`/teams/${team.currentId}/leave`); toast.show('已退出小组'); leaveOpen.value = false; await team.loadTeams(); router.push('/workbench') } catch(e){ toast.show(e instanceof ApiError ? e.message : '退出失败') } }
 async function saveSettings(){ settings.specialHolidays = specialOffText.value.split('\n').map(s=>s.trim()).filter(Boolean); settings.specialWorkdays = specialWorkText.value.split('\n').map(s=>s.trim()).filter(Boolean)
   try { await api.patch(`/teams/${team.currentId}`, { settings: { ...settings } }); toast.show('容量与提醒设置已保存'); await team.loadTeams(); syncForms() } catch(e){ toast.show(e instanceof ApiError ? e.message : '保存失败') } }
 async function saveStatus(m: Member){ const d = statusDraft[m.userId]; try { await api.patch(`/teams/${team.currentId}/members/${m.userId}/status`, { memberStatus: d.status, memberStatusStart: d.start || null, memberStatusEnd: d.end || null }); toast.show('成员状态已更新'); await team.loadTeamData() } catch(e){ toast.show(e instanceof ApiError ? e.message : '更新失败') } }
