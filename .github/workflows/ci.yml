@@ -13,6 +13,12 @@ jobs:
         run: python3 tools/check-bat.py packaging/windows
       - name: 服务 XML 良构校验（注释里的双连字符会让 WinSW 拒绝加载）
         run: python3 -c "import xml.etree.ElementTree, glob; [xml.etree.ElementTree.parse(f) for f in glob.glob('packaging/windows/*.xml')]"
+      - name: PSScriptAnalyzer（档 1：验证脚本静态检查，仅 Error 级失败）
+        shell: pwsh
+        run: |
+          $issues = Invoke-ScriptAnalyzer -Path tools/ci -Recurse -Severity Error
+          if ($issues) { $issues | Format-Table -AutoSize | Out-String | Write-Host; exit 1 }
+          Write-Host 'PSScriptAnalyzer: no Error-level findings'
 
   backend:
     runs-on: ubuntu-latest

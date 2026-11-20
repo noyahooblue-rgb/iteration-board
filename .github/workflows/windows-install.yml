@@ -13,6 +13,12 @@ on:
   push:
   pull_request:
   workflow_dispatch:
+    inputs:
+      tier:
+        description: '重跑档位：all=冒烟+全量 E2E；smoke=只跑档 2 冒烟'
+        type: choice
+        options: [all, smoke]
+        default: all
 
 jobs:
   build-package:
@@ -48,8 +54,36 @@ jobs:
           path: packaging/dist/iteration-board-offline-1.1.0.zip
           retention-days: 7
 
-  windows-install:
+  # 档 2（Windows 冒烟，目标 ≤20 分钟）：中文+空格路径、中文 TEMP、chcp 936 下
+  # install → 健康 → 密码文件登录 admin → 改密 → stop → start → uninstall。
+  windows-smoke:
     needs: build-package
+    runs-on: windows-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+      - name: 下载安装包
+        uses: actions/download-artifact@v4
+        with:
+          name: ib-offline-package
+          path: C:\ibdl
+      - name: Windows 冒烟（档 2）
+        shell: pwsh
+        timeout-minutes: 20
+        run: ./tools/ci/windows-smoke.ps1
+      - name: 上传冒烟证据（脚本输出/应用与 PG 日志/WinSW 日志/SCM 事件）
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: windows-smoke-evidence
+          path: C:\ibwork-smoke\evidence
+          retention-days: 7
+          if-no-files-found: warn
+
+  # 档 3（全量 E2E 剧本）：只在档 2 冒烟全绿后跑。
+  windows-install:
+    needs: [build-package, windows-smoke]
+    if: ${{ inputs.tier != 'smoke' }}
     runs-on: windows-latest
     timeout-minutes: 150
     steps:
