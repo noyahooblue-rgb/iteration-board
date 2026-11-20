@@ -63,7 +63,7 @@
 
       <GlassPanel class="items">
         <h3>迭代外工作（独立事项）</h3>
-        <p class="tiny" style="margin:4px 0 8px">进行中的缺陷 / 分析 / 临时事项：计入个人负载与总览，不计入本迭代燃尽图（P13），在迭代总结里单列。</p>
+        <p class="tiny" style="margin:4px 0 8px">进行中的缺陷 / 分析 / 临时事项：计入个人负载与总览，不计入本迭代燃尽图，在迭代总结里单列。</p>
         <button v-for="it in outsideItems" :key="it.id" class="iitem press" @click="openId=it.id;drawerOpen=true">
           <span class="tdot" :style="{background:itemColor(it)}"/><span class="small">{{it.code}}</span><span class="grow">{{it.title}}</span>
           <span class="tiny">{{STATUS_META[it.status].label}}</span><span class="tiny">{{it.estimate ?? '—'}} 点</span>

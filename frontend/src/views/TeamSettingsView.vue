@@ -38,7 +38,7 @@
           <label class="small">估算单位<select v-model="basic.estimateUnit" class="flexin"><option value="POINT">点</option><option value="HOUR">小时</option><option value="DAY">人天</option></select></label>
         </div>
         <AppButton style="margin-top:14px" @click="saveBasic">保存基本设置</AppButton>
-        <h3 style="margin-top:20px">默认验收角色（修订四 P17）</h3>
+        <h3 style="margin-top:20px">默认验收角色</h3>
         <p class="small">新建故事/任务时默认由哪个角色验收；任何人不能验收自己负责的事项，此时会自动转交给另一角色并在事项上提示。</p>
         <div class="frow">
           <label class="small">故事默认验收角色<select v-model="settings.storyAcceptRole" class="flexin"><option value="PO">PO</option><option value="LEADER">组长</option></select></label>

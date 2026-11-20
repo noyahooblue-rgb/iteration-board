@@ -1,6 +1,6 @@
 <template>
 <div class="wrap">
-  <header class="top"><h1>加入或创建小组</h1><button class="small press" @click="logout">退出登录</button></header>
+  <header class="top"><h1>加入或创建小组</h1><span class="topbtns"><button v-if="auth.user?.platformAdmin" class="small press" @click="router.push('/admin')">平台管理</button><button class="small press" @click="logout">退出登录</button></span></header>
   <p v-if="pending" class="pending glass">已提交加入申请，等待组长审批中。审批通过后刷新页面即可进入小组。</p>
   <div class="grid">
     <GlassPanel>
@@ -44,7 +44,7 @@ async function join(){ errJ.value=''; try{ const res = await api.post('/teams/jo
 async function logout(){ await auth.logout(); router.push('/login') }
 </script>
 <style scoped>
-.wrap{max-width:980px;margin:0 auto;padding:28px 20px}.top{display:flex;justify-content:space-between;align-items:center;margin-bottom:18px}
+.wrap{max-width:980px;margin:0 auto;padding:28px 20px}.top{display:flex;justify-content:space-between;align-items:center;margin-bottom:18px}.topbtns{display:flex;gap:14px;align-items:center}
 .grid{display:grid;grid-template-columns:1fr 1fr;gap:16px}@media(max-width:820px){.grid{grid-template-columns:1fr}}
 h2{display:flex;gap:8px;align-items:center}
 .fld{display:block;font-size:12px;color:var(--text-2);margin-top:12px}.fld select{width:100%;min-height:44px;margin-top:6px;border-radius:var(--r-ctl);border:1px solid var(--separator);background:var(--fill);padding:0 10px}

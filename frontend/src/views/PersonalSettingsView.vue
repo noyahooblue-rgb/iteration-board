@@ -41,7 +41,7 @@
       <label class="switch"><input type="checkbox" :checked="prefs[c.key]" :disabled="c.locked || (!!prefs.COMPACT_NOTIFICATIONS && c.key==='REMINDER')" @change="togglePref(c.key, ($event.target as HTMLInputElement).checked)"/><span/></label>
     </div>
     <div class="prefrow">
-      <span class="grow"><b>精简通知</b><br/><span class="tiny">开启后只收六类：指派给我、邀请我认领、@我、催我、待我验收、加入申请；同一事项 5 分钟内的多条变化会合并成一条（修订四 P25）</span></span>
+      <span class="grow"><b>精简通知</b><br/><span class="tiny">开启后只收六类：指派给我、邀请我认领、@我、催我、待我验收、加入申请；同一事项 5 分钟内的多条变化会合并成一条</span></span>
       <label class="switch"><input type="checkbox" :checked="!!prefs.COMPACT_NOTIFICATIONS" @change="togglePref('COMPACT_NOTIFICATIONS', ($event.target as HTMLInputElement).checked)"/><span/></label>
     </div>
     <h2 style="margin-top:22px">浏览器提醒</h2>
@@ -57,7 +57,7 @@
       <label class="switch"><input type="checkbox" :checked="!!prefs.NOTIFICATION_SOUND" @change="togglePref('NOTIFICATION_SOUND', ($event.target as HTMLInputElement).checked)"/><span/></label>
     </div>
     <template v-if="myStatus.status==='LEAVE'">
-      <h2 style="margin-top:22px">请假期间到期事项（P19）</h2>
+      <h2 style="margin-top:22px">请假期间到期事项</h2>
       <p class="small">以下事项在你的请假期间到期，请提前转交或请组长协助跟进：</p>
       <p v-if="leaveDueLoading" class="small">加载中…</p>
       <div v-for="it in leaveDue" :key="it.itemId" class="mrow"><span class="grow"><b>{{it.code}}</b> {{it.title}}<br/><span class="tiny">截止 {{it.dueDate}}</span></span><span class="tiny">请在事项详情里转交</span></div>

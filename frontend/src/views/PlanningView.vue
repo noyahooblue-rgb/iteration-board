@@ -18,7 +18,7 @@
           <span class="small">{{loadOf(m.userId).points}} {{unit}} / 剩余容量 {{capOf(m.userId).capacityPoints}} {{unit}}（剩余 {{capOf(m.userId).remainingDays}} 天 × 系数 {{coef}}）{{over(m.userId) ? ' · 超容量' : ''}}</span>
         </div>
       </div>
-      <p class="tiny">容量口径（M3 定稿）：个人剩余容量 = 剩余可用工作日 × 小组容量系数（每人每个工作日约等于几个故事点，默认 1，在小组设置里调整）；请假/出差覆盖日不计；共同负责的故事点按人数均分。超容量只提示、不拦截。</p>
+      <p class="tiny">容量口径：个人剩余容量 = 剩余可用工作日 × 小组容量系数（每人每个工作日约等于几个故事点，默认 1，在小组设置里调整）；请假/出差覆盖日不计；共同负责的故事点按人数均分。超容量只提示、不拦截。</p>
     </GlassPanel>
     <div v-for="g in planning.groups" :key="g.task?.id ?? 'indie'" class="group">
       <h2 class="ghead"><template v-if="g.task"><span class="lcode">{{g.task.code}}</span> {{g.task.title}} <RouterLink :to="`/task/${g.task.id}`" class="small link">任务详情 →</RouterLink></template><template v-else>独立事项</template></h2>

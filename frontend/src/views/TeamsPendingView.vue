@@ -5,7 +5,7 @@
     <h1>加入申请已提交</h1>
     <p class="small">你申请加入的小组需要组长审批。审批通过后，点击下方按钮刷新状态即可进入小组；被拒绝时申请会失效，可以重新输入邀请码申请。</p>
     <p v-if="teamName" class="small">申请小组：<b>{{teamName}}</b></p>
-    <div class="row"><AppButton @click="refresh">刷新状态</AppButton><AppButton variant="ghost" @click="router.push('/teams/new')">返回创建 / 加入</AppButton><AppButton variant="ghost" @click="logout">退出登录</AppButton></div>
+    <div class="row"><AppButton @click="refresh">刷新状态</AppButton><AppButton variant="ghost" @click="router.push('/teams/new')">返回创建 / 加入</AppButton><AppButton v-if="auth.user?.platformAdmin" variant="ghost" @click="router.push('/admin')">平台管理</AppButton><AppButton variant="ghost" @click="logout">退出登录</AppButton></div>
     <p v-if="msg" class="small" style="margin-top:10px">{{msg}}</p>
   </GlassPanel>
 </div>
