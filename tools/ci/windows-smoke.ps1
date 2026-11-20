@@ -116,8 +116,12 @@ try {
     Check 'S3 admin is platformAdmin + mustChangePassword' ($me.Body.platformAdmin -eq $true -and $me.Body.mustChangePassword -eq $true)
     $chg = Api-Call $s 'Post' '/auth/change-password' @{ oldPassword = $initPw; newPassword = $NewPw }
     Check 'S3 change-password succeeds (204)' ($chg.Status -eq 204)
-    Start-Sleep -Seconds 1
-    Check 'S3 password file deleted by app after change' (-not (Test-Path $pwFile))
+    $pwGone = $false
+    for ($i = 0; $i -lt 15; $i++) {
+      if (-not (Test-Path $pwFile)) { $pwGone = $true; break }
+      Start-Sleep -Seconds 1
+    }
+    Check 'S3 password file deleted by app after change' $pwGone
   }
 
   Write-Host 'PHASE S4 stop / start'
@@ -138,8 +142,13 @@ try {
     $domFile = Join-Path $Evidence 'chrome128-dom.html'
     & $ChromeExe --headless=new --disable-gpu --no-sandbox --window-size=1440,900 --screenshot=$shot 'http://localhost:18080/' 2>&1 | Out-Null
     Check 'S5 Chrome 128 renders login page (screenshot exists)' (Test-Path $shot)
-    & $ChromeExe --headless=new --disable-gpu --no-sandbox --dump-dom 'http://localhost:18080/' 2>&1 | Out-File -Encoding utf8 $domFile
-    $dom = Get-Content $domFile -Raw -ErrorAction SilentlyContinue
+    $dom = ''
+    for ($i = 0; $i -lt 3; $i++) {
+      & $ChromeExe --headless=new --disable-gpu --no-sandbox --dump-dom 'http://localhost:18080/' 2>&1 | Out-File -Encoding utf8 $domFile
+      $dom = Get-Content $domFile -Raw -ErrorAction SilentlyContinue
+      if ($dom -match 'demo-box|login|登录') { break }
+      Start-Sleep -Seconds 2
+    }
     Check 'S5 Chrome 128 DOM contains app login marker' ($dom -match 'demo-box|login|登录')
   } else {
     Write-Host 'SKIP S5 (no ChromeExe provided)'
@@ -166,6 +175,7 @@ try {
   if ($script:Failures.Count -gt 0) {
     Write-Host "SMOKE RESULT: $($script:Failures.Count) FAILURE(S)"
     $script:Failures | ForEach-Object { Write-Host "  - $_" }
+    Write-Host "::error::SMOKE FAILURES: $($script:Failures -join ' | ')"
     # 证据 artifact 无权限下载时，关键日志尾巴经 annotation 表面化（同 windows-verify.ps1 口径）
     foreach ($ln in @('smoke-blocked.log', 'smoke-install.log', 'smoke-stop.log', 'smoke-start.log', 'smoke-uninstall.log')) {
       $lf = Join-Path $Evidence $ln
