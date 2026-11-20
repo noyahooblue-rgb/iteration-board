@@ -115,7 +115,7 @@ for /f "usebackq delims=" %%T in (`powershell -NoProfile -Command "Get-Date -For
 set "WORK=%TARGET%\tmp\ib-migrate-import-%TS%"
 mkdir "%WORK%" >nul 2>&1
 echo [INFO] Extracting the migration package ...
-powershell -NoProfile -Command "Expand-Archive -Path '%ZIP%' -DestinationPath '%WORK%' -Force"
+powershell -NoProfile -Command "Add-Type -AssemblyName System.IO.Compression.FileSystem; [IO.Compression.ZipFile]::ExtractToDirectory('%ZIP%', '%WORK%')"
 if errorlevel 1 (
   echo [ERROR] Extracting the migration package failed.
   goto :fail
@@ -133,7 +133,7 @@ if not exist "%WORK%\db.dump" (
 rem --- step 2: verify hashes ---------------------------------------------
 echo [INFO] Verifying manifest and file hashes ...
 set "IB_WORK=%WORK%"
-powershell -NoProfile -Command "$m = Get-Content (Join-Path $env:IB_WORK 'manifest.json') -Raw | ConvertFrom-Json; $fail = 0; foreach ($f in $m.files) { $p = Join-Path $env:IB_WORK ($f.path.Replace('/', '\')); if (-not (Test-Path $p)) { Write-Host \"[ERROR] missing file: $($f.path)\"; $fail = 1; continue }; $h = (Get-FileHash $p -Algorithm SHA256).Hash.ToLower(); if ($h -ne $f.sha256) { Write-Host \"[ERROR] hash mismatch: $($f.path)\"; $fail = 1 } }; if ($fail -eq 0) { Write-Host '[INFO] All files verified.' }; exit $fail"
+powershell -NoProfile -Command "function Get-Sha256([string]$path) { $fs = [IO.File]::OpenRead($path); try { return [BitConverter]::ToString(([Security.Cryptography.SHA256]::Create()).ComputeHash($fs)).Replace('-', '').ToLower() } finally { $fs.Close() } }; $m = Get-Content (Join-Path $env:IB_WORK 'manifest.json') -Raw | ConvertFrom-Json; $fail = 0; foreach ($f in $m.files) { $p = Join-Path $env:IB_WORK ($f.path.Replace('/', '\')); if (-not (Test-Path $p)) { Write-Host \"[ERROR] missing file: $($f.path)\"; $fail = 1; continue }; $h = (Get-Sha256 $p); if ($h -ne $f.sha256) { Write-Host \"[ERROR] hash mismatch: $($f.path)\"; $fail = 1 } }; if ($fail -eq 0) { Write-Host '[INFO] All files verified.' }; exit $fail"
 if errorlevel 1 (
   echo [ERROR] Hash verification failed - the package is incomplete
   echo [ERROR] or corrupted. Copy it again and re-run. Nothing changed.
