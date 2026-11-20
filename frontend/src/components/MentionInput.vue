@@ -2,12 +2,14 @@
 <div class="mi">
   <textarea ref="ta" :value="modelValue" :rows="rows" :placeholder="placeholder" :aria-label="ariaLabel"
     @input="onInput" @keydown="onKey" @click="syncTrigger" @keyup="onKeyup" @blur="onBlur"/>
-  <div v-if="open && filtered.length" class="mipop glass" role="listbox" aria-label="选择要 @ 的成员">
-    <button v-for="(m, i) in filtered" :key="m.userId" class="mrow" :class="{ on: i === sel }" role="option" :aria-selected="i === sel"
-      @mousedown.prevent="pick(m)" @mouseenter="sel = i">
-      <Avatar :name="m.displayName" :color="m.avatarColor" :size="24"/><span class="mn">{{ m.displayName }}</span><span class="tiny">@{{ m.loginName }}</span>
-    </button>
-  </div>
+  <OverlayMenu :open="open && !!filtered.length" :anchor="ta" manual-focus @close="open=false">
+    <div class="mipop" role="listbox" aria-label="选择要 @ 的成员">
+      <button v-for="(m, i) in filtered" :key="m.userId" class="mrow" :class="{ on: i === sel }" role="option" :aria-selected="i === sel"
+        @mousedown.prevent="pick(m)" @mouseenter="sel = i">
+        <Avatar :name="m.displayName" :color="m.avatarColor" :size="24"/><span class="mn">{{ m.displayName }}</span><span class="tiny">@{{ m.loginName }}</span>
+      </button>
+    </div>
+  </OverlayMenu>
 </div>
 </template>
 <script setup lang="ts">
@@ -15,6 +17,7 @@
 // ↑↓ 选择、Enter 确认、Esc 关闭；选中后文本中插入 @姓名 并通过 update:mentionIds 回传被 @ 的 userId 列表。
 import { ref, computed, nextTick } from 'vue'
 import Avatar from './Avatar.vue'
+import OverlayMenu from './OverlayMenu.vue'
 import { useTeam } from '../stores/team'
 import { pinyinInitials } from '../utils/pinyin'
 import type { Member } from '../api/types'
@@ -70,8 +73,8 @@ function onKey(e: KeyboardEvent) {
 <style scoped>
 .mi{position:relative;flex:1;display:flex}
 .mi textarea{flex:1;border:1px solid var(--field-brd);background:var(--field);border-radius:var(--r-ctl);padding:9px 12px;resize:none;max-height:110px;outline:none;font-size:14px;font-family:inherit}
-.mi textarea:focus{border-color:var(--theme);box-shadow:0 0 0 3px rgba(0,122,255,.16)}
-.mipop{position:absolute;left:0;bottom:calc(100% + 6px);z-index:60;min-width:220px;max-height:264px;overflow-y:auto;border-radius:13px;padding:5px;box-shadow:var(--shadow-lift);display:flex;flex-direction:column}
+.mi textarea:focus{border-color:var(--theme);box-shadow:0 0 0 3px var(--focus-ring)}
+.mipop{min-width:220px;max-height:264px;overflow-y:auto;display:flex;flex-direction:column}
 .mrow{display:flex;align-items:center;gap:8px;text-align:left;padding:6px 9px;border-radius:9px;font-size:13.5px}
 .mrow.on{background:var(--hover)}
 .mrow .mn{font-weight:600}

@@ -141,4 +141,23 @@ public class NotificationController {
         userRepo.save(me);
         return getSettings();
     }
+
+    public record AppearanceSettingsRequest(String theme) {}
+
+    /** 外观主题偏好（深色主题定稿）：{theme: system|light|dark|graphite}，存 preferences_json 根键 theme。 */
+    @GetMapping("/auth/appearance-settings")
+    public Map<String, Object> getAppearance() {
+        return Map.of("theme", AppearancePrefs.of(currentUser.require()));
+    }
+
+    @PatchMapping("/auth/appearance-settings")
+    @Transactional
+    public Map<String, Object> patchAppearance(@RequestBody AppearanceSettingsRequest req) {
+        AppUser me = currentUser.require();
+        if (req.theme() != null) {
+            me.setPreferencesJson(AppearancePrefs.merge(me, req.theme()));
+            userRepo.save(me);
+        }
+        return getAppearance();
+    }
 }

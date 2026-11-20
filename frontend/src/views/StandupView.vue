@@ -73,9 +73,9 @@ async function saveNote(){ try { await api.put(`/teams/${team.currentId}/standup
 .grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(330px,1fr));gap:14px}
 .card{padding:16px 18px}.card.speaking{outline:2px solid var(--theme)}
 .chead{display:flex;gap:10px;align-items:center}.chead .grow{flex:1;display:flex;flex-direction:column}
-.blk{display:inline-flex;gap:4px;align-items:center;color:var(--c-red);font-size:12px;font-weight:700;background:rgba(255,59,48,.1);border-radius:99px;padding:3px 9px}
+.blk{display:inline-flex;gap:4px;align-items:center;color:var(--c-red);font-size:12px;font-weight:700;background:var(--danger-bg);border-radius:99px;padding:3px 9px}
 .sec{margin-top:12px}.sec h4{font-size:12px;color:var(--text-2);margin-bottom:5px}
-.line{padding:3px 0;line-height:1.5}.line.blocked{color:var(--c-red)}.line.done{color:#1D7A3A}
+.line{padding:3px 0;line-height:1.5}.line.blocked{color:var(--c-red)}.line.done{color:var(--success-text)}
 .cnum{color:var(--text-3);font-weight:600}
 .dim{color:var(--text-3)}
 .tbtn{display:block;text-align:left;width:100%}

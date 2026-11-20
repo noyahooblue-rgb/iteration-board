@@ -22,7 +22,7 @@
         <label class="small">迭代 <select v-model="iterArg" class="flexin"><option v-for="it in iterations" :key="it.id" :value="it.id">{{it.name}}</option></select></label>
       </template>
       <AppButton :disabled="generating" @click="generateOrView">{{ generating ? '生成中…' : (existing ? '查看' : '生成') }}</AppButton>
-      <AppButton v-if="!existing" variant="ghost" :disabled="aiBusy" @click="generateAi">{{ aiBusy ? 'AI 汇总中…' : 'AI 汇总生成' }}</AppButton>
+      <AppButton v-if="!existing" variant="ghost" :disabled="aiBusy" @click="generateAi" ><AiSpark :size="15"/>{{ aiBusy ? 'AI 汇总中…' : 'AI 汇总生成' }}</AppButton>
       <span v-if="!existing && !aiAvail" class="tiny">AI 暂不可用，可手工用左侧「生成」走程序报告。</span>
       <span v-if="existing" class="tiny">该周期已有报告，点「查看」打开；要更新内容请在报告内用「重新生成」。</span>
     </div>
@@ -68,7 +68,7 @@
 <script setup lang="ts">
 import { ref, computed, onMounted, watch } from 'vue'
 import { FileSpreadsheet } from 'lucide-vue-next'
-import AiBadge from '../components/AiBadge.vue'; import { useAi } from '../stores/ai'
+import AiSpark from '../components/AiSpark.vue'; import AiBadge from '../components/AiBadge.vue'; import { useAi } from '../stores/ai'
 import AppShell from '../components/AppShell.vue'; import GlassPanel from '../components/GlassPanel.vue'; import AppButton from '../components/AppButton.vue'
 import { api, apiMode, ApiError, newIdempotencyKey } from '../api/http'; import type { ReportItem, ReportVersion, Iteration } from '../api/types'
 import { useTeam } from '../stores/team'; import { useAuth } from '../stores/auth'; import { useToast } from '../stores/toast'
@@ -204,10 +204,10 @@ async function exportExcel(){ try { const r:any = await api.get(`/teams/${team.c
 .gchip{padding:7px 14px;border-radius:999px;border:1.5px solid var(--separator);font-weight:600;background:var(--card)}
 .gchip.on{border-color:var(--theme);background:var(--theme-soft);color:var(--theme)}
 .flexin{min-height:36px;border:1px solid var(--field-brd);border-radius:9px;background:var(--card);padding:4px 9px}
-.errbar{display:flex;gap:12px;align-items:center;color:var(--c-red);background:rgba(255,59,48,.08);border-radius:12px;padding:10px 14px}
+.errbar{display:flex;gap:12px;align-items:center;color:var(--c-red);background:var(--danger-bg-soft);border-radius:12px;padding:10px 14px}
 .layout{display:grid;grid-template-columns:280px 1fr;gap:14px;align-items:start}
 .list{display:flex;flex-direction:column;gap:10px}
-.rcard{text-align:left;background:var(--card);border:1px solid rgba(255,255,255,.65);border-radius:var(--r-card);padding:12px 14px;display:flex;flex-direction:column;gap:3px;box-shadow:0 4px 14px rgba(10,60,140,.06)}
+.rcard{text-align:left;background:var(--card);border:1px solid var(--card-brd);border-radius:var(--r-card);padding:12px 14px;display:flex;flex-direction:column;gap:3px;box-shadow:var(--shadow-card-soft)}
 .rcard.on{outline:2px solid var(--theme)}
 .reader{padding:18px 20px;min-width:0}
 .rhead{display:flex;align-items:center;gap:10px;margin-bottom:10px;flex-wrap:wrap}.rhead h2{font-size:17px}

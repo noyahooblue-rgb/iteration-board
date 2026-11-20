@@ -9,6 +9,10 @@
         <AppButton v-if="task.taskStatus==='PENDING_ACCEPTANCE' && canAccept" @click="acceptTask">验收任务</AppButton>
       </div>
       <h2 class="ttitle">{{task.title}}</h2>
+      <div v-if="task.taskStatus==='PENDING_ACCEPTANCE' && canAccept" class="prompt" data-testid="task-prompt">
+        <span class="grow">故事已全部完成，要验收任务吗？</span>
+        <AppButton @click="acceptTask">验收任务</AppButton>
+      </div>
       <p class="small">所属 PO：{{team.memberName(task.poId)}} · 整体进度 {{clampPct(task.progressPercent)}}%（故事点加权，无估算按件数）· {{doneCount}}/{{stories.length}} 个故事完成</p>
       <ProgressBar :value="task.progressPercent" style="margin:10px 0 4px"/>
       <div class="md" v-html="html"/>
@@ -25,7 +29,7 @@
 
     <GlassPanel class="panel">
       <div class="hrow"><h3 class="grow">故事列表（可拖拽排序）</h3>
-        <AppButton v-if="isPO" variant="ghost" @click="aiSplit"><Sparkles :size="15"/>AI 拆故事</AppButton>
+        <AppButton v-if="isPO" variant="ghost" @click="aiSplit"><AiSpark :size="15"/>AI 拆故事</AppButton>
         <AppButton v-if="isPO" @click="newStory"><Plus :size="15"/>新建故事</AppButton>
       </div>
       <p v-if="aiNote" class="note">{{aiNote}}</p>
@@ -77,7 +81,8 @@
 import { ref, computed, onMounted } from 'vue'
 import { useRoute, RouterLink } from 'vue-router'
 import { marked } from 'marked'; import DOMPurify from 'dompurify'
-import { Plus, Sparkles, GripVertical } from 'lucide-vue-next'
+import { Plus, GripVertical } from 'lucide-vue-next'
+import AiSpark from '../components/AiSpark.vue'
 import AppShell from '../components/AppShell.vue'; import GlassPanel from '../components/GlassPanel.vue'; import AppButton from '../components/AppButton.vue'; import ProgressBar from '../components/ProgressBar.vue'; import AvatarStack from '../components/AvatarStack.vue'; import TypeBadge from '../components/TypeBadge.vue'; import ItemDrawer from '../components/ItemDrawer.vue'; import EditItemModal from '../components/EditItemModal.vue'
 import { api, ApiError, newIdempotencyKey } from '../api/http'; import { TASK_STATUS_META, STATUS_META, STORY_CAT_META, itemColor, estimateUnitLabel, type Item, type Planning, type StoryCategory } from '../api/types'
 import AiBadge from '../components/AiBadge.vue'
@@ -141,19 +146,21 @@ async function acceptTask(){ if(!task.value) return; try { task.value = await ap
 .back{display:inline-block;margin-bottom:10px;color:var(--theme)}
 .head{padding:18px 20px;margin-bottom:12px}.panel{padding:16px 20px;margin-bottom:12px}
 .hrow{display:flex;gap:10px;align-items:center;flex-wrap:wrap}
+.prompt{display:flex;gap:10px;align-items:center;padding:10px 12px;border-radius:12px;background:var(--theme-soft);border:1px solid var(--line);font-size:13.5px;margin:8px 0}
+.prompt .grow{flex:1}
 .ttitle{font-size:20px;margin:8px 0 4px}.grow{flex:1}
-.tpill{font-size:12px;font-weight:600;background:var(--sel);color:#0A5CD6;padding:2px 9px;border-radius:999px}
+.tpill{font-size:12px;font-weight:600;background:var(--sel);color:var(--primary-deep);padding:2px 9px;border-radius:999px}
 .md :deep(p){margin:6px 0}.md :deep(h2){margin:10px 0 4px}
 .drow{display:flex;gap:12px;align-items:center;padding:7px 0;border-bottom:1px solid var(--field-brd)}
-.srow{display:flex;gap:9px;align-items:center;padding:9px 10px;border:1px solid rgba(255,255,255,.65);background:var(--card);border-radius:12px;margin-bottom:8px}
+.srow{display:flex;gap:9px;align-items:center;padding:9px 10px;border:1px solid var(--card-brd);background:var(--card);border-radius:12px;margin-bottom:8px}
 .srow.dragging{opacity:.5}.grip{color:var(--text-3);cursor:grab;flex:none}
 .tbtn{text-align:left;font-weight:500}.tdot{width:8px;height:8px;border-radius:50%;flex:none}
-.catpill{font-size:11px;padding:2px 8px;border-radius:999px;font-weight:700;color:#fff}
+.catpill{font-size:11px;padding:2px 8px;border-radius:999px;font-weight:700;color:var(--on-color)}
 .sub{margin:16px 0 8px;font-size:14px}
 .bulk{width:100%;border:1px solid var(--field-brd);background:var(--field);border-radius:var(--r-ctl);padding:10px 12px;outline:none;font-size:14px;resize:vertical}
-.bulk:focus{border-color:var(--theme);box-shadow:0 0 0 3px rgba(0,122,255,.16)}
-.note{background:rgba(88,86,214,.12);border:1px solid rgba(88,86,214,.35);border-radius:12px;padding:9px 13px;font-size:13px;margin:10px 0}
-.splitpanel{border:1px solid rgba(88,86,214,.35);background:rgba(88,86,214,.05);border-radius:14px;padding:12px 14px;margin:10px 0}
+.bulk:focus{border-color:var(--theme);box-shadow:0 0 0 3px var(--focus-ring)}
+.note{background:var(--indigo-bg);border:1px solid var(--indigo-brd);border-radius:12px;padding:9px 13px;font-size:13px;margin:10px 0}
+.splitpanel{border:1px solid var(--indigo-brd);background:var(--indigo-bg-soft);border-radius:14px;padding:12px 14px;margin:10px 0}
 .drow2{display:flex;gap:7px;align-items:center;padding:5px 0}
 .drow2 .grow{flex:1}.drow2 .num{width:70px;flex:none}
 .flexin{min-height:36px;border:1px solid var(--field-brd);border-radius:10px;background:var(--field);padding:5px 9px}

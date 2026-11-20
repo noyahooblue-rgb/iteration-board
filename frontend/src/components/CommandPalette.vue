@@ -34,7 +34,7 @@ function critLabel(f: SavedFilter){ const c = f.criteria ?? {}; return [c.q, c.t
 function applyFilter(f: SavedFilter){ ui.searchOpen = false; router.push({ path: '/search', query: { filter: String(f.id) } }) }
 </script>
 <style scoped>
-.mask{position:fixed;inset:0;background:rgba(8,25,55,.3);z-index:80;display:flex;justify-content:center;align-items:flex-start;padding:12vh 16px 16px}
+.mask{position:fixed;inset:0;background:var(--mask-strong);z-index:var(--z-modal);display:flex;justify-content:center;align-items:flex-start;padding:12vh 16px 16px}
 .panel{width:620px;max-width:100%;border-radius:20px;padding:12px;max-height:70vh;overflow-y:auto}
 .srow{display:flex;align-items:center;gap:9px;background:var(--field);border:1px solid var(--field-brd);border-radius:13px;padding:0 13px;color:var(--text-3)}
 .srow input{flex:1;min-height:44px;border:0;background:transparent;outline:none;font-size:14.5px;min-width:0}

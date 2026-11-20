@@ -34,6 +34,6 @@ function toggleFeature(k: string){ const key = k as keyof TeamAiSettings; settin
 <style scoped>
 .srow{display:flex;gap:10px;align-items:center;padding:9px 0;border-bottom:1px solid var(--field-brd)}.grow{flex:1}
 .srow input{width:19px;height:19px}
-.warnbox{background:rgba(255,204,0,.18);border:1px solid rgba(183,121,31,.4);border-radius:12px;padding:9px 13px}
+.warnbox{background:var(--warn-bg-strong);border:1px solid var(--warn-brd-deep);border-radius:12px;padding:9px 13px}
 .lrow{display:flex;gap:12px;align-items:center;padding:6px 0;border-bottom:1px solid var(--field-brd)}
 </style>

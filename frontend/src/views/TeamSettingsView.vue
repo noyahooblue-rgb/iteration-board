@@ -211,20 +211,20 @@ async function resetCode(){ if (!confirm('确定要重置邀请码吗？旧邀�
 .layout{display:grid;grid-template-columns:200px 1fr;gap:14px;align-items:start}
 .side{display:flex;flex-direction:column;gap:4px;padding:14px}
 .tab{text-align:left;padding:9px 12px;border-radius:11px;font-weight:500;min-height:40px;text-decoration:none;color:var(--text)}
-.tab.on{background:var(--theme);color:#fff}.tab.link{color:var(--text-2)}
+.tab.on{background:var(--theme);color:var(--on-color)}.tab.link{color:var(--text-2)}
 .body{padding:20px}
 .mrow{display:flex;align-items:center;gap:12px;padding:10px 0;border-bottom:1px solid var(--field-brd)}
 .mrow .grow{flex:1}.mrow select{min-height:38px;border-radius:10px;border:1px solid var(--field-brd);background:var(--field);padding:0 8px}
-.rolepill{font-size:12px;font-weight:600;background:var(--sel);color:#0A5CD6;padding:3px 10px;border-radius:999px}
+.rolepill{font-size:12px;font-weight:600;background:var(--sel);color:var(--primary-deep);padding:3px 10px;border-radius:999px}
 .code{font-size:26px;font-weight:700;letter-spacing:3px;margin:14px 0}
-.danger{margin-top:10px;border:1px solid rgba(255,59,48,.3);background:rgba(255,59,48,.06);border-radius:14px;padding:14px}
+.danger{margin-top:10px;border:1px solid var(--danger-brd-soft);background:var(--danger-bg-min);border-radius:14px;padding:14px}
 .frow{display:flex;gap:14px;flex-wrap:wrap;margin-top:12px}.frow label{display:flex;flex-direction:column;gap:6px;flex:1;min-width:180px}
 .flexin{min-height:40px;border:1px solid var(--field-brd);border-radius:10px;background:var(--field);padding:6px 10px}
 .colorin{width:56px;height:36px;border:1px solid var(--field-brd);border-radius:10px;background:var(--field);padding:2px}
 .statusctl{display:flex;gap:8px;align-items:center;flex-wrap:wrap}.statusctl input[type="date"]{min-height:38px;border-radius:10px;border:1px solid var(--field-brd);background:var(--field);padding:0 8px}
 .seg{display:inline-flex;background:var(--track);border-radius:999px;padding:3px;gap:2px}
 .seg button{padding:6px 14px;border-radius:999px;font-size:13px;font-weight:500;color:var(--text-2);min-height:32px}
-.seg button.on{background:var(--card-solid);color:var(--text);box-shadow:0 1px 4px rgba(10,40,90,.18);font-weight:600}
+.seg button.on{background:var(--card-solid);color:var(--text);box-shadow:var(--shadow-seg-sm);font-weight:600}
 .atable{width:100%;border-collapse:collapse;margin-top:14px;font-size:13px}
 .atable th{text-align:left;color:var(--text-2);font-weight:600;padding:8px;border-bottom:1px solid var(--field-brd);white-space:nowrap}
 .atable td{padding:8px;border-bottom:1px solid var(--field-brd);vertical-align:top}

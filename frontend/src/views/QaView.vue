@@ -1,7 +1,7 @@
 <template>
 <AppShell title="智能问答" @refresh="loadHistory">
   <GlassPanel class="panel">
-    <div class="qhead"><Sparkles :size="17" class="indigo"/><b>问问小组的事</b><span class="tiny">回答基于结构化数据检索，引用可点开事项</span></div>
+    <div class="qhead"><AiSpark :size="17"/><b>问问小组的事</b><span class="tiny">回答基于结构化数据检索，引用可点开事项</span></div>
     <template v-if="ai.featureOn('qa')">
       <div class="qrow">
         <input v-model="question" class="flexin grow" placeholder="如：登录页视觉还原做到哪了？谁在负责导出？" @keyup.enter="ask"/>
@@ -32,7 +32,7 @@
 </template>
 <script setup lang="ts">
 import { ref, onMounted } from 'vue'
-import { Sparkles } from 'lucide-vue-next'
+import AiSpark from '../components/AiSpark.vue'
 import AppShell from '../components/AppShell.vue'; import GlassPanel from '../components/GlassPanel.vue'; import AppButton from '../components/AppButton.vue'; import ItemDrawer from '../components/ItemDrawer.vue'; import AiBadge from '../components/AiBadge.vue'
 import { api, ApiError } from '../api/http'; import type { QaRecord, QaAnswer } from '../api/types'
 import { useTeam } from '../stores/team'; import { useToast } from '../stores/toast'; import { useAi } from '../stores/ai'
@@ -53,13 +53,13 @@ async function remove(h: QaRecord){ await busy.wrap('del' + h.id, async () => { 
 </script>
 <style scoped>
 .panel{padding:16px 18px;margin-bottom:14px}
-.qhead{display:flex;gap:8px;align-items:center;margin-bottom:10px}.indigo{color:#5856D6}
+.qhead{display:flex;gap:8px;align-items:center;margin-bottom:10px}.indigo{color:var(--c-indigo)}
 .qrow{display:flex;gap:8px;align-items:center}.grow{flex:1}
 .flexin{min-height:40px;border:1px solid var(--field-brd);border-radius:10px;background:var(--field);padding:6px 10px}
-.ans{margin-top:12px;border:1px solid rgba(88,86,214,.3);background:rgba(88,86,214,.05);border-radius:12px;padding:12px}
+.ans{margin-top:12px;border:1px solid var(--indigo-brd-soft);background:var(--indigo-bg-soft);border-radius:12px;padding:12px}
 .atext{margin:8px 0;font-size:14.5px;line-height:1.6}
 .notfound{margin:8px 0;font-weight:700;color:var(--c-red)}
 .cites{display:flex;gap:8px;flex-wrap:wrap}
-.cite{font-size:12.5px;font-weight:600;color:#3730A3;background:rgba(88,86,214,.12);border-radius:999px;padding:4px 11px}
+.cite{font-size:12.5px;font-weight:600;color:var(--indigo-deep);background:var(--indigo-bg);border-radius:999px;padding:4px 11px}
 .hrow{display:flex;gap:10px;align-items:flex-start;padding:9px 0;border-bottom:1px solid var(--field-brd)}
 </style>

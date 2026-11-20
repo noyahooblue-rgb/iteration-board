@@ -13,6 +13,6 @@ const shown = computed(()=> p.ids.slice(0, p.max))
 </script>
 <style scoped>
 .stack{display:inline-flex;align-items:center}
-.stack .av{border:2px solid var(--card-solid,#fff);box-sizing:content-box}
-.more{display:inline-flex;align-items:center;justify-content:center;border-radius:50%;background:var(--track);color:var(--text-2);font-weight:700;border:2px solid var(--card-solid,#fff);box-sizing:content-box}
+.stack .av{border:2px solid var(--card-solid);box-sizing:content-box}
+.more{display:inline-flex;align-items:center;justify-content:center;border-radius:50%;background:var(--track);color:var(--text-2);font-weight:700;border:2px solid var(--card-solid);box-sizing:content-box}
 </style>

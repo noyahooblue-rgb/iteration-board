@@ -8,4 +8,4 @@ defineEmits(['update:modelValue'])
 </script>
 <style scoped>.field{display:block}.lab{display:block;font-size:13px;font-weight:600;color:var(--text-2);margin-bottom:6px}
 input,textarea{width:100%;min-height:42px;padding:9px 12px;border-radius:var(--r-ctl);border:1px solid var(--field-brd);background:var(--field);outline:none;resize:vertical;transition:border-color .15s,box-shadow .15s}
-input:focus,textarea:focus{border-color:var(--theme);box-shadow:0 0 0 3px rgba(0,122,255,.16)}.err{display:block;color:var(--c-red);font-size:12px;margin-top:5px}</style>
+input:focus,textarea:focus{border-color:var(--theme);box-shadow:0 0 0 3px var(--focus-ring)}.err{display:block;color:var(--c-red);font-size:12px;margin-top:5px}</style>

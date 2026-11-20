@@ -5,33 +5,40 @@ body{margin:0;font-family:var(--font);font-size:14px;line-height:1.55;color:var(
 button,a,[role="button"]{touch-action:manipulation}
 button{font:inherit;color:inherit;background:none;border:0;cursor:pointer}
 input,select,textarea{font-size:16px;font-family:inherit;color:inherit}
-:focus-visible{outline:2.5px solid var(--theme);outline-offset:2px;border-radius:6px}
+/* 焦点环（定稿 §5）：2px --primary、外扩 2px，全主题统一 */
+:focus-visible{outline:2px solid var(--primary);outline-offset:2px;border-radius:6px}
 h1{font-size:22px;font-weight:600;margin:0} h2{font-size:15px;font-weight:600;margin:0}
 .small{font-size:12px;color:var(--text-2)} .tiny{font-size:12px;color:var(--text-3)}
 .press{transition:transform .18s var(--ease-out)} .press:active{transform:scale(.97)}
-/* 页面背景：与试用空间一致的蓝色极光（浅色 #BFD9FF→#CFE4FF + 蓝/青/靛三色团；深色海军蓝底） */
+/* 选中文字（定稿 §5）：主色浅底 + 主文字 */
+::selection{background:var(--primary-soft);color:var(--text-1)}
+/* 滚动条（定稿 §5）：细滚动条，滑块用轨道/提示色令牌，深色下不刺眼 */
+*{scrollbar-width:thin;scrollbar-color:var(--track) transparent}
+::-webkit-scrollbar{width:10px;height:10px}
+::-webkit-scrollbar-track{background:transparent}
+::-webkit-scrollbar-thumb{background:var(--track);border-radius:99px;border:2px solid transparent;background-clip:content-box}
+::-webkit-scrollbar-thumb:hover{background:var(--text-3);border:2px solid transparent;background-clip:content-box}
+/* 页面背景：浅色蓝色极光（值与原实现一致）；深色两主题按定稿 §2.5/§3 用
+   --ambient-1/2 径向氛围光 + --bg-base 实底（暮光蓝灰 #4A90E2/.38 + #2BB5C8/.18；
+   石墨 #3B82F6/.22 + #5E5CE6/.10，颜色与不透明度已折进令牌的 rgba 值） */
 .page-bg{position:fixed;inset:0;z-index:-1;background:
-  radial-gradient(62vmax 62vmax at -18vmax -22vmax, rgba(0,122,255,.55), transparent 68%),
-  radial-gradient(54vmax 54vmax at 106% 6vmax, rgba(48,176,199,.5), transparent 68%),
-  radial-gradient(48vmax 48vmax at 26vmax 126%, rgba(88,86,214,.38), transparent 70%),
-  linear-gradient(160deg, #BFD9FF 0%, #DCEBFF 42%, #CFE4FF 100%)}
-:root[data-theme="dark"] .page-bg{background:
-  radial-gradient(62vmax 62vmax at -18vmax -22vmax, rgba(0,110,255,.5), transparent 68%),
-  radial-gradient(54vmax 54vmax at 106% 6vmax, rgba(30,150,180,.42), transparent 68%),
-  radial-gradient(48vmax 48vmax at 26vmax 126%, rgba(88,86,214,.4), transparent 70%),
-  linear-gradient(160deg, #0A1B38 0%, #0D2247 48%, #081630 100%)}
-@media (prefers-color-scheme: dark){
-  :root:not([data-theme="light"]) .page-bg{background:
-  radial-gradient(62vmax 62vmax at -18vmax -22vmax, rgba(0,110,255,.5), transparent 68%),
-  radial-gradient(54vmax 54vmax at 106% 6vmax, rgba(30,150,180,.42), transparent 68%),
-  radial-gradient(48vmax 48vmax at 26vmax 126%, rgba(88,86,214,.4), transparent 70%),
-  linear-gradient(160deg, #0A1B38 0%, #0D2247 48%, #081630 100%)}
-}
-.glass{background:var(--glass);backdrop-filter:blur(var(--glass-blur)) saturate(180%);-webkit-backdrop-filter:blur(var(--glass-blur)) saturate(180%);border:1px solid var(--glass-brd);box-shadow:inset 0 1px 0 var(--glass-hi),var(--shadow)}
+  radial-gradient(62vmax 62vmax at -18vmax -22vmax, var(--ambient-1), transparent 68%),
+  radial-gradient(54vmax 54vmax at 106% 6vmax, var(--ambient-2), transparent 68%),
+  radial-gradient(48vmax 48vmax at 26vmax 126%, var(--ambient-3), transparent 70%),
+  var(--page-grad)}
+.glass{background:var(--glass);backdrop-filter:blur(var(--glass-blur)) saturate(180%);-webkit-backdrop-filter:blur(var(--glass-blur)) saturate(180%);border:1px solid var(--glass-brd);box-shadow:inset 0 1px 0 var(--glass-highlight),var(--shadow)}
+/* 深色玻璃（定稿 §3）：blur 24px + saturate 160%（--glass-blur 深色默认即 24px，玻璃强度档位仍可调） */
+:root[data-theme="dark"] .glass, :root[data-theme="graphite"] .glass{backdrop-filter:blur(var(--glass-blur)) saturate(160%);-webkit-backdrop-filter:blur(var(--glass-blur)) saturate(160%)}
 /* 减少透明度：玻璃改实底且关闭背景模糊 */
 :root[data-reduce-transparency] .glass{backdrop-filter:none;-webkit-backdrop-filter:none}
 /* 减少动效：动画/过渡降级为短淡入淡出；系统级 prefers-reduced-motion 同样尊重 */
 :root[data-reduce-motion] *, :root[data-reduce-motion] *::before, :root[data-reduce-motion] *::after{animation-duration:.15s !important;transition-duration:.15s !important;transition-timing-function:ease !important}
 @media (prefers-reduced-motion: reduce){
   *,*::before,*::after{animation-duration:.15s !important;transition-duration:.15s !important;transition-timing-function:ease !important}
+}
+/* 打印一律浅色（定稿 §5）：令牌在 tokens.css 的 @media print 中强制浅色；此处去氛围光与玻璃模糊 */
+@media print{
+  .page-bg{display:none}
+  .glass{backdrop-filter:none;-webkit-backdrop-filter:none;background:var(--card-solid)}
+  body{background:var(--bg-base)} /* print 下 --bg-base 已被 tokens.css @media print 强制为 #FFFFFF */
 }

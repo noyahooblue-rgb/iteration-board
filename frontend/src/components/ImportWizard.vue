@@ -2,7 +2,7 @@
   <Modal :open="open" @close="emit('close')">
     <h2>导入向导</h2>
     <div class="tabs">
-      <button class="tchip press" :class="{on:mode==='paste'}" @click="mode='paste'">粘贴导入</button>
+      <button class="tchip press" :class="{on:mode==='paste'}" @click="mode='paste'"><AiSpark :size="13"/>粘贴导入</button>
       <button class="tchip press" :class="{on:mode==='file'}" @click="mode='file'">Excel / CSV 列映射</button>
     </div>
     <template v-if="step==='input'">
@@ -63,7 +63,7 @@
 // 文件路径走 POST imports/file/parse（multipart）出 {headers, rows}，前端按列映射拼预览行后走 POST /imports 确认（rows 口径）。
 // 确认请求只发契约字段：source=AI_PASTE 时 rows 为 ImportRowInput{externalId,title,description,priority,estimate,dueDate,externalUrl}（estimate 为契约 0.5.1 新增，仅新建落库）；无 parentId。
 import { ref, watch } from 'vue'
-import Modal from './Modal.vue'; import AppButton from './AppButton.vue'
+import Modal from './Modal.vue'; import AppButton from './AppButton.vue'; import AiSpark from './AiSpark.vue'
 import { api, ApiError, newIdempotencyKey } from '../api/http'; import type { ImportRow, ImportBatch } from '../api/types'
 import { useTeam } from '../stores/team'; import { useToast } from '../stores/toast'; import { useAi } from '../stores/ai'
 import { useBusy } from '../utils/busy'
@@ -114,11 +114,11 @@ async function undo(b: ImportBatch){ await busy.wrap('undo' + b.id, async () => 
 .foot{display:flex;gap:10px;justify-content:flex-end;margin-top:14px}
 .maprow{display:flex;gap:10px;align-items:center;margin-top:8px}.grow{flex:1}
 .flexin{min-height:38px;border:1px solid var(--field-brd);border-radius:10px;background:var(--field);padding:5px 9px}
-.flexin.warn{background:rgba(255,204,0,.25);border-color:#B7791F}
+.flexin.warn{background:var(--warn-bg-max);border-color:var(--warn-text)}
 .prow{display:flex;gap:8px;align-items:center;padding:7px 0;border-bottom:1px solid var(--field-brd);flex-wrap:wrap}
 .prow .num{width:76px;flex:none}.prow .num2{width:140px;flex:none}
 .act{font-size:11px;font-weight:700;border-radius:6px;padding:2px 7px;flex:none}
-.act.NEW{background:rgba(52,199,89,.15);color:#1D7A3A}.act.UPDATE{background:rgba(0,122,255,.13);color:#0A5CD6}.act.UNCHANGED{background:var(--field);color:var(--text-2)}
+.act.NEW{background:var(--success-bg-mid);color:var(--success-text)}.act.UPDATE{background:var(--primary-soft-12);color:var(--primary-deep)}.act.UNCHANGED{background:var(--field);color:var(--text-2)}
 .diff{flex-basis:100%;padding-left:28px}
 .hist{margin-top:18px;border-top:1px solid var(--field-brd);padding-top:10px}
 .hrow{display:flex;gap:8px;align-items:center;padding:5px 0}

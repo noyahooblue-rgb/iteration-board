@@ -285,6 +285,17 @@ public class ItemService {
         }
         if (cmd.version() != item.getVersion()) throw ApiException.versionConflict("事项已被他人修改，请刷新后重试");
         ItemStatus st = item.getStatus();
+        // 修订五规则 5：已完成/已取消的事项只能改描述类字段；改其他字段须先「重新打开」（REOPEN 本身留痕）。
+        if (st == ItemStatus.DONE || st == ItemStatus.CANCELLED) {
+            boolean touchesNonDesc = cmd.title() != null || cmd.priority() != null || cmd.storyCategory() != null
+                    || cmd.acceptorPresent() || cmd.dueDatePresent() || cmd.estimatePresent()
+                    || cmd.iterationPresent() || cmd.parentPresent() || cmd.poPresent()
+                    || cmd.ownerIdsPresent() || cmd.labelNamesPresent();
+            if (touchesNonDesc) {
+                throw new ApiException(HttpStatus.UNPROCESSABLE_ENTITY, "DONE_ITEM_LOCKED",
+                        "已完成/已取消的事项只能修改描述，其他修改请先重新打开事项");
+            }
+        }
         if (cmd.title() != null) item.setTitle(cmd.title());
         if (cmd.description() != null) item.setDescription(cmd.description());
         if (cmd.priority() != null) item.setPriority(cmd.priority());
@@ -767,6 +778,28 @@ public class ItemService {
                     || st == ItemStatus.IN_REVIEW)) out.add("NUDGE");
             if ((owner || member.getRole() == Role.LEADER)
                     && st != ItemStatus.DONE && st != ItemStatus.CANCELLED) out.add("PROGRESS");
+            // 修订五 A7：状态菜单项同样来自 allowedActions（前端只渲染这里给出的流转动作，不可用动作不出现）。
+            boolean leaderOrPo2 = leaderOrPo;
+            if (owner && st == ItemStatus.NOT_STARTED) out.add("START");
+            if (owner && st == ItemStatus.IN_PROGRESS) out.add("SUBMIT");
+            if (st == ItemStatus.IN_REVIEW && !owner
+                    && (user.getId().equals(item.getAcceptor() == null ? null : item.getAcceptor().getId()) || leaderOrPo2)) {
+                out.add("APPROVE"); out.add("REJECT");
+            }
+            if (owner && (st == ItemStatus.NOT_STARTED || st == ItemStatus.IN_PROGRESS)) out.add("RELEASE");
+            if (owner && st == ItemStatus.NOT_STARTED && item.isAssignedDirectly()) out.add("DECLINE");
+            if (st != ItemStatus.DONE && st != ItemStatus.CANCELLED
+                    && (item.getCreator().getId().equals(user.getId()) || owner || leaderOrPo2)) out.add("TRANSFER");
+            boolean cancelOk = leaderOrPo2 || (item.getCreator().getId().equals(user.getId())
+                    && (st == ItemStatus.UNCLAIMED || st == ItemStatus.NOT_STARTED));
+            if (st != ItemStatus.DONE && st != ItemStatus.CANCELLED && cancelOk) out.add("CANCEL");
+            if ((st == ItemStatus.DONE || st == ItemStatus.CANCELLED)
+                    && (item.getCreator().getId().equals(user.getId()) || leaderOrPo2
+                    || (item.getAcceptor() != null && item.getAcceptor().getId().equals(user.getId())))) out.add("REOPEN");
+        } else {
+            // 任务：待验收时组长/PO 的验收动作也进 allowedActions
+            if (item.getStatus() == ItemStatus.IN_REVIEW && leaderOrPo) { out.add("APPROVE"); out.add("REJECT"); }
+            if (item.getStatus() != ItemStatus.DONE && item.getStatus() != ItemStatus.CANCELLED && leaderOrPo) out.add("CANCEL");
         }
         return out;
     }
@@ -816,6 +849,24 @@ public class ItemService {
                 item.getType() == ItemType.TASK ? TaskDerivationService.toTaskStatus(item).name() : null,
                 inviteeRepo.findByItemId(item.getId()).stream().map(iv -> iv.getUser().getId()).toList(),
                 item.getSource(), item.getExternalSystem(), item.getExternalId(), item.getExternalUrl(),
-                item.isExternalClosed(), allowedActions(item, user), item.getAcceptorNote());
+                item.isExternalClosed(), allowedActions(item, user), item.getAcceptorNote(),
+                rejected(item), rejectReason(item));
+    }
+
+    /**
+     * 修订五 B「已退回」标记（派生，不加表字段）：事项处于进行中，且最近一次关键流转是 REJECT
+     * （其后没有 SUBMIT / APPROVE / REOPEN 覆盖）时为 true；退回意见取该次 REJECT 的原因。
+     */
+    private boolean rejected(Item item) { return rejectReason(item) != null; }
+
+    private String rejectReason(Item item) {
+        if (item.getStatus() != ItemStatus.IN_PROGRESS) return null;
+        List<Activity> acts = activityRepo.findByItemIdOrderByCreatedAtAsc(item.getId());
+        for (int i = acts.size() - 1; i >= 0; i--) {
+            String a = acts.get(i).getAction();
+            if ("REJECT".equals(a)) return acts.get(i).getDetail() == null ? "" : acts.get(i).getDetail();
+            if ("SUBMIT".equals(a) || "APPROVE".equals(a) || "REOPEN".equals(a)) return null;
+        }
+        return null;
     }
 }

@@ -1,8 +1,8 @@
 <template>
 <div class="wrap"><GlassPanel class="card">
   <span v-if="meta.demoMode" class="demo-badge"><i/>演示环境 · 数据为模拟</span>
-  <div class="brand"><span class="brand-mark"><Bird :size="24"/></span>
-    <div><h1>迭代小组平台</h1><p class="small sub">{{ meta.demoMode && DEMO_SUBTITLE ? DEMO_SUBTITLE : '小组的事项、进展与阻塞，一眼看清。' }}</p></div></div>
+  <div class="brand"><img class="lockup" :src="lockupSrc(effectiveTheme)" alt="迭代小组平台"/>
+    <p class="small sub">{{ meta.demoMode && DEMO_SUBTITLE ? DEMO_SUBTITLE : '小组的事项、进展与阻塞，一眼看清。' }}</p></div>
   <SegmentedControl v-model="tab" :options="[{label:'登录',value:'login'},{label:'注册',value:'register'}]" class="tabs"/>
   <template v-if="tab==='login'">
     <AppInput v-model="f.loginName" label="登录名" placeholder="请输入登录名" :error="e.loginName"/>
@@ -43,11 +43,12 @@
 <script setup lang="ts">
 import { reactive, ref, computed, onMounted } from 'vue'
 import { useRouter } from 'vue-router'
-import { Bird, UserRoundX } from 'lucide-vue-next'
+import { UserRoundX } from 'lucide-vue-next'
 import GlassPanel from '../components/GlassPanel.vue'; import AppButton from '../components/AppButton.vue'; import AppInput from '../components/AppInput.vue'; import SegmentedControl from '../components/SegmentedControl.vue'
 import { api, ApiError, DEMO_ACCOUNTS, DEMO_SUBTITLE, DEMO_FILL_HINT, DEMO_REG_CLOSED_TEXT, DEMO_PASSWORD_FILL } from '../api/http'; import { useAuth } from '../stores/auth'; import { useTeam } from '../stores/team'; import { useToast } from '../stores/toast'
 const router = useRouter(), auth = useAuth(), team = useTeam(), toast = useToast()
 import { APP_VERSION, BUILD_DATE } from '../utils/appMeta'
+import { effectiveTheme, lockupSrc } from '../utils/appearance'
 // 登录页底部版本（修订三二.1）：优先用后端 /meta 的版本，离线兜底用本地常量。
 const version = computed(()=> (auth.meta as any).version ?? APP_VERSION)
 const buildDate = computed(()=> (auth.meta as any).buildDate ?? BUILD_DATE)
@@ -58,7 +59,7 @@ const e = reactive<any>({})
 const captchaId = ref(''), captchaSvg = ref('')
 const demos = DEMO_ACCOUNTS
 const strength = computed(()=> { let s=0; if(r.password.length>=8)s++; if(/[A-Za-z]/.test(r.password)&&/\d/.test(r.password))s++; if(r.password.length>=12)s++; if(/[^A-Za-z0-9]/.test(r.password))s++; return s })
-const strengthColor = computed(()=> ['#ccc','var(--c-red)','var(--c-adhoc)','var(--c-task)','var(--c-green)'][strength.value])
+const strengthColor = computed(()=> ['var(--strength-empty)','var(--c-red)','var(--c-adhoc)','var(--c-task)','var(--c-green)'][strength.value])
 async function loadCaptcha(){ try{ const d = await api.get('/auth/captcha'); captchaId.value=d.captchaId; captchaSvg.value=d.imageSvg }catch{} }
 onMounted(()=>{ auth.loadMeta(); loadCaptcha() })
 function fillDemo(login:string){ f.loginName=login; f.password=DEMO_PASSWORD_FILL; toast.show('已填入演示账号，点登录即可') }
@@ -76,22 +77,21 @@ async function register(){ if (busy.value) return; err.value=''; e.rLogin = r.lo
 .wrap{min-height:100dvh;display:grid;place-items:center;padding:20px}
 .wrap .card{width:420px;max-width:100%;padding:32px 32px 24px;position:relative}
 .demo-badge{position:absolute;top:-14px;right:18px;display:inline-flex;align-items:center;gap:6px;font-size:12px;color:var(--text-2);padding:5px 10px;border-radius:999px;background:var(--field);border:1px solid var(--field-brd);white-space:nowrap}
-.demo-badge i{width:7px;height:7px;border-radius:50%;background:var(--c-yellow);box-shadow:0 0 0 3px rgba(255,204,0,.25);flex:none}
-.brand{display:flex;gap:12px;align-items:center}
-.brand-mark{width:44px;height:44px;border-radius:13px;flex:none;display:grid;place-items:center;color:#fff;background:linear-gradient(140deg,#2E9BFF,#007AFF 55%,#5856D6);box-shadow:0 8px 20px rgba(0,122,255,.35),inset 0 1px 0 rgba(255,255,255,.5)}
-.brand h1{font-size:21px}
+.demo-badge i{width:7px;height:7px;border-radius:50%;background:var(--c-yellow);box-shadow:var(--halo-yellow);flex:none}
+.brand{display:flex;flex-direction:column;gap:6px;align-items:flex-start}
+.brand .lockup{width:264px;max-width:82%;height:auto;display:block;border-radius:10px}
 .sub{margin:2px 0 0}
 .tabs{display:flex;width:100%;margin:22px 0 20px;padding:4px;border-radius:14px}
 .tabs :deep(button){flex:1;min-height:36px;font-size:14px;border-radius:10px}
 .caprow{display:flex;gap:10px;align-items:flex-end;margin-top:10px}.caprow>*:first-child{flex:1}
-.cap{height:44px;border-radius:12px;overflow:hidden;border:1px solid var(--separator);padding:0;background:#fff}
+.cap{height:44px;border-radius:12px;overflow:hidden;border:1px solid var(--separator);padding:0;background:var(--card-solid)}
 .strength{display:flex;align-items:center;gap:8px;margin-top:8px}.strength>div{height:6px;border-radius:99px;transition:width .3s;min-width:0;background:var(--fill);flex:none;width:0}
 .strength>div{max-width:180px}
-.errbox{color:var(--c-red);background:rgba(255,59,48,.10);border-radius:10px;padding:8px 12px;font-size:13px;margin-top:12px}
+.errbox{color:var(--c-red);background:var(--danger-bg);border-radius:10px;padding:8px 12px;font-size:13px;margin-top:12px}
 .demo-box{margin-top:18px;padding-top:14px;border-top:1px solid var(--field-brd)}
 .drow{display:flex;gap:8px;flex-wrap:wrap;margin-top:10px}
 .chip{display:inline-flex;align-items:center;gap:8px;border:1px solid var(--field-brd);background:var(--field);border-radius:999px;padding:6px 12px 6px 6px;font-size:13px;font-weight:500;min-height:38px}
-.chip-av{width:26px;height:26px;border-radius:50%;color:#fff;display:grid;place-items:center;font-size:12px;font-weight:600;flex:none}
+.chip-av{width:26px;height:26px;border-radius:50%;color:var(--on-color);display:grid;place-items:center;font-size:12px;font-weight:600;flex:none}
 .chip-login{color:var(--text-3);font-size:12px}
 .reg-closed{text-align:center;display:flex;flex-direction:column;align-items:center;gap:10px;padding:8px 0}
 .reg-ico{width:52px;height:52px;border-radius:16px;display:grid;place-items:center;color:var(--theme);background:var(--sel)}

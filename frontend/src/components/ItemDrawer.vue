@@ -13,42 +13,66 @@
     </div>
 
     <input class="title" v-model="titleDraft" @blur="saveTitle" aria-label="事项标题"/>
-    <div class="mainrow">      <div class="rel"><button class="press pillbtn" @click="showActions=!showActions"><StatusPill :status="item.status"/><ChevronDown :size="15"/></button>
-        <div v-if="showActions" class="menu glass"><button v-for="a in actions" :key="a.action" @click="doAction(a.action)">{{a.label}}</button>
-        <button v-if="canJoin" :disabled="busy.is('join')" @click="doJoin">加入共同负责</button>
-        <button v-if="canDecline" @click="askReason('DECLINE')">婉拒</button>
-        <button @click="showTransfer=true;showActions=false">转交</button>
-        <button v-if="canDeleteItem" @click="removeItem">删除（进回收站）</button>
-        <button @click="askReason('RELEASE')">释放回待认领</button>
-        <button @click="askReason('CANCEL')">取消事项</button>
-        <span v-if="!actions.length" class="small" style="padding:8px 12px">当前无可执行动作</span></div></div>
+    <div class="mainrow">      <div class="rel"><button ref="statusBtn" class="press pillbtn" @click="showActions=!showActions"><StatusPill :status="item.status"/><ChevronDown :size="15"/></button>
+        <OverlayMenu :open="showActions" :anchor="statusBtn" @close="showActions=false">
+          <div class="ovl-col">
+            <button class="ovl-item" @click="showActions=false"><Check :size="15" class="ovl-check"/>{{item.type==='TASK' ? (TASK_STATUS_META[item.taskStatus ?? 'NOT_STARTED'].label) : STATUS_META[item.status].label}}（当前）</button>
+            <button v-for="a in actions" :key="a.action" class="ovl-item" @click="doAction(a.action)">{{a.label}}</button>
+            <button v-if="canJoin" class="ovl-item" :disabled="busy.is('join')" @click="doJoin">加入共同负责</button>
+            <button v-if="canTransfer" class="ovl-item" @click="showTransfer=true;showActions=false">转交</button>
+            <button v-if="canDeleteItem" class="ovl-item" @click="removeItem">删除（进回收站）</button>
+            <span v-if="!actions.length && !canJoin && !canTransfer && !canDeleteItem" class="small" style="padding:8px 12px">当前无可执行动作</span>
+          </div>
+        </OverlayMenu></div>
       <AppButton v-if="mainAction" :disabled="busy.is('transition')" @click="doAction(mainAction.action)">{{mainAction.label}}</AppButton>
       <AppButton v-if="canNudge" variant="ghost" :disabled="busy.is('nudge')" @click="nudgeItem"><Zap :size="15"/>催一下</AppButton>
       <AppButton variant="ghost" @click="editOpen=true">编辑</AppButton></div>
 
     <div class="attrs">
-      <div class="attr rel"><span>负责人</span><b class="avaline" :class="{editable:canInlineEdit && item.type!=='TASK'}" @click="toggleEdit('owners')"><Avatar v-if="item.ownerIds.length" :name="team.memberName(item.ownerIds[0])" :color="team.member(item.ownerIds[0])?.avatarColor" :size="22"/>{{item.ownerIds.length ? item.ownerIds.map(id=>team.memberName(id)).join('、') : '未认领'}}<Pencil v-if="canInlineEdit && item.type!=='TASK'" :size="13" class="pen"/></b>
-        <div v-if="editField==='owners'" class="pop glass">
+      <div class="attr rel"><span>负责人</span><b class="avaline" :class="{editable:canInlineEdit && item.type!=='TASK'}" @click="toggleEdit('owners', $event)"><Avatar v-if="item.ownerIds.length" :name="team.memberName(item.ownerIds[0])" :color="team.member(item.ownerIds[0])?.avatarColor" :size="22"/>{{item.ownerIds.length ? item.ownerIds.map(id=>team.memberName(id)).join('、') : '未认领'}}<Pencil v-if="canInlineEdit && item.type!=='TASK'" :size="13" class="pen"/></b>
+        <OverlayMenu :open="editField==='owners'" :anchor="editAnchor" @close="editField=null">
+          <div class="pop-in">
           <label v-for="m in team.members" :key="m.userId" class="poprow"><input type="checkbox" :value="m.userId" v-model="ownerDraft"/>{{memberLabel(team.members, m)}}<span class="tiny">{{m.role==='LEADER'?'组长':m.role==='PO'?'PO':'成员'}}</span></label>
           <div class="popfoot"><AppButton variant="ghost" @click="editField=null">取消</AppButton><AppButton @click="saveOwners">保存</AppButton></div>
-        </div></div>
+          </div>
+        </OverlayMenu></div>
       <div class="attr"><span>协作人</span><b>{{item.collaboratorIds.map(id=>team.memberName(id)).join('、')||'无'}}</b></div>
       <div class="attr"><span>验收人</span><b class="avaline"><Avatar v-if="item.acceptorId" :name="team.memberName(item.acceptorId)" :color="team.member(item.acceptorId)?.avatarColor" :size="22"/>{{item.acceptorId ? team.memberName(item.acceptorId) : '未设置'}}</b><span v-if="item.acceptorAutoTransferred" class="tiny" style="display:block;color:var(--c-adhoc)">原默认验收人是负责人本人，已按规则自动转交（不能验收自己的事项）</span></div>
-      <div class="attr rel"><span>优先级</span><b :class="{editable:canInlineEdit}" @click="toggleEdit('priority')"><span class="prio" :class="item.priority">{{item.priority}}</span><Pencil v-if="canInlineEdit" :size="13" class="pen"/></b>
-        <div v-if="editField==='priority'" class="pop glass"><div class="poprow" style="gap:8px"><button v-for="p in ['P0','P1','P2','P3']" :key="p" class="prio press" :class="p" @click="savePriority(p)">{{p}}</button></div></div></div>
-      <div class="attr rel"><span>截止日期</span><b :class="{editable:canInlineEdit}" @click="toggleEdit('due')">{{item.dueDate ? fmtDue(item.dueDate) : '未设置'}}<span v-if="dueState==='over'" class="overdue"> 已逾期</span><span v-else-if="dueState==='today'" class="overdue"> 今天到期</span><Pencil v-if="canInlineEdit" :size="13" class="pen"/></b>
-        <div v-if="editField==='due'" class="pop glass"><input type="date" v-model="dueDraft" class="flexin"/><div class="popfoot"><AppButton variant="ghost" @click="saveDue(null)">清除</AppButton><AppButton @click="saveDue(dueDraft)">保存</AppButton></div></div></div>
-      <div class="attr rel"><span>估算</span><b :class="{editable:canInlineEdit}" @click="toggleEdit('estimate')">{{item.estimate ?? '—'}} 点<Pencil v-if="canInlineEdit" :size="13" class="pen"/></b>
-        <div v-if="editField==='estimate'" class="pop glass"><input type="number" min="0" step="0.5" v-model="estimateDraft" class="flexin" placeholder="故事点"/><div class="popfoot"><AppButton variant="ghost" @click="editField=null">取消</AppButton><AppButton @click="saveEstimate">保存</AppButton></div></div></div>
+      <div class="attr rel"><span>优先级</span><b :class="{editable:canInlineEdit}" @click="toggleEdit('priority', $event)"><span class="prio" :class="item.priority">{{item.priority}}</span><Pencil v-if="canInlineEdit" :size="13" class="pen"/></b>
+        <OverlayMenu :open="editField==='priority'" :anchor="editAnchor" @close="editField=null"><div class="pop-in"><div class="poprow" style="gap:8px"><button v-for="p in ['P0','P1','P2','P3']" :key="p" class="prio press" :class="p" @click="savePriority(p)">{{p}}</button></div></div></OverlayMenu></div>
+      <div class="attr rel"><span>截止日期</span><b :class="{editable:canInlineEdit}" @click="toggleEdit('due', $event)">{{item.dueDate ? fmtDue(item.dueDate) : '未设置'}}<span v-if="dueState==='over'" class="overdue"> 已逾期</span><span v-else-if="dueState==='today'" class="overdue"> 今天到期</span><Pencil v-if="canInlineEdit" :size="13" class="pen"/></b>
+        <OverlayMenu :open="editField==='due'" :anchor="editAnchor" @close="editField=null"><div class="pop-in"><input type="date" v-model="dueDraft" class="flexin"/><div class="popfoot"><AppButton variant="ghost" @click="saveDue(null)">清除</AppButton><AppButton @click="saveDue(dueDraft)">保存</AppButton></div></div></OverlayMenu></div>
+      <div class="attr rel"><span>估算</span><b :class="{editable:canInlineEdit}" @click="toggleEdit('estimate', $event)">{{item.estimate ?? '—'}} 点<Pencil v-if="canInlineEdit" :size="13" class="pen"/></b>
+        <OverlayMenu :open="editField==='estimate'" :anchor="editAnchor" @close="editField=null"><div class="pop-in"><input type="number" min="0" step="0.5" v-model="estimateDraft" class="flexin" placeholder="故事点"/><div class="popfoot"><AppButton variant="ghost" @click="editField=null">取消</AppButton><AppButton @click="saveEstimate">保存</AppButton></div></div></OverlayMenu></div>
       <div class="attr"><span>所属迭代</span><b>{{item.iterationId ? (team.iteration?.name ?? '当前迭代') : '日常事项'}}</b></div>
-      <div class="attr rel"><span>标签</span><b :class="{editable:canInlineEdit && canManageLabels}" @click="toggleEdit('labels')"><span v-for="l in item.labels" :key="l" class="tag">{{l}}</span><span v-if="!item.labels.length">无</span><Pencil v-if="canInlineEdit && canManageLabels" :size="13" class="pen"/></b>
-        <div v-if="editField==='labels'" class="pop glass"><input v-model="labelsDraft" class="flexin" placeholder="多个标签用逗号分隔"/><div class="popfoot"><AppButton variant="ghost" @click="editField=null">取消</AppButton><AppButton @click="saveLabels">保存</AppButton></div></div></div>
+      <div class="attr rel"><span>标签</span><b :class="{editable:canInlineEdit && canManageLabels}" @click="toggleEdit('labels', $event)"><span v-for="l in item.labels" :key="l" class="tag">{{l}}</span><span v-if="!item.labels.length">无</span><Pencil v-if="canInlineEdit && canManageLabels" :size="13" class="pen"/></b>
+        <OverlayMenu :open="editField==='labels'" :anchor="editAnchor" @close="editField=null"><div class="pop-in"><input v-model="labelsDraft" class="flexin" placeholder="多个标签用逗号分隔"/><div class="popfoot"><AppButton variant="ghost" @click="editField=null">取消</AppButton><AppButton @click="saveLabels">保存</AppButton></div></div></OverlayMenu></div>
       <div class="attr" v-if="item.parentId"><span>所属任务</span><b class="parentlink press" @click="$emit('open-item', item.parentId)">{{parentTitle}}</b></div>
       <div class="attr" v-if="item.type==='STORY' && item.storyCategory"><span>故事类别</span><b><span class="catpill" :style="{background:STORY_CAT_META[item.storyCategory].color}">{{STORY_CAT_META[item.storyCategory].label}}</span></b></div>
       <div class="attr" v-if="item.type==='TASK'"><span>所属 PO</span><b class="avaline"><Avatar v-if="item.poId" :name="team.memberName(item.poId)" :color="team.member(item.poId)?.avatarColor" :size="22"/>{{item.poId ? team.memberName(item.poId) : '未设置'}}</b></div>
       <div class="attr" v-if="item.type==='TASK' && item.taskStatus"><span>任务状态</span><b>{{TASK_STATUS_META[item.taskStatus].label}} · 进度 {{item.progressPercent}}%（由故事推算）</b></div>
       <div class="attr" v-if="item.batchId"><span>下发批次</span><b>批次 #{{item.batchId}}（每人一份）</b></div>
       <div class="attr" v-if="item.assignedDirectly"><span>来源</span><b>直接指派{{canDecline ? '（未开始前可婉拒）' : ''}}</b></div>
+    </div>
+
+    <!-- 修订五 B：状态×进度联动区。已取消隐藏进度；待认领/待验收/已完成只读；任务显示故事推算进度 -->
+    <div v-if="item.status!=='CANCELLED'" class="sec prog-sec">
+      <h2 class="sec-title"><Gauge :size="16"/>进度 <span class="tiny">{{item.progressPercent}}%</span>
+        <span v-if="item.rejected" class="mark red">已退回</span>
+        <span v-if="readyMark" class="mark green">可提交验收</span>
+        <span v-if="noEstimateMark" class="mark amber">未估算</span></h2>
+      <ProgressBar :value="item.progressPercent" style="margin:8px 0"/>
+      <p v-if="item.rejected && item.rejectReason" class="small">退回意见：{{item.rejectReason}}</p>
+      <div v-if="showPrompt" class="prompt" data-testid="progress-prompt">
+        <span class="grow">进度已到 100%，要{{promptActionLabel}}吗？</span>
+        <AppButton @click="doPromptAction">{{promptActionLabel}}</AppButton>
+        <AppButton variant="ghost" @click="dismissPromptNow">暂不</AppButton>
+      </div>
+      <div v-if="item.type==='TASK' && item.taskStatus==='PENDING_ACCEPTANCE' && canApproveTask" class="prompt" data-testid="task-prompt">
+        <span class="grow">故事已全部完成，要验收任务吗？</span>
+        <AppButton @click="doAction('APPROVE')">验收任务</AppButton>
+      </div>
+      <p v-if="progressReadonlyNote" class="tiny">{{progressReadonlyNote}}</p>
     </div>
 
     <div class="sec"><h2 class="sec-title"><FileText :size="16"/>描述</h2><div class="md" v-html="html"/></div>
@@ -91,10 +115,13 @@
       <template v-else-if="tab==='progress'">
         <!-- 进度滑杆（1.0.4 F）：未操作时绑定 item.progressPercent（刚认领=0），不能用 v-model 的 null 初始值——
              range 在 value 为 null 时浏览器默认停在 50%，会出现「文字 0% 但填充到中间」。只有用户 input 后才写入 pPercent。 -->
-        <div class="pct-row"><span>进度</span><input type="range" min="0" max="100" step="5" :value="pPercent ?? item.progressPercent" @input="pPercent = Number(($event.target as HTMLInputElement).value)"/><b>{{pPercent ?? item.progressPercent}}%</b>
+        <template v-if="canEditProgress">
+        <div class="pct-row"><span>进度</span><input type="range" min="0" max="100" step="5" :value="pPercent ?? item.progressPercent" @input="pPercent = Number(($event.target as HTMLInputElement).value)" @change="onSliderRelease"/><b>{{pPercent ?? item.progressPercent}}%</b>
           <label class="small"><input type="checkbox" v-model="pBlocked"/> 阻塞</label></div>
         <input v-if="pBlocked" v-model="pBlockReason" placeholder="阻塞原因" class="flexin" style="margin-bottom:8px"/>
         <div class="foot-row"><MentionInput v-model="pText" v-model:mention-ids="pMentionIds" :rows="2" placeholder="记录最新进展，例如：已完成联调，正在回归…（输入 @ 可提及成员）"/><AppButton variant="ghost" @click="submitKeepGoing">照常推进</AppButton><AppButton @click="submitProgress"><Send :size="15"/>提交</AppButton></div>
+        </template>
+        <p v-else class="small">当前状态（{{STATUS_META[item.status].label}}）下进度只读{{item.status==='CANCELLED' ? '，事项已取消' : ''}}。</p>
       </template>
       <div v-else-if="tab==='comments'" class="foot-row"><MentionInput v-model="cText" v-model:mention-ids="cMentionIds" :rows="2" placeholder="发表评论…（输入 @ 可提及成员）" enter-submits @enter="submitComment"/><AppButton :disabled="commentBusy" @click="submitComment"><Send :size="15"/>{{ commentBusy ? '提交中…' : '提交' }}</AppButton></div>
     </div>
@@ -108,6 +135,7 @@
   </Modal>
   <Modal :open="!!reasonAction" @close="reasonAction=null">
     <h2>{{reasonAction==='REJECT'?'打回原因':reasonAction==='RELEASE'?'释放原因':reasonAction==='DECLINE'?'婉拒原因':'取消原因'}}</h2>
+    <p v-if="reasonAction==='RELEASE' || reasonAction==='DECLINE'" class="small" style="margin-bottom:8px">进度将清零，记录保留在历史里；新认领人会从 0 开始。</p>
     <AppInput v-model="reason" type="textarea" label="原因（必填）" placeholder="说清原因，对方会看到"/>
     <div style="display:flex;gap:10px;justify-content:flex-end;margin-top:14px"><AppButton variant="ghost" @click="reasonAction=null">返回</AppButton><AppButton variant="danger" @click="confirmReason">确认</AppButton></div>
   </Modal>
@@ -142,8 +170,9 @@
 <script setup lang="ts">
 import { ref, computed, watch } from 'vue'
 import { marked } from 'marked'; import DOMPurify from 'dompurify'
-import { X, OctagonAlert, Zap, ChevronDown, FileText, Layers, ClipboardList, Check, Clock, Send, Pencil } from 'lucide-vue-next'
+import { X, OctagonAlert, Zap, ChevronDown, FileText, Layers, ClipboardList, Check, Clock, Send, Pencil, Gauge } from 'lucide-vue-next'
 import Drawer from './Drawer.vue'; import Modal from './Modal.vue'; import AppButton from './AppButton.vue'; import AppInput from './AppInput.vue'
+import OverlayMenu from './OverlayMenu.vue'; import { isPromptDismissed, dismissPrompt, clearDismissOnDrop } from '../utils/progressPrompt'
 import StatusPill from './StatusPill.vue'; import EditItemModal from './EditItemModal.vue'; import { STATUS_META, TYPE_META, STORY_CAT_META, TASK_STATUS_META } from '../api/types'; import TypeBadge from './TypeBadge.vue'; import Avatar from './Avatar.vue'; import ProgressBar from './ProgressBar.vue'
 import MentionInput from './MentionInput.vue'; import { mentionSegments } from '../utils/mention'; import { fmtDateTime, localToday } from '../utils/datetime'
 import { api, ApiError } from '../api/http'; import type { Item, ProgressUpdate, Comment, Activity } from '../api/types'
@@ -155,6 +184,7 @@ const team = useTeam(), auth = useAuth(), toast = useToast(), busy = useBusy()
 const item = ref<Item|null>(null), loading = ref(false), titleDraft = ref(''), tab = ref('progress')
 const progress = ref<ProgressUpdate[]>([]), comments = ref<Comment[]>([]), activities = ref<Activity[]>([]), allItems = ref<Item[]>([])
 const showActions = ref(false), showTransfer = ref(false), reasonAction = ref<string|null>(null), reason = ref(''), editOpen = ref(false)
+const statusBtn = ref<HTMLElement|null>(null), editAnchor = ref<HTMLElement|null>(null)
 const pText = ref(''), pPercent = ref<number|null>(null), pBlocked = ref(false), pBlockReason = ref(''), cText = ref('')
 // @提及（1.0.4 G）：MentionInput 维护被 @ 成员 id，提交评论/进展时随 mentionIds 一起发（评论 POST 已支持；进展 POST 后端 1.0.4 同步加同名字段）
 const pMentionIds = ref<number[]>([]), cMentionIds = ref<number[]>([])
@@ -180,7 +210,8 @@ function canDeleteComment(c:Comment){ return !!auth.user && (c.authorId===auth.u
 async function saveComment(c:Comment){ if(!item.value || commentBusy.value) return; commentBusy.value = true; try{ await api.patch(`/teams/${team.currentId}/items/${item.value.id}/comments/${c.id}`, { content: editCommentText.value }); editCommentId.value=null; toast.show('评论已编辑'); load() }catch(e){ handleErr(e) } finally { commentBusy.value = false } }
 async function removeComment(c:Comment){ if(!item.value) return; if(!confirm('确定删除这条评论吗？')) return; try{ await api.del(`/teams/${team.currentId}/items/${item.value.id}/comments/${c.id}`); toast.show('评论已删除'); load() }catch(e){ handleErr(e) } }
 const canNudge = computed(()=> { const it = item.value; if (!it) return false; if (it.allowedActions) return it.allowedActions.includes('NUDGE'); return !!auth.user && it.type!=='TASK' && !it.ownerIds.includes(auth.user.id) && ['NOT_STARTED','IN_PROGRESS','IN_REVIEW'].includes(it.status) })
-function toggleEdit(f:string){ if (!canInlineEdit.value) return; if (editField.value===f) { editField.value=null; return }
+function toggleEdit(f:string, ev?:Event){ if (!canInlineEdit.value) return; if (editField.value===f) { editField.value=null; return }
+  if (ev) editAnchor.value = (ev.currentTarget as HTMLElement) ?? null
   if (!item.value) return
   if (f==='owners') ownerDraft.value = [...item.value.ownerIds]
   if (f==='due') dueDraft.value = item.value.dueDate ?? ''
@@ -208,25 +239,78 @@ const html = computed(()=> item.value ? DOMPurify.sanitize(marked.parse(item.val
 const fmt = fmtDateTime
 const fmtDue = (d:string)=> { const m = d.match(/^(\d+)-(\d+)-(\d+)$/); return m ? `${Number(m[2])}月${Number(m[3])}日` : d }
 const dueState = computed(()=> { const d = item.value?.dueDate; if(!d || item.value?.status==='DONE') return ''; const today = localToday(); return d < today ? 'over' : d === today ? 'today' : '' })
-function typeColor(t:string){ return (TYPE_META as any)[t]?.color ?? '#007AFF' }
+function typeColor(t:string){ return (TYPE_META as any)[t]?.color ?? 'var(--c-req)' }
+// 修订五 A7：菜单项来自后端 allowedActions（不可用动作不出现）；无 allowedActions 时回退本地推导（旧数据/极端兜底）。
+const ACTION_LABELS: Record<string,string> = { CLAIM:'认领', START:'开始', SUBMIT:'提交验收', APPROVE:'通过', REJECT:'打回', RELEASE:'释放回待认领', DECLINE:'婉拒', CANCEL:'取消事项', REOPEN:'重新打开' }
 const actions = computed(()=>{
   if(!item.value || !auth.user) return [] as {action:string;label:string}[]
-  const s = item.value.status, meId = auth.user.id, out:{action:string;label:string}[] = []
-  if (item.value.type==='TASK') { if (item.value.taskStatus==='PENDING_ACCEPTANCE' && (team.current?.myRole==='PO' || item.value.poId===meId)) { out.push({action:'APPROVE',label:'验收任务'}); out.push({action:'REJECT',label:'打回任务'}) } return out }
+  const it = item.value, meId = auth.user.id
+  if (it.type==='TASK') {
+    if (it.allowedActions) return ['APPROVE','REJECT','CANCEL'].filter(a=>it.allowedActions!.includes(a)).map(a=>({action:a, label: a==='APPROVE'?'验收任务':a==='REJECT'?'打回任务':'取消任务'}))
+    if (it.taskStatus==='PENDING_ACCEPTANCE' && (team.current?.myRole==='PO' || it.poId===meId)) return [{action:'APPROVE',label:'验收任务'},{action:'REJECT',label:'打回任务'}]
+    return []
+  }
+  if (it.allowedActions) {
+    const order = ['CLAIM','START','SUBMIT','APPROVE','REJECT','RELEASE','DECLINE','CANCEL','REOPEN']
+    return order.filter(a=>it.allowedActions!.includes(a)).map(a=>({action:a, label:ACTION_LABELS[a]}))
+  }
+  const s = it.status, out:{action:string;label:string}[] = []
   if (s==='UNCLAIMED') out.push({action:'CLAIM',label:'认领'})
-  if (s==='NOT_STARTED' && item.value.ownerIds.includes(meId)) out.push({action:'START',label:'开始'})
-  if (s==='IN_PROGRESS' && item.value.ownerIds.includes(meId)) out.push({action:'SUBMIT',label:'提交验收'})
+  if (s==='NOT_STARTED' && it.ownerIds.includes(meId)) out.push({action:'START',label:'开始'})
+  if (s==='IN_PROGRESS' && it.ownerIds.includes(meId)) out.push({action:'SUBMIT',label:'提交验收'})
   if (s==='IN_REVIEW') { out.push({action:'APPROVE',label:'通过'},{action:'REJECT',label:'打回'}) }
   if (s==='DONE'||s==='CANCELLED') out.push({action:'REOPEN',label:'重新打开'})
+  if (it.ownerIds.includes(meId) && (s==='NOT_STARTED'||s==='IN_PROGRESS')) out.push({action:'RELEASE',label:'释放回待认领'})
+  out.push({action:'CANCEL',label:'取消事项'})
   return out
 })
+const canTransfer = computed(()=> { const it = item.value; if (!it) return false; if (it.allowedActions) return it.allowedActions.includes('TRANSFER'); return !['DONE','CANCELLED'].includes(it.status) })
 const mainAction = computed(()=> actions.value[0] ?? null)
 const canJoin = computed(()=> { const it = item.value; if (!it) return false; if (it.allowedActions) return it.allowedActions.includes('JOIN'); return !!auth.user && it.type!=='TASK' && it.ownerIds.length>0 && !it.ownerIds.includes(auth.user.id) && !['DONE','CANCELLED'].includes(it.status) })
 const canDecline = computed(()=> !!item.value && !!auth.user && item.value.status==='NOT_STARTED' && item.value.assignedDirectly && item.value.ownerIds.includes(auth.user.id) && progress.value.length===0)
+// ---------- 修订五 B：状态×进度联动（前端部分；补满/清零/清阻塞在后端流转层） ----------
+const promptDismissed = ref(false)
+const canEditProgress = computed(()=> { const it = item.value; if (!it || it.type==='TASK') return false; return it.status==='IN_PROGRESS' || it.status==='NOT_STARTED' })
+const showPrompt = computed(()=> { const it = item.value; if (!it || it.type==='TASK') return false
+  return it.status==='IN_PROGRESS' && it.progressPercent>=100 && !promptDismissed.value && !!auth.user && it.ownerIds.includes(auth.user.id) })
+const promptActionLabel = computed(()=> { const it = item.value; if (!it) return '提交验收'
+  // 主按钮按 allowedActions/验收人：有验收人且不是本人 → 提交验收；无验收人或验收人是本人（提交即完成）→ 标记完成
+  return it.acceptorId && auth.user && it.acceptorId !== auth.user.id ? '提交验收' : '标记完成' })
+const readyMark = computed(()=> { const it = item.value; if (!it || it.type==='TASK') return false
+  return it.status==='IN_PROGRESS' && it.progressPercent>=100 && promptDismissed.value })
+const noEstimateMark = computed(()=> { const it = item.value; if (!it) return false
+  return it.status==='IN_PROGRESS' && (it.estimate == null) })
+const progressReadonlyNote = computed(()=> { const it = item.value; if (!it || it.type==='TASK') return ''
+  if (it.status==='UNCLAIMED') return '待认领：认领后可登记进度。'
+  if (it.status==='IN_REVIEW') return '待验收：进度已补满 100%，只读。'
+  if (it.status==='DONE') return '已完成：进度只读，如需修改请先重新打开。'
+  return '' })
+const canApproveTask = computed(()=> { const it = item.value; if (!it || !auth.user) return false
+  if (it.allowedActions) return it.allowedActions.includes('APPROVE')
+  return team.current?.myRole==='PO' || team.current?.myRole==='LEADER' || it.poId===auth.user.id })
+function dismissPromptNow(){ if (!item.value) return; dismissPrompt(item.value.id); promptDismissed.value = true }
+async function doPromptAction(){ await runTransition('SUBMIT') }
+// 待开始拖到 >0：提交一条进展（后端自动转进行中），顶部提示条带 5 秒撤销（UNSTART 回待开始且进度清零）
+async function onSliderRelease(e: Event){
+  const it = item.value; if (!it) return
+  const v = Number((e.target as HTMLInputElement).value)
+  if (it.status==='NOT_STARTED' && v>0) {
+    try {
+      await api.post(`/teams/${team.currentId}/items/${it.id}/progress`, { text: pText.value.trim() || '开始推进', percent: v, mentionIds: pMentionIds.value.length ? [...pMentionIds.value] : undefined })
+      pText.value=''; pMentionIds.value=[]; pPercent.value=null
+      emit('changed'); await load()
+      toast.showWithAction('已开始，状态改为进行中', '撤销', () => { undoStart() }, 5000)
+    } catch(e){ handleErr(e) }
+  }
+}
+async function undoStart(){ const it = item.value; if (!it) return
+  try { item.value = await api.post(`/teams/${team.currentId}/items/${it.id}/transitions`, { action:'UNSTART', version: it.version }); toast.show('已撤销开始，回到待开始'); emit('changed'); load() }
+  catch(e){ handleErr(e) } }
 async function load(){
   if (!props.itemId || !team.currentId) return; loading.value = true
   try { const tid = team.currentId
     item.value = await api.get(`/teams/${tid}/items/${props.itemId}`); titleDraft.value = item.value!.title
+    clearDismissOnDrop(item.value!.id, item.value!.progressPercent); promptDismissed.value = isPromptDismissed(item.value!.id)
     progress.value = await api.get(`/teams/${tid}/items/${props.itemId}/progress-list`).catch(()=>[])
     comments.value = await api.get(`/teams/${tid}/items/${props.itemId}/comments`).catch(()=>[])
     activities.value = await api.get(`/teams/${tid}/items/${props.itemId}/activities`).catch(()=>[])
@@ -257,42 +341,53 @@ async function submitComment(){ if(!item.value || !cText.value.trim() || comment
 </script>
 <style scoped>
 .banner{display:flex;gap:10px;align-items:flex-start;padding:12px 14px;border-radius:12px;font-size:13.5px;margin-bottom:12px}.banner .grow{flex:1}.banner-btn{min-height:34px;padding:5px 12px}
-.banner.red{background:rgba(255,59,48,.12);border:1px solid rgba(255,59,48,.35)}.banner.yellow{background:rgba(255,204,0,.16);border:1px solid rgba(230,180,0,.4)}
-.quick-replies{display:flex;gap:6px;margin-top:8px;flex-wrap:wrap}.qr{border:1px solid rgba(160,120,0,.35);background:var(--card);border-radius:999px;padding:5px 12px;font-size:12px;font-weight:600;min-height:32px}
+.banner.red{background:var(--danger-bg-strong);border:1px solid var(--danger-brd)}.banner.yellow{background:var(--warn-bg);border:1px solid var(--warn-brd)}
+.quick-replies{display:flex;gap:6px;margin-top:8px;flex-wrap:wrap}.qr{border:1px solid var(--amber-brd);background:var(--card);border-radius:999px;padding:5px 12px;font-size:12px;font-weight:600;min-height:32px}
 .link{color:inherit;font-weight:700;text-decoration:underline;margin-left:6px}
 .head{display:flex;align-items:center;gap:8px;position:relative}
 .icon{width:36px;height:36px;display:grid;place-items:center;border-radius:10px;background:var(--fill)}
-.rel{position:relative}.menu{position:absolute;top:42px;right:0;z-index:5;border-radius:14px;padding:6px;min-width:150px;display:flex;flex-direction:column}
-.menu.more{top:44px;right:44px}.menu button{text-align:left;padding:8px 12px;border-radius:9px}.menu button:hover{background:var(--fill)}
+.rel{position:relative}
+/* 修订五：浮层内容样式（容器由 OverlayMenu 提供实色/描边/定位/层级，抽屉内不再自绘菜单） */
+.ovl-col{display:flex;flex-direction:column;min-width:170px}
+.ovl-item{display:flex;align-items:center;gap:7px;text-align:left;padding:8px 12px;border-radius:9px;font-size:13.5px;color:var(--text);width:100%}
+.ovl-item:hover{background:var(--hover)}
+.ovl-check{color:var(--theme);flex:none}
+.pop-in{min-width:230px;display:flex;flex-direction:column;gap:4px;padding:4px}
+.mark{font-size:11px;font-weight:700;padding:2px 8px;border-radius:999px}
+.mark.red{color:var(--danger-deep);background:var(--danger-soft)}
+.mark.green{color:var(--success-deep);background:var(--success-soft)}
+.mark.amber{color:var(--warn-deep);background:var(--warn-soft)}
+.prompt{display:flex;gap:10px;align-items:center;padding:10px 12px;border-radius:12px;background:var(--theme-soft);border:1px solid var(--line);font-size:13.5px;margin-top:6px}
+.prompt .grow{flex:1}
 .title{width:100%;font-size:19px;font-weight:600;line-height:1.35;border:0;background:transparent;padding:8px 6px;margin:8px -6px 4px;border-radius:10px;outline:none}.title:hover,.title:focus{background:var(--field)}
 .mainrow{display:flex;align-items:center;gap:10px;margin:8px 0 14px;position:relative}
-.attrs{display:grid;grid-template-columns:1fr 1fr;gap:10px 18px;background:var(--card);border:1px solid rgba(255,255,255,.65);border-radius:var(--r-card);padding:14px;margin-bottom:4px}
+.attrs{display:grid;grid-template-columns:1fr 1fr;gap:10px 18px;background:var(--card);border:1px solid var(--card-brd);border-radius:var(--r-card);padding:14px;margin-bottom:4px}
 .attr>span{display:block;font-size:12px;color:var(--text-2);margin-bottom:2px}.attr b{font-weight:500;display:block}
 .attr .editable{cursor:pointer;border-radius:8px;padding:2px 6px;margin:-2px -6px}.attr .editable:hover{background:var(--hover)}
 .attr .pen{color:var(--text-3);margin-left:6px;vertical-align:-2px}
-.pop{position:absolute;top:calc(100% + 4px);left:0;z-index:40;border-radius:14px;padding:10px;min-width:230px;box-shadow:var(--shadow-lift);display:flex;flex-direction:column;gap:4px}
+
 .poprow{display:flex;align-items:center;gap:8px;padding:6px 8px;border-radius:9px;font-size:13.5px;font-weight:500}.poprow input{width:17px;height:17px}
 .popfoot{display:flex;gap:8px;justify-content:flex-end;margin-top:8px}
 .avaline{display:inline-flex !important;align-items:center;gap:7px;font-weight:600 !important}
-.prio{font-size:12px;padding:2px 9px;border-radius:999px;font-weight:700}.prio.P0{color:#fff;background:var(--c-red)}.prio.P1{color:#B25E00;background:rgba(255,149,0,.18)}.prio.P2{color:#0A5CD6;background:rgba(0,122,255,.12)}.prio.P3{color:var(--text-2);background:var(--track)}
-.btag{font-size:11px;font-weight:600;color:#7D2CA8;background:rgba(175,82,222,.14);border-radius:6px;padding:2px 7px}
-.catpill{font-size:12px;padding:2px 9px;border-radius:999px;font-weight:700;color:#fff}
-.tag{font-size:12px;padding:2px 9px;border-radius:999px;background:var(--sel);color:#0A5CD6;font-weight:500;margin-right:4px}
+.prio{font-size:12px;padding:2px 9px;border-radius:999px;font-weight:700}.prio.P0{color:var(--on-color);background:var(--c-red)}.prio.P1{color:var(--prio-1);background:var(--prio-1-bg)}.prio.P2{color:var(--primary-deep);background:var(--primary-soft-12)}.prio.P3{color:var(--text-2);background:var(--track)}
+.btag{font-size:11px;font-weight:600;color:var(--violet-deep);background:var(--violet-soft);border-radius:6px;padding:2px 7px}
+.catpill{font-size:12px;padding:2px 9px;border-radius:999px;font-weight:700;color:var(--on-color)}
+.tag{font-size:12px;padding:2px 9px;border-radius:999px;background:var(--sel);color:var(--primary-deep);font-weight:500;margin-right:4px}
 .overdue{color:var(--c-red);font-weight:700}.parentlink{color:var(--theme);font-weight:600}
 .pillbtn{display:inline-flex;align-items:center;gap:2px}
 .sec-title{display:flex;align-items:center;gap:7px;font-size:15px}.sec-title .tiny{font-weight:400}
 .dtabs{display:flex;gap:2px;border-bottom:1px solid var(--field-brd);margin-top:6px}
 .dtabs button{padding:8px 14px;font-size:14px;font-weight:500;color:var(--text-2);border-bottom:2px solid transparent;margin-bottom:-1px;min-height:40px}
 .dtabs button.on{color:var(--theme);border-bottom-color:var(--theme);font-weight:600}
-.st-ico{width:22px;height:22px;border-radius:50%;display:grid;place-items:center;color:#fff;flex:none}
+.st-ico{width:22px;height:22px;border-radius:50%;display:grid;place-items:center;color:var(--on-color);flex:none}
 .child .sid{color:var(--text-2);font-size:12.5px}.child .ct{flex:1;font-weight:500}
-.tl-pct{display:inline-block;font-size:12px;font-weight:600;color:#0A5CD6;background:var(--sel);padding:2px 9px;border-radius:999px}
+.tl-pct{display:inline-block;font-size:12px;font-weight:600;color:var(--primary-deep);background:var(--sel);padding:2px 9px;border-radius:999px}
 .dfoot{flex:none;padding:12px 22px;background:var(--glass);backdrop-filter:blur(20px) saturate(180%);border-top:1px solid var(--field-brd)}
 .pct-row{display:flex;align-items:center;gap:10px;margin-bottom:10px;font-size:13px}.pct-row input[type=range]{flex:1;accent-color:var(--theme);min-height:32px}
 .foot-row{display:flex;gap:10px;align-items:flex-end}.foot-row textarea{flex:1;border:1px solid var(--field-brd);background:var(--field);border-radius:var(--r-ctl);padding:9px 12px;resize:none;max-height:110px;outline:none;font-size:14px}
-.foot-row textarea:focus{border-color:var(--theme);box-shadow:0 0 0 3px rgba(0,122,255,.16)}
+.foot-row textarea:focus{border-color:var(--theme);box-shadow:0 0 0 3px var(--focus-ring)}
 .sec{margin-top:20px}.md :deep(p){margin:6px 0}.md :deep(h2){margin:10px 0 4px}
-.child{display:flex;align-items:center;gap:10px;width:100%;text-align:left;padding:9px 12px;border:1px solid rgba(255,255,255,.65);background:var(--card);border-radius:12px;margin-bottom:8px;font-size:13px}.child:hover{background:var(--hover)}
+.child{display:flex;align-items:center;gap:10px;width:100%;text-align:left;padding:9px 12px;border:1px solid var(--card-brd);background:var(--card);border-radius:12px;margin-bottom:8px;font-size:13px}.child:hover{background:var(--hover)}
 .check{display:flex;gap:8px;align-items:center;padding:5px 0}.check .grow{flex:1}.icon.sm{width:26px;height:26px}.check input{width:18px;height:18px}.check .done{text-decoration:line-through;color:var(--text-2)}
 .mention{color:var(--theme);font-weight:600;background:var(--sel);border-radius:5px;padding:0 3px}
 .tl{margin-top:14px;display:flex;flex-direction:column;gap:14px}

@@ -28,7 +28,7 @@
         <select v-if="dec[it.itemId].action==='TRANSFER'" v-model.number="dec[it.itemId].toUserId" class="flexin sm"><option :value="0" disabled>选择接收人</option><option v-for="m in targets" :key="m.userId" :value="m.userId">{{memberLabel(team.members, m)}}</option></select>
       </div>
     </template>
-    <p v-if="!pending.length" class="small" style="color:#1D7A3A">没有待交接条目，可以直接确认。</p>
+    <p v-if="!pending.length" class="small" style="color:var(--success-text)">没有待交接条目，可以直接确认。</p>
     <p v-if="err" class="err">{{err}}</p>
     <div class="foot">
       <AppButton variant="ghost" @click="$emit('cancel')">取消</AppButton>

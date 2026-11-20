@@ -21,8 +21,8 @@
       <AppButton variant="ghost" @click="saveMyStatus">保存状态</AppButton>
     </div>
     <h2 style="margin-top:22px">外观</h2>
-    <p class="small">仅保存在本机浏览器，立即生效；真实与演示环境行为一致。</p>
-    <div class="prefrow"><span class="grow"><b>主题模式</b><br/><span class="tiny">默认跟随系统，也可固定浅色或深色</span></span>
+    <p class="small">主题选择保存在你的账号设置里，换设备登录也会同步；玻璃/动效偏好保存在本机浏览器。切换立即生效。</p>
+    <div class="prefrow"><span class="grow"><b>主题模式</b><br/><span class="tiny">浅色 / 深色（暮光蓝灰）/ 石墨 / 跟随系统（系统深色时用暮光蓝灰）</span></span>
       <div class="seg" role="group" aria-label="主题模式">
         <button v-for="o in themeOpts" :key="o.v" class="press" :class="{on: appearance.theme===o.v}" @click="setAppearance({theme:o.v})">{{o.label}}</button>
       </div></div>
@@ -63,6 +63,9 @@
       <div v-for="it in leaveDue" :key="it.itemId" class="mrow"><span class="grow"><b>{{it.code}}</b> {{it.title}}<br/><span class="tiny">截止 {{it.dueDate}}</span></span><span class="tiny">请在事项详情里转交</span></div>
       <p v-if="!leaveDueLoading && !leaveDue.length" class="small">请假期间没有到期事项。</p>
     </template>
+    <h2 style="margin-top:22px">关于</h2>
+    <div class="mrow"><img :src="lockupSrc(effectiveTheme)" alt="迭代小组平台" style="width:240px;max-width:70%;height:auto;border-radius:8px"/></div>
+    <p class="small">版本 {{ APP_VERSION }} · 构建日期 {{ BUILD_DATE }}。品牌标识「迭代之芯 · 彩带交织」：∞ 象征迭代持续推进，彩带交织象征团队协作，右上金色星芒象征 AI。</p>
   </GlassPanel>
 </AppShell>
 </template>
@@ -71,12 +74,13 @@ import { reactive, ref, computed, onMounted } from 'vue'
 import AppShell from '../components/AppShell.vue'; import GlassPanel from '../components/GlassPanel.vue'; import AppButton from '../components/AppButton.vue'; import AppInput from '../components/AppInput.vue'; import Avatar from '../components/Avatar.vue'
 import { api, ApiError } from '../api/http'; import { useAuth } from '../stores/auth'; import { useTeam } from '../stores/team'; import { useToast } from '../stores/toast'
 const auth = useAuth(), team = useTeam(), toast = useToast()
-// 外观（M5）：本地偏好，改动即时生效并持久化（localStorage，不走后端）
-import { loadAppearance, saveAppearance, type Appearance, type ThemeMode, type GlassLevel } from '../utils/appearance'
+// 外观：主题选择同步保存到服务端个人设置（/auth/appearance-settings），本地缓存用于首屏；玻璃/动效为本地偏好。改动即时生效。
+import { loadAppearance, saveAppearance, effectiveTheme, lockupSrc, pushAppearanceToServer, type Appearance, type ThemeMode, type GlassLevel } from '../utils/appearance'
+import { APP_VERSION, BUILD_DATE } from '../utils/appMeta'
 const appearance = reactive<Appearance>(loadAppearance())
-const themeOpts = [{ v: 'system', label: '跟随系统' }, { v: 'light', label: '浅色' }, { v: 'dark', label: '深色' }] as { v: ThemeMode; label: string }[]
+const themeOpts = [{ v: 'light', label: '浅色' }, { v: 'dark', label: '深色' }, { v: 'graphite', label: '石墨' }, { v: 'system', label: '跟随系统' }] as { v: ThemeMode; label: string }[]
 const glassOpts = [{ v: 'clear', label: '通透' }, { v: 'standard', label: '标准' }, { v: 'frosted', label: '磨砂' }] as { v: GlassLevel; label: string }[]
-function setAppearance(patch: Partial<Appearance>){ Object.assign(appearance, patch); saveAppearance({ ...appearance }) }
+function setAppearance(patch: Partial<Appearance>){ Object.assign(appearance, patch); saveAppearance({ ...appearance }); if (patch.theme) pushAppearanceToServer(patch.theme) }
 const f = reactive({ old: '', next: '', confirm: '' }); const err = ref('')
 // M3：通知偏好 + 我的成员状态
 import type { NotificationPrefs } from '../api/types'
@@ -137,14 +141,14 @@ async function submit(){
 .body{padding:20px;max-width:760px}
 .mrow{display:flex;align-items:center;gap:12px;margin-top:10px}.mrow .grow{flex:1}
 .err{color:var(--c-red);font-size:12px;margin-top:10px}
-.errbox2{color:var(--c-red);background:rgba(255,59,48,.08);border-radius:10px;padding:9px 12px;font-size:13px;margin-top:10px;line-height:1.6}
+.errbox2{color:var(--c-red);background:var(--danger-bg-soft);border-radius:10px;padding:9px 12px;font-size:13px;margin-top:10px;line-height:1.6}
 .frow{display:flex;gap:12px;align-items:flex-end;flex-wrap:wrap;margin-top:10px}.frow label{display:flex;flex-direction:column;gap:6px}
 .flexin{min-height:40px;border:1px solid var(--field-brd);border-radius:10px;background:var(--field);padding:6px 10px}
 .prefrow{display:flex;align-items:center;gap:12px;padding:10px 0;border-bottom:1px solid var(--field-brd)}.prefrow .grow{flex:1}
-.switch{position:relative;width:48px;height:28px;flex:none}.switch input{opacity:0;width:0;height:0}.switch span{position:absolute;inset:0;background:var(--track);border-radius:99px;transition:.2s;cursor:pointer}.switch span:before{content:'';position:absolute;width:22px;height:22px;border-radius:50%;background:#fff;top:3px;left:3px;transition:.2s;box-shadow:0 1px 4px rgba(0,0,0,.25)}
+.switch{position:relative;width:48px;height:28px;flex:none}.switch input{opacity:0;width:0;height:0}.switch span{position:absolute;inset:0;background:var(--track);border-radius:99px;transition:.2s;cursor:pointer}.switch span:before{content:'';position:absolute;width:22px;height:22px;border-radius:50%;background:var(--knob);top:3px;left:3px;transition:.2s;box-shadow:var(--shadow-knob)}
 .switch input:checked + span{background:var(--c-green)}.switch input:checked + span:before{transform:translateX(20px)}
 .switch input:disabled + span{opacity:.55;cursor:not-allowed}
 .seg{display:flex;background:var(--track);border-radius:999px;padding:3px;gap:2px;flex:none}
 .seg button{padding:6px 14px;border-radius:999px;font-size:13px;font-weight:500;color:var(--text-2);min-height:32px}
-.seg button.on{background:var(--card-solid);color:var(--text);box-shadow:0 1px 4px rgba(10,40,90,.18);font-weight:600}
+.seg button.on{background:var(--card-solid);color:var(--text);box-shadow:var(--shadow-seg-sm);font-weight:600}
 </style>

@@ -77,6 +77,9 @@ const PREF_CATS = ['ASSIGNMENT', 'NUDGE', 'MENTION', 'ITEM_UPDATE', 'REMINDER', 
 const PREF_DEFAULTS: Record<string, boolean> = { ASSIGNMENT: true, NUDGE: true, MENTION: true, ITEM_UPDATE: true, REMINDER: true, SYSTEM: true }
 // 精简通知（P25）与后端一致：单独存 compactNotification，不混进分类表；桌面通知/提示音是浏览器本地偏好，后端不存。
 const compactByUser = new Map<number, boolean>()
+// 外观主题偏好（深色主题定稿）：与后端一致，单独存 theme（system/light/dark/graphite），默认 system。
+const themeByUser = new Map<number, string>()
+const THEME_MODES = ['system', 'light', 'dark', 'graphite']
 function prefsOf(userId: number) { return { ...PREF_DEFAULTS, ...(userPrefs.get(userId) ?? {}) } }
 // 精简通知（P25）六类白名单判定：ASSIGNMENT 含指派与邀请认领；ITEM_UPDATE 仅「待我验收」类（type=REVIEW_PENDING 或正文含待验收）；SYSTEM 仅加入申请类（type=JOIN_REQUEST）。
 const COMPACT_EXTRA_TYPES = new Set(['REVIEW_PENDING', 'JOIN_REQUEST'])
@@ -160,12 +163,31 @@ function allowedActionsFor(it: Item): string[] {
     if (!isOwner && it.ownerIds.length && !['DONE', 'CANCELLED'].includes(it.status)) acts.push('JOIN')
     if (isOwner && it.status === 'IN_PROGRESS') acts.push('PROGRESS')
     if (isOwner && ['IN_PROGRESS', 'IN_REVIEW'].includes(it.status)) acts.push('RESPOND_NUDGE')
+    // 修订五 A7：状态菜单项来自 allowedActions
+    if (isOwner && it.status === 'NOT_STARTED') acts.push('START')
+    if (isOwner && it.status === 'IN_PROGRESS') acts.push('SUBMIT')
+    if (!isOwner && it.status === 'IN_REVIEW' && (it.acceptorId === u.id || leadPO)) acts.push('APPROVE', 'REJECT')
+    if (isOwner && ['NOT_STARTED', 'IN_PROGRESS'].includes(it.status)) acts.push('RELEASE')
+    if (isOwner && it.status === 'NOT_STARTED' && it.assignedDirectly) acts.push('DECLINE')
+    if (!['DONE', 'CANCELLED'].includes(it.status) && (isCreator || isOwner || leadPO)) acts.push('TRANSFER')
+    if (!['DONE', 'CANCELLED'].includes(it.status) && (leadPO || (isCreator && ['UNCLAIMED', 'NOT_STARTED'].includes(it.status)))) acts.push('CANCEL')
+    if (['DONE', 'CANCELLED'].includes(it.status) && (isCreator || leadPO || it.acceptorId === u.id)) acts.push('REOPEN')
   } else {
     if (it.taskStatus === 'PENDING_ACCEPTANCE' && (role === 'PO' || it.poId === u.id)) acts.push('APPROVE', 'REJECT')
   }
   return acts
 }
-const view = (it: Item) => { const v = JSON.parse(JSON.stringify(recompute(it))); v.allowedActions = allowedActionsFor(it); return v }
+const view = (it: Item) => { const v = JSON.parse(JSON.stringify(recompute(it))); v.allowedActions = allowedActionsFor(it)
+  // 修订五 B「已退回」派生标记：进行中且最近一次关键流转是 REJECT（与真实后端同口径）
+  v.rejected = false; v.rejectReason = null
+  if (it.status === 'IN_PROGRESS') {
+    const mine = activities.filter(a => a.itemId === it.id) // activities 为 unshift 倒序，首个命中即最近
+    for (const a of mine) {
+      if (a.action === 'REJECT') { v.rejected = true; v.rejectReason = a.detail ?? ''; break }
+      if (['SUBMIT', 'APPROVE', 'REOPEN'].includes(a.action)) break
+    }
+  }
+  return v }
 function getItem(teamId: number, itemId: number, includeDeleted = false) { requireMember(teamId); const it = items.find(i => i.id === itemId); if (!it || (it.deletedAt && !includeDeleted)) throw err(404, 'NOT_FOUND', '事项不存在'); return it }
 function captchaSvg(code: string) {
   const chars = code.split('').map((c, i) => `<text x="${14 + i * 24}" y="30" font-size="24" font-family="monospace" fill="hsl(${i * 70 + 200},70%,45%)" transform="rotate(${(i % 2 ? -1 : 1) * 8} ${14 + i * 24} 24)">${c}</text>`).join('')
@@ -369,6 +391,11 @@ function auth(method: string, sub: string, body: any) {
     if (method === 'PATCH') { if (body?.categories) { const p = { ...prefsOf(u.id) }; for (const k of PREF_CATS) if (typeof body.categories[k] === 'boolean') p[k] = body.categories[k]; p.ASSIGNMENT = true; p.NUDGE = true; userPrefs.set(u.id, p) }
       if (typeof body?.compactNotification === 'boolean') compactByUser.set(u.id, body.compactNotification)
       return { status: 200, data: { categories: { ...prefsOf(u.id) }, compactNotification: compactByUser.get(u.id) ?? false } } }
+  }
+  if (sub === 'appearance-settings') {
+    const u = me()
+    if (method === 'GET') return { status: 200, data: { theme: themeByUser.get(u.id) ?? 'system' } }
+    if (method === 'PATCH') { if (typeof body?.theme === 'string' && THEME_MODES.includes(body.theme)) themeByUser.set(u.id, body.theme); return { status: 200, data: { theme: themeByUser.get(u.id) ?? 'system' } } }
   }
   if (method === 'POST' && sub === 'change-password') {
     const u = me(); if (u.password !== body.oldPassword) throw err(400, 'VALIDATION', '原密码不正确')
@@ -998,6 +1025,11 @@ function itemsRoute(method: string, teamId: number, seg: string[], body: any, q:
     const { u, m } = requireMember(teamId)
     if (!(m.role !== 'MEMBER' || it.creatorId === u.id || it.ownerIds.includes(u.id))) throw err(403, 'FORBIDDEN', '只能编辑自己创建或负责的事项')
     if (body.version !== it.version) throw err(409, 'VERSION_CONFLICT', '该事项已被他人修改，请刷新后重试')
+    // 修订五规则 5：已完成/已取消只能改描述，其他字段须先重新打开
+    if ((it.status === 'DONE' || it.status === 'CANCELLED') && it.type !== 'TASK') {
+      const nonDesc = ['title', 'priority', 'acceptorId', 'dueDate', 'estimate', 'iterationId', 'parentId', 'storyCategory', 'poId', 'ownerIds', 'labelNames'].some(k => k in body)
+      if (nonDesc) throw err(422, 'DONE_ITEM_LOCKED', '已完成/已取消的事项只能修改描述，其他修改请先重新打开事项')
+    }
     if ('parentId' in body && body.parentId != null) {
       if (it.type !== 'STORY') throw err(400, 'VALIDATION', '只有故事可以挂在任务下')
       const parent = items.find(i => i.id === body.parentId && !i.deletedAt); if (!parent || parent.type !== 'TASK') throw err(400, 'VALIDATION', '所属任务不存在或不是任务')
@@ -1120,6 +1152,8 @@ function transition(teamId: number, it: Item, body: any) {
   if (it.type === 'TASK') {
     if (body.action === 'APPROVE') {
       recompute(it); if (it.taskStatus !== 'PENDING_ACCEPTANCE') throw illegal()
+      // 修订五规则 7：父完成子未完成禁止（推算兜底校验）
+      if (items.some(k => k.parentId === it.id && !k.deletedAt && k.status !== 'CANCELLED' && k.status !== 'DONE')) throw err(422, 'PARENT_CHILD_CONFLICT', '任务下仍有未完成的故事，不能验收通过任务')
       if (!(m.role === 'PO' || it.poId === u.id)) throw err(403, 'FORBIDDEN', '只有 PO 可以验收任务')
       it.taskStatus = 'DONE'; it.progressPercent = 100; it.version++; act(it.id, u.id, 'APPROVE', 'PENDING_ACCEPTANCE', 'DONE', null); return { status: 200, data: view(it) }
     }
@@ -1146,16 +1180,17 @@ function transition(teamId: number, it: Item, body: any) {
   switch (body.action) {
     case 'CLAIM': if (from !== 'UNCLAIMED') throw illegal(); it.ownerIds = [u.id]; it.assignedDirectly = false; it.inviteeIds = []; it.status = 'NOT_STARTED'; break
     case 'START': if (from !== 'NOT_STARTED') throw illegal(); if (!isOwner) throw err(403, 'FORBIDDEN', '只有负责人可以开始'); it.status = 'IN_PROGRESS'; break
-    case 'SUBMIT': if (from !== 'IN_PROGRESS') throw illegal(); if (!isOwner) throw err(403, 'FORBIDDEN', '只有负责人可以提交验收'); it.status = it.acceptorId === u.id ? 'DONE' : 'IN_REVIEW'; if (it.status === 'DONE') it.progressPercent = 100; break
-    case 'APPROVE': if (from !== 'IN_REVIEW') throw illegal(); if (!(it.acceptorId === u.id || m.role === 'LEADER')) throw err(403, 'FORBIDDEN', '只有验收人或组长可以通过'); it.status = 'DONE'; it.progressPercent = 100; break
+    case 'UNSTART': if (from !== 'IN_PROGRESS') throw illegal(); if (!isOwner) throw err(403, 'FORBIDDEN', '只有负责人可以撤销开始'); it.status = 'NOT_STARTED'; it.progressPercent = 0; break
+    case 'SUBMIT': if (from !== 'IN_PROGRESS') throw illegal(); if (!isOwner) throw err(403, 'FORBIDDEN', '只有负责人可以提交验收'); it.status = it.acceptorId === u.id ? 'DONE' : 'IN_REVIEW'; it.progressPercent = 100; if (it.blocked) { it.blocked = false; it.blockReason = null; act(it.id, u.id, 'UNBLOCK', from, it.status, '提交验收/完成时自动清除阻塞标记') } break
+    case 'APPROVE': if (from !== 'IN_REVIEW') throw illegal(); if (!(it.acceptorId === u.id || m.role === 'LEADER')) throw err(403, 'FORBIDDEN', '只有验收人或组长可以通过'); it.status = 'DONE'; it.progressPercent = 100; if (it.blocked) { it.blocked = false; it.blockReason = null; act(it.id, u.id, 'UNBLOCK', from, it.status, '提交验收/完成时自动清除阻塞标记') } break
     case 'REJECT': if (from !== 'IN_REVIEW') throw illegal(); if (!(it.acceptorId === u.id || m.role === 'LEADER')) throw err(403, 'FORBIDDEN', '只有验收人或组长可以打回'); needReason(); it.status = 'IN_PROGRESS'; break
-    case 'RELEASE': if (from !== 'NOT_STARTED' && from !== 'IN_PROGRESS') throw illegal(); if (!isOwner) throw err(403, 'FORBIDDEN', '只有负责人可以释放'); needReason(); it.status = 'UNCLAIMED'; it.ownerIds = []; it.assignedDirectly = false; it.blocked = false; it.blockReason = null; break
+    case 'RELEASE': if (from !== 'NOT_STARTED' && from !== 'IN_PROGRESS') throw illegal(); if (!isOwner) throw err(403, 'FORBIDDEN', '只有负责人可以释放'); needReason(); it.status = 'UNCLAIMED'; it.ownerIds = []; it.assignedDirectly = false; it.blocked = false; it.blockReason = null; it.progressPercent = 0; break
     case 'DECLINE':
       if (from !== 'NOT_STARTED') throw illegal()
       if (!it.assignedDirectly || !isOwner) throw err(403, 'FORBIDDEN', '只有被直接指派的负责人可以婉拒')
       needReason()
       if (progressList.some(p => p.itemId === it.id)) throw err(422, 'ILLEGAL_TRANSITION', '已登记过进展，不能婉拒，请使用释放')
-      it.status = 'UNCLAIMED'; it.ownerIds = []; it.assignedDirectly = false
+      it.status = 'UNCLAIMED'; it.ownerIds = []; it.assignedDirectly = false; it.progressPercent = 0
       notify(it.creatorId, teamId, 'ITEM_UPDATE', it, `${u.displayName} 婉拒了 ${it.code}：${body.reason}`, u.id); break
     case 'TRANSFER': {
       if (from === 'DONE' || from === 'CANCELLED') throw illegal()

@@ -44,6 +44,7 @@
             <p class="ktitle">{{it.title}}</p>
             <p v-if="it.type==='STORY' && it.storyCategory" class="kcat"><span class="tdot" :style="{background:STORY_CAT_META[it.storyCategory].color}"/>{{STORY_CAT_META[it.storyCategory].label}}故事</p>
             <p v-if="it.blocked" class="kblock"><OctagonAlert :size="14"/> <span>阻塞：{{it.blockReason}}</span></p>
+            <p v-if="it.rejected || readyMark(it) || (it.estimate==null && it.status==='IN_PROGRESS')" class="kmarks"><span v-if="it.rejected" class="mark red">已退回</span><span v-if="readyMark(it)" class="mark green">可提交验收</span><span v-if="it.estimate==null && it.status==='IN_PROGRESS'" class="mark amber">未估算</span></p>
             <ProgressBar v-if="showBar(it)" :value="barPct(it)" :color="barPct(it)>=100 ? 'var(--c-green)' : 'var(--theme)'"/>
             <div class="krow foot">
               <AvatarStack v-if="it.ownerIds.length" :ids="it.ownerIds" :size="22"/>
@@ -73,6 +74,7 @@ import { useBusy } from '../utils/busy'
 import AvatarStack from '../components/AvatarStack.vue'; import ProgressBar from '../components/ProgressBar.vue'; import SegmentedControl from '../components/SegmentedControl.vue'
 import { api, ApiError } from '../api/http'; import { TYPE_META, STORY_CAT_META, itemColor, estimateUnitLabel, type Item, type ItemStatus } from '../api/types'
 import { localToday } from '../utils/datetime'
+import { isPromptDismissed } from '../utils/progressPrompt'
 import { useTeam } from '../stores/team'; import { useAuth } from '../stores/auth'; import { useToast } from '../stores/toast'
 const team = useTeam(), auth = useAuth(), toast = useToast(), busy = useBusy()
 const items = ref<Item[]>([]), tasks = ref<Item[]>([]), loading = ref(false), loadErr = ref('')
@@ -119,6 +121,8 @@ function fmtDue(d:string){ const m = d.match(/^(\d+)-(\d+)-(\d+)$/); return m ? 
 function dueSuffix(it:Item){ const c = dueClass(it); return c==='over' ? ' · 已逾期' : c==='today' ? ' · 今天' : '' }
 function showBar(it:Item){ return it.status==='IN_PROGRESS' || it.status==='IN_REVIEW' || it.status==='DONE' }
 function barPct(it:Item){ return it.progressPercent }
+// 修订五 B：卡片小标记——「可提交验收」= 进度 100% 且进行中且用户已选过「暂不」（dismiss 存本地，见 utils/progressPrompt）
+function readyMark(it:Item){ return it.status==='IN_PROGRESS' && it.progressPercent>=100 && isPromptDismissed(it.id) }
 function dueClass(it:Item){ if(!it.dueDate || it.status==='DONE') return ''; const today=localToday(); return it.dueDate < today ? 'over' : it.dueDate === today ? 'today' : '' }
 function canQuickNudge(it:Item){ if (it.allowedActions) return it.allowedActions.includes('NUDGE'); return !!auth.user && !it.ownerIds.includes(auth.user.id) && ['NOT_STARTED','IN_PROGRESS','IN_REVIEW'].includes(it.status) }
 function canQuickKeep(it:Item){ if (it.allowedActions) return it.allowedActions.includes('PROGRESS'); return !!auth.user && it.ownerIds.includes(auth.user.id) && it.status==='IN_PROGRESS' }
@@ -153,7 +157,7 @@ async function onDrop(target:ItemStatus){ const it = dragItem(); dragOver.value=
 .switchrow{margin-left:auto}
 .switch{position:relative;width:48px;height:28px;flex:none;display:inline-block}.switch input{position:absolute;opacity:0;width:100%;height:100%;cursor:pointer;margin:0}
 .switch .tr{position:absolute;inset:0;border-radius:999px;background:var(--track);transition:background-color .2s;pointer-events:none}
-.switch .tr::after{content:"";position:absolute;top:2px;left:2px;width:24px;height:24px;border-radius:50%;background:#fff;box-shadow:0 2px 6px rgba(10,40,90,.28);transition:transform .2s}
+.switch .tr::after{content:"";position:absolute;top:2px;left:2px;width:24px;height:24px;border-radius:50%;background:var(--knob);box-shadow:var(--shadow-switch);transition:transform .2s}
 .switch input:checked + .tr{background:var(--c-green)}.switch input:checked + .tr::after{transform:translateX(20px)}
 .chk{display:inline-flex;gap:6px;align-items:center;font-size:13px}.chk input{width:17px;height:17px}
 .fld-sm{font-size:13px;display:inline-flex;gap:6px;align-items:center}.fld-sm select{min-height:32px;border-radius:9px;border:1px solid var(--field-brd);background:var(--field);padding:0 6px}
@@ -166,7 +170,7 @@ async function onDrop(target:ItemStatus){ const it = dragItem(); dragOver.value=
 .col.dim{opacity:.45}.col.over{outline:2px solid var(--theme)}
 .colhead{display:flex;align-items:baseline;gap:8px;padding:2px 6px 10px}.colhead .cnt{color:var(--text-2);font-size:13px}
 .cards{display:flex;flex-direction:column;gap:12px}
-.kcard{position:relative;background:var(--card);border:1px solid var(--card-brd,rgba(255,255,255,.65));border-left:4px solid var(--theme);border-radius:var(--r-card);box-shadow:0 1px 3px rgba(10,60,140,.07);padding:12px 14px 12px 18px;cursor:grab;text-align:left;width:100%;overflow:hidden}
+.kcard{position:relative;background:var(--card);border:1px solid var(--card-brd);border-left:4px solid var(--theme);border-radius:var(--r-card);box-shadow:var(--shadow-card-sm);padding:12px 14px 12px 18px;cursor:grab;text-align:left;width:100%;overflow:hidden}
 /* 拖拽期间降级：关阴影与过渡，减少重绘（M5 性能优化） */
 .board.dragging .kcard{box-shadow:none;transition:none}
 .board.dragging .kcard.dragging{box-shadow:var(--shadow-lift)}
@@ -176,12 +180,17 @@ async function onDrop(target:ItemStatus){ const it = dragItem(); dragOver.value=
 .ktitle{font-size:15px;font-weight:600;line-height:1.4;margin:7px 0;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden}
 .kcat{font-size:12px;color:var(--text-2);display:flex;gap:5px;align-items:center;margin:2px 0}
 .kblock{color:var(--c-red);font-size:12.5px;margin:4px 0;display:flex;gap:5px;align-items:center}
-.ptag{font-size:11px;font-weight:700;color:#0A5CD6;background:var(--sel);border-radius:6px;padding:1px 6px}
-.btag{font-size:11px;font-weight:600;color:#7D2CA8;background:rgba(175,82,222,.14);border-radius:6px;padding:1px 6px;display:inline-flex;gap:3px;align-items:center}
-.nudge{position:absolute;top:0;right:14px;background:var(--c-yellow);color:#5C4A00;font-size:11px;font-weight:700;padding:3px 8px;border-radius:0 0 9px 9px;display:inline-flex;gap:4px;align-items:center;box-shadow:0 3px 8px rgba(190,150,0,.3);z-index:1}
+.kmarks{display:flex;gap:5px;flex-wrap:wrap;margin:4px 0}
+.mark{font-size:11px;font-weight:700;padding:2px 8px;border-radius:999px}
+.mark.red{color:var(--danger-deep);background:var(--danger-soft)}
+.mark.green{color:var(--success-deep);background:var(--success-soft)}
+.mark.amber{color:var(--warn-deep);background:var(--warn-soft)}
+.ptag{font-size:11px;font-weight:700;color:var(--primary-deep);background:var(--sel);border-radius:6px;padding:1px 6px}
+.btag{font-size:11px;font-weight:600;color:var(--violet-deep);background:var(--violet-soft);border-radius:6px;padding:1px 6px;display:inline-flex;gap:3px;align-items:center}
+.nudge{position:absolute;top:0;right:14px;background:var(--c-yellow);color:var(--nudge-text);font-size:11px;font-weight:700;padding:3px 8px;border-radius:0 0 9px 9px;display:inline-flex;gap:4px;align-items:center;box-shadow:var(--shadow-nudge);z-index:var(--z-sticky)}
 .prio{font-size:13px;font-weight:700}.meta-ico{display:inline-flex;gap:4px;align-items:center;font-size:12px;color:var(--text-2)}.due{font-size:12px;color:var(--text-2);display:inline-flex;gap:4px;align-items:center}.due.over,.due.today{color:var(--c-red);font-weight:700}
 .qbtn{display:inline-flex;gap:3px;align-items:center;font-size:11.5px;font-weight:600;color:var(--text-2);background:var(--field);border:1px solid var(--field-brd);border-radius:99px;padding:3px 9px;min-height:26px}.qbtn:hover{color:var(--theme);border-color:var(--theme)}
 .empty{padding:10px 4px}
-.noiter{display:flex;gap:10px;align-items:center;background:rgba(255,204,0,.16);border:1px solid rgba(183,121,31,.4);border-radius:14px;padding:10px 14px;margin-bottom:12px;flex-wrap:wrap}.noiter .grow{flex:1}.nbtn{font-size:13px;font-weight:700;color:var(--theme);text-decoration:none}
+.noiter{display:flex;gap:10px;align-items:center;background:var(--warn-bg);border:1px solid var(--warn-brd-deep);border-radius:14px;padding:10px 14px;margin-bottom:12px;flex-wrap:wrap}.noiter .grow{flex:1}.nbtn{font-size:13px;font-weight:700;color:var(--theme);text-decoration:none}
 @media(max-width:820px){.col{width:78vw}}
 </style>

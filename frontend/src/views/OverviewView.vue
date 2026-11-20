@@ -32,7 +32,7 @@
   </GlassPanel>
 
   <GlassPanel class="panel" v-if="data?.canViewRisks">
-    <h3>AI 风险摘要 <AiBadge v-if="aiRisk" :ai-generated="aiGen"/></h3>
+    <h3><AiSpark :size="16"/> AI 风险摘要 <AiBadge v-if="aiRisk" :ai-generated="aiGen"/></h3>
     <template v-if="aiRisk">
       <div v-for="r in aiRisk" :key="r.itemId ?? r.itemCode ?? r.reason" class="airisk">
         <button class="press grow" :disabled="!r.itemId" @click="r.itemId && (openId=r.itemId, drawerOpen=true)"><b>{{r.itemCode}}</b> {{r.reason}}</button>
@@ -59,7 +59,7 @@
 <script setup lang="ts">
 import { ref, computed, onMounted } from 'vue'
 import AppShell from '../components/AppShell.vue'; import GlassPanel from '../components/GlassPanel.vue'; import AppButton from '../components/AppButton.vue'; import Avatar from '../components/Avatar.vue'; import ItemDrawer from '../components/ItemDrawer.vue'
-import AiBadge from '../components/AiBadge.vue'
+import AiSpark from '../components/AiSpark.vue'; import AiBadge from '../components/AiBadge.vue'
 import { api, ApiError } from '../api/http'; import { MEMBER_STATUS_META, type OverviewData, type RiskSignal } from '../api/types'
 import { useTeam } from '../stores/team'; import { useToast } from '../stores/toast'
 import { clampPct } from '../utils/progress'
@@ -84,9 +84,9 @@ async function scan(){ try { const r = await api.post(`/teams/${team.currentId}/
 .trow{display:grid;grid-template-columns:1.6fr 1fr .7fr .7fr .9fr .9fr .8fr;gap:10px;align-items:center;padding:9px 0;border-bottom:1px solid var(--field-brd);font-size:13.5px}
 .trow.thead{font-size:12px;color:var(--text-2);font-weight:600}
 .c1{display:flex;gap:8px;align-items:center;font-weight:600}
-.free{font-weight:700}.free.FREE{color:#1D7A3A}.free.BUSY{color:var(--text-2)}
-.sev{font-weight:700;margin:12px 0 4px}.sev.HIGH{color:var(--c-red)}.sev.MEDIUM{color:#B7791F}.sev.LOW{color:var(--text-2)}
+.free{font-weight:700}.free.FREE{color:var(--success-text)}.free.BUSY{color:var(--text-2)}
+.sev{font-weight:700;margin:12px 0 4px}.sev.HIGH{color:var(--c-red)}.sev.MEDIUM{color:var(--warn-text)}.sev.LOW{color:var(--text-2)}
 .risk{display:flex;gap:10px;align-items:center;width:100%;text-align:left;padding:8px 10px;border-radius:10px}.risk:hover{background:var(--hover)}.risk .grow{flex:1;font-weight:500}
-.rcat{font-size:11px;font-weight:700;background:rgba(255,59,48,.1);color:var(--c-red);border-radius:6px;padding:2px 7px;flex:none}
-.airisk{display:flex;gap:10px;align-items:center;padding:7px 0;border-bottom:1px solid var(--field-brd);flex-wrap:wrap}.airisk .grow{flex:1;text-align:left;font-weight:500}.airisk .sug{color:#3730A3}
+.rcat{font-size:11px;font-weight:700;background:var(--danger-bg);color:var(--c-red);border-radius:6px;padding:2px 7px;flex:none}
+.airisk{display:flex;gap:10px;align-items:center;padding:7px 0;border-bottom:1px solid var(--field-brd);flex-wrap:wrap}.airisk .grow{flex:1;text-align:left;font-weight:500}.airisk .sug{color:var(--indigo-deep)}
 </style>

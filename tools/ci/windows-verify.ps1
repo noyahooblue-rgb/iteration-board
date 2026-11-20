@@ -322,6 +322,21 @@ try {
     Check "P2c screenshot $shot exists" (Test-Path (Join-Path $Evidence "shots-f\$shot"))
   }
 
+  # ---------- P2d: Scenario R5 (revision 5: progress/status linkage
+  # + overlay geometry, 1.1.0) ----------
+  Phase 'P2d Scenario R5 (progress-status linkage + overlay geometry)'
+  $r5Log = Join-Path $Evidence 'p2d-scenario-r5.log'
+  Push-Location (Join-Path $env:GITHUB_WORKSPACE 'tools\windows-e2e')
+  try {
+    $env:IB_BASE = 'http://localhost:18080'
+    $env:IB_SHOTS = Join-Path $Evidence 'shots-r5'
+    & node e2e-scenario-r5.mjs *>> $r5Log
+    Check 'P2d Scenario R5 passed' ($LASTEXITCODE -eq 0)
+  } finally { Pop-Location }
+  foreach ($shot in 'R5-F-status-menu.png', 'R5-F-ready-mark.png', 'R5-H-task-prompt.png') {
+    Check "P2d screenshot $shot exists" (Test-Path (Join-Path $Evidence "shots-r5\$shot"))
+  }
+
   # ---------- P3: stop, backup-skip while stopped, start ----------
   Phase 'P3 stop / backup-skip / start'
   $code = Run-Bat $Root 'stop.bat' @('--no-pause') 'p3-stop.log'
@@ -465,6 +480,10 @@ try {
   }
   $code = Run-Bat $RootB 'migrate-import.bat' @("`"$migPkgArg`"", "`"$RootB`"", '--yes', '--no-pause') 'p13-import.log'
   Check 'P13 migrate-import.bat exit 0' ($code -eq 0)
+  foreach ($lf in @('app.log', 'IterationBoardApp.out.log', 'IterationBoardApp.wrapper.log')) {
+    $src = Join-Path $RootB "logs\$lf"
+    if (Test-Path $src) { Copy-Item $src (Join-Path $Evidence "p13b-$lf") -Force }
+  }
   $importLog = Get-Content (Join-Path $Evidence 'p13-import.log') -Raw -ErrorAction SilentlyContinue
   Check 'P13 import log: manifest hashes verified, no mismatch' ($importLog -match 'All files verified' -and $importLog -notmatch 'hash mismatch|Hash verification failed')
   Check 'P13 meta endpoint 200 on B after import' (Http-Ok 'http://localhost:18080/api/v1/meta')
@@ -591,7 +610,7 @@ if ($script:Failures.Count -gt 0) {
   if ($script:Failures -match 'P1 ') { Dump-Tail 'p1-install.log' }
   if ($script:Failures -match 'P1b') { Dump-Tail 'p1-install.log'; Dump-Tail 'p1b-stop.log'; Dump-Tail 'p1b-start.log' }
   if ($script:Failures -match 'P12') { Dump-Tail 'p12-stop.log'; Dump-Tail 'p12-start.log' }
-  if ($script:Failures -match 'P13') { Dump-Tail 'p13-install-b.log' 25; Dump-Tail 'p13-uninstall-a.log'; Dump-Tail 'p13-export.log'; Dump-Tail 'p13-pg-init.log' 25 }
+  if ($script:Failures -match 'P13') { Dump-Tail 'p13-install-b.log' 25; Dump-Tail 'p13-uninstall-a.log'; Dump-Tail 'p13-export.log'; Dump-Tail 'p13-pg-init.log' 25; Dump-Tail 'p13b-app.log' 30; Dump-Tail 'p13b-IterationBoardApp.out.log' 30 }
   if ($script:Failures -match 'P1b') {
     $p1log = Join-Path $Evidence 'p1-install.log'
     if (Test-Path $p1log) {
@@ -604,6 +623,7 @@ if ($script:Failures.Count -gt 0) {
   if ($script:Failures -match 'P2 ') { Dump-Tail 'p2-playwright.log' }
   if ($script:Failures -match 'P2b ') { Dump-Tail 'p2b-scenario-e.log' }
   if ($script:Failures -match 'P2c ') { Dump-Tail 'p2c-scenario-f.log' }
+  if ($script:Failures -match 'P2d') { Dump-Tail 'p2d-scenario-r5.log' 25 }
   if ($script:Failures -match 'P3 ') { Dump-Tail 'p3-stop.log' }
   if ($script:Failures -match 'P6 ') { Dump-Tail 'p6-upgrade.log' }
   if ($script:Failures -match 'P13') { Dump-Tail 'p13-import.log' }

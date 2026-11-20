@@ -1,7 +1,10 @@
 /* 设计系统变量：数值落设计口径
-   外观机制（M5）：主题三档由 <html data-theme> 控制——"light"/"dark" 为显式选择；
-   无 data-theme 时跟随系统（prefers-color-scheme）。玻璃强度 data-glass、减少透明度
-   data-reduce-transparency、减少动效 data-reduce-motion 均由 utils/appearance.ts 写入并持久化。 */
+   外观机制：<html data-theme> 由 utils/appearance.ts 写入「生效主题」——
+   light / dark（暮光蓝灰）/ graphite（石墨）；跟随系统在 JS 层解析为其一
+   （系统深色→dark、系统浅色→light），并监听系统变化。玻璃强度 data-glass、
+   减少透明度 data-reduce-transparency、减少动效 data-reduce-motion 同由该模块写入。
+   深色两主题按深色主题定稿的中性层与共用彩色落值；
+   石墨只换中性层，彩色与暮光蓝灰共用。浅色既有值保持不变，只补定稿令牌名映射。 */
 :root{
   --c-req:#007AFF; --c-task:#30B0C7; --c-defect:#FF2D55; --c-analysis:#AF52DE; --c-adhoc:#FF9500;
   --c-red:#FF3B30; --c-green:#34C759; --c-yellow:#FFCC00; --c-indigo:#5856D6;
@@ -15,39 +18,180 @@
   --lane-bg:rgba(255,255,255,.4); --lane-brd:rgba(255,255,255,.5); --col-bg:rgba(255,255,255,.28); --col-brd:rgba(255,255,255,.4);
   --shadow:0 18px 44px rgba(10,60,140,.18),0 3px 10px rgba(10,60,140,.10);
   --shadow-lift:0 12px 40px rgba(20,30,60,.20);
+  /* 修订五浮层规范：浮层实色背景/描边/阴影档位（禁止玻璃与 backdrop-filter） */
+  --bg-raised:#ffffff; --line:rgba(16,60,130,.16); --shadow-3:var(--shadow-lift);
+  /* 修订五 z-index 统一档位：页面 0 / 粘性 10 / 侧栏顶栏 20 / 抽屉 30 / 弹窗 40 / 浮层 50 / 提示条 60 */
+  --z-page:0; --z-sticky:10; --z-chrome:20; --z-drawer:30; --z-modal:40; --z-overlay:50; --z-toast:60;
   --r-panel:24px; --r-card:16px; --r-ctl:12px;
   --font:"InterVariable","Inter",-apple-system,"PingFang SC","Microsoft YaHei",sans-serif;
   --ease-spring:cubic-bezier(.32,1.35,.45,1); --ease-out:cubic-bezier(.2,.8,.25,1);
+  /* ===== 定稿令牌名（§3/§4）浅色映射：值与上方既有浅色令牌逐一等值，视觉不变 ===== */
+  --bg-base:#DCEBFF; --bg-card:#FFFFFF; --bg-hover:rgba(0,122,255,.08);
+  --text-1:#10233F;
+  --primary:#007AFF; --primary-btn:var(--theme); --primary-btn-hover:var(--theme); --primary-btn-active:var(--theme);
+  --primary-soft:rgba(0,122,255,.14);
+  --ai:#FFD60A; --ai-soft:rgba(255,214,10,.12); --ai-brd:rgba(255,214,10,.45);
+  --danger:#FF3B30; --unread:#FF3B30; --danger-bg-min:rgba(255,59,48,.06); --primary-soft-12:rgba(0,122,255,.12);
+  --glass-highlight:rgba(255,255,255,.9);
+  --ambient-1:rgba(0,122,255,.55); --ambient-2:rgba(48,176,199,.5); --ambient-3:rgba(88,86,214,.38);
+  --page-grad:linear-gradient(160deg,#BFD9FF 0%,#DCEBFF 42%,#CFE4FF 100%);
+  /* 状态色（§4）：浅色沿用既有标签配色（fg 深色字 / bg 同色低透明） */
+  --st-claim:rgba(16,35,63,.64); --st-claim-bg:rgba(16,60,130,.12);
+  --st-todo:#0A5CD6; --st-todo-bg:rgba(0,122,255,.14);
+  --st-doing:#0B6E80; --st-doing-bg:rgba(48,176,199,.18);
+  --st-review:#7D2CA8; --st-review-bg:rgba(175,82,222,.16);
+  --st-done:#177245; --st-done-bg:rgba(52,199,89,.16);
+  --st-cancel:rgba(16,35,63,.44); --st-cancel-bg:rgba(16,60,130,.12);
+  /* 分类标签（§4）：浅色沿用 STORY_CAT_META 既有值 */
+  --cat-dev:#30B0C7; --cat-analysis:#AF52DE; --cat-test:#00C7BE; --cat-other:#A2845E;
+  /* 语义色（组件写死色替换用）：浅色 = 替换前原值，深色 = 定稿提亮值 */
+  --primary-deep:#0A5CD6;
+  --violet-deep:#7D2CA8; --violet-soft:rgba(175,82,222,.14);
+  --indigo-deep:#3730A3; --indigo-soft:rgba(88,86,214,.14); --indigo-bg:rgba(88,86,214,.12); --indigo-bg-soft:rgba(88,86,214,.05); --indigo-bg-mid:rgba(88,86,214,.06);
+  --indigo-brd:rgba(88,86,214,.35); --indigo-brd-soft:rgba(88,86,214,.3);
+  --danger-deep:#B00020; --danger-soft:rgba(255,59,48,.14);
+  --danger-bg:rgba(255,59,48,.10); --danger-bg-soft:rgba(255,59,48,.08); --danger-bg-strong:rgba(255,59,48,.12);
+  --danger-brd:rgba(255,59,48,.35); --danger-brd-strong:rgba(255,59,48,.4); --danger-brd-soft:rgba(255,59,48,.3);
+  --success-deep:#0B6E2F; --success-text:#1D7A3A; --success-soft:rgba(52,199,89,.16);
+  --success-bg:rgba(52,199,89,.14); --success-bg-mid:rgba(52,199,89,.15); --success-bg-strong:rgba(52,199,89,.18);
+  --warn-deep:#8A6100; --warn-text:#B7791F; --warn-soft:rgba(255,204,0,.2);
+  --warn-bg-soft:rgba(255,204,0,.14); --warn-bg:rgba(255,204,0,.16); --warn-bg-strong:rgba(255,204,0,.18); --warn-bg-max:rgba(255,204,0,.25);
+  --warn-brd:rgba(230,180,0,.4); --warn-brd-strong:rgba(230,180,0,.45); --warn-brd-deep:rgba(183,121,31,.4); --amber-brd:rgba(160,120,0,.35);
+  --prio-1:#B25E00; --prio-1-bg:rgba(255,149,0,.18);
+  --nudge-text:#5C4A00; --halo-yellow:0 0 0 3px rgba(255,204,0,.25);
+  --focus-ring:rgba(0,122,255,.16);
+  --mask:rgba(8,25,55,.28); --mask-strong:rgba(8,25,55,.3);
+  --on-color:#FFFFFF; --knob:#FFFFFF; --strength-empty:#CCCCCC;
+  --card-brd:rgba(255,255,255,.65);
+  --shadow-card:0 4px 14px rgba(10,60,140,.08); --shadow-card-soft:0 4px 14px rgba(10,60,140,.06); --shadow-card-sm:0 1px 3px rgba(10,60,140,.07);
+  --shadow-seg:0 1px 5px rgba(10,60,140,.15); --shadow-seg-sm:0 1px 4px rgba(10,40,90,.18);
+  --shadow-switch:0 2px 6px rgba(10,40,90,.28); --shadow-knob:0 1px 4px rgba(0,0,0,.25);
+  --shadow-btn-primary:0 6px 16px rgba(0,122,255,.32),inset 0 1px 0 rgba(255,255,255,.35);
+  --shadow-btn-danger:0 6px 16px rgba(255,59,48,.3); --shadow-nav-on:0 6px 14px rgba(0,122,255,.3);
+  --shadow-mark:0 0 0 3px rgba(255,204,0,.25); --shadow-nudge:0 3px 8px rgba(190,150,0,.3);
+  --team-mark-grad:linear-gradient(140deg,#2E9BFF,#007AFF 60%,#5856D6); --team-mark-hi:inset 0 1px 0 rgba(255,255,255,.5);
 }
 /* 玻璃强度三档：通透 / 标准（默认）/ 磨砂——调不透明度与模糊半径 */
 :root[data-glass="clear"]{ --glass-alpha:.34; --glass-blur:10px }
 :root[data-glass="frosted"]{ --glass-alpha:.82; --glass-blur:30px }
 /* 减少透明度：玻璃与卡片改实底（模糊在 base.css 中同步关闭） */
 :root[data-reduce-transparency]{ --glass:var(--card-solid); --card:var(--card-solid) }
-/* 深色变量：显式深色，或跟随系统且系统为深色（浅色显式选择时不命中后者） */
+/* ===== 暮光蓝灰（深色默认，定稿 §3/§4） ===== */
 :root[data-theme="dark"]{
-  --c-req:#0A84FF; --c-task:#40CBE0; --c-defect:#FF375F; --c-analysis:#BF5AF2; --c-adhoc:#FF9F0A;
-  --c-red:#FF453A; --c-green:#30D158; --c-yellow:#FFD60A; --c-indigo:#5E5CE6; --theme:#0A84FF; --theme-soft:rgba(10,132,255,.18);
-  --bg:#0a1b38; --text:#EAF2FF; --text-2:rgba(234,242,255,.66); --text-3:rgba(234,242,255,.42);
-  --field:rgba(16,22,40,.6); --field-brd:rgba(160,195,255,.18); --track:rgba(180,205,255,.16); --glass-brd:rgba(160,195,255,.22); --glass-hi:rgba(190,215,255,.28); --hover:rgba(90,160,255,.12); --sel:rgba(90,160,255,.2);
-  --card:rgba(23,31,52,.86); --card-solid:#171f34; --fill:rgba(160,170,210,.14);
-  --glass-rgb:20,28,48; --glass-edge:rgba(255,255,255,.22); --separator:rgba(200,210,255,.16);
-  --lane-bg:rgba(16,24,44,.4); --lane-brd:rgba(160,195,255,.14); --col-bg:rgba(16,24,44,.32); --col-brd:rgba(160,195,255,.12);
-  --shadow:0 18px 44px rgba(0,0,10,.45),0 3px 10px rgba(0,0,10,.3);
+  --c-req:#409CFF; --c-task:#40CBE0; --c-defect:#FF375F; --c-analysis:#BF5AF2; --c-adhoc:#FF9F0A;
+  --c-red:#FF453A; --c-green:#30D158; --c-yellow:#FFD60A; --c-indigo:#5E5CE6; --theme:#409CFF; --theme-soft:rgba(64,156,255,.20);
+  --bg:#1A202B; --text:#F4F7FB; --text-2:#B7C1D1; --text-3:#8F9AAE;
+  --field:#3A4456; --field-brd:rgba(255,255,255,.12); --track:#3A4456; --glass-brd:rgba(255,255,255,.12); --glass-hi:rgba(255,255,255,.07); --hover:#3A4456; --sel:rgba(64,156,255,.20);
+  --card:#252D3B; --card-solid:#252D3B; --fill:rgba(255,255,255,.08);
+  --glass-rgb:44,54,72; --glass-alpha:.62; --glass-blur:24px; --glass-edge:rgba(255,255,255,.14); --separator:rgba(255,255,255,.10);
+  --lane-bg:rgba(26,32,43,.45); --lane-brd:rgba(255,255,255,.08); --col-bg:rgba(37,45,59,.5); --col-brd:rgba(255,255,255,.08);
+  --shadow:0 18px 44px rgba(0,0,0,.5),0 3px 10px rgba(0,0,0,.35);
   --shadow-lift:0 12px 40px rgba(0,0,0,.55);
+  --bg-raised:#2F3848; --line:rgba(255,255,255,.10);
+  --bg-base:#1A202B; --bg-card:#252D3B; --bg-hover:#3A4456;
+  --text-1:#F4F7FB;
+  --primary:#409CFF; --primary-btn:#0071E3; --primary-btn-hover:#0A7CF0; --primary-btn-active:#0062C4;
+  --primary-soft:rgba(64,156,255,.20);
+  --ai:#FFD60A; --ai-soft:rgba(255,214,10,.12); --ai-brd:rgba(255,214,10,.45);
+  --danger:#FF6961; --unread:#FF453A; --danger-bg-min:rgba(255,105,97,.08); --primary-soft-12:rgba(64,156,255,.16);
+  --glass-highlight:rgba(255,255,255,.07);
+  --ambient-1:rgba(74,144,226,.38); --ambient-2:rgba(43,181,200,.18); --ambient-3:rgba(43,181,200,.10);
+  --page-grad:linear-gradient(160deg,#1A202B 0%,#1A202B 100%);
+  --st-claim:#9E9BFF; --st-claim-bg:rgba(158,155,255,.20);
+  --st-todo:#B7C1D1; --st-todo-bg:rgba(183,193,209,.20);
+  --st-doing:#409CFF; --st-doing-bg:rgba(64,156,255,.20);
+  --st-review:#FF9F0A; --st-review-bg:rgba(255,159,10,.20);
+  --st-done:#30D158; --st-done-bg:rgba(48,209,88,.20);
+  --st-cancel:#8F9AAE; --st-cancel-bg:rgba(143,154,174,.20);
+  --cat-dev:#409CFF; --cat-analysis:#64D2FF; --cat-test:#30D158; --cat-other:#B7C1D1;
+  --primary-deep:#409CFF;
+  --violet-deep:#BF5AF2; --violet-soft:rgba(191,90,242,.20);
+  --indigo-deep:#9E9BFF; --indigo-soft:rgba(94,92,230,.22); --indigo-bg:rgba(94,92,230,.18); --indigo-bg-soft:rgba(94,92,230,.10); --indigo-bg-mid:rgba(94,92,230,.12);
+  --indigo-brd:rgba(94,92,230,.5); --indigo-brd-soft:rgba(94,92,230,.45);
+  --danger-deep:#FF6961; --danger-soft:rgba(255,105,97,.20);
+  --danger-bg:rgba(255,105,97,.14); --danger-bg-soft:rgba(255,105,97,.10); --danger-bg-strong:rgba(255,105,97,.16);
+  --danger-brd:rgba(255,105,97,.45); --danger-brd-strong:rgba(255,105,97,.5); --danger-brd-soft:rgba(255,105,97,.4);
+  --success-deep:#30D158; --success-text:#30D158; --success-soft:rgba(48,209,88,.20);
+  --success-bg:rgba(48,209,88,.18); --success-bg-mid:rgba(48,209,88,.18); --success-bg-strong:rgba(48,209,88,.22);
+  --warn-deep:#FF9F0A; --warn-text:#FF9F0A; --warn-soft:rgba(255,159,10,.20);
+  --warn-bg-soft:rgba(255,159,10,.12); --warn-bg:rgba(255,159,10,.14); --warn-bg-strong:rgba(255,159,10,.16); --warn-bg-max:rgba(255,159,10,.22);
+  --warn-brd:rgba(255,159,10,.45); --warn-brd-strong:rgba(255,159,10,.5); --warn-brd-deep:rgba(255,159,10,.45); --amber-brd:rgba(255,159,10,.4);
+  --prio-1:#FF9F0A; --prio-1-bg:rgba(255,159,10,.20);
+  --nudge-text:#5C4A00; --halo-yellow:0 0 0 3px rgba(255,214,10,.25);
+  --focus-ring:rgba(64,156,255,.28);
+  --mask:rgba(0,0,0,.5); --mask-strong:rgba(0,0,0,.55);
+  --on-color:#FFFFFF; --knob:#FFFFFF; --strength-empty:#3A4456;
+  --card-brd:rgba(255,255,255,.10);
+  --shadow-card:0 4px 14px rgba(0,0,0,.35); --shadow-card-soft:0 4px 14px rgba(0,0,0,.3); --shadow-card-sm:0 1px 3px rgba(0,0,0,.3);
+  --shadow-seg:0 1px 5px rgba(0,0,0,.4); --shadow-seg-sm:0 1px 4px rgba(0,0,0,.4);
+  --shadow-switch:0 2px 6px rgba(0,0,0,.45); --shadow-knob:0 1px 4px rgba(0,0,0,.45);
+  --shadow-btn-primary:0 6px 16px rgba(0,113,227,.4),inset 0 1px 0 rgba(255,255,255,.25);
+  --shadow-btn-danger:0 6px 16px rgba(255,105,97,.3); --shadow-nav-on:0 6px 14px rgba(0,113,227,.35);
+  --shadow-mark:0 0 0 3px rgba(255,214,10,.22); --shadow-nudge:0 3px 8px rgba(0,0,0,.35);
+  --team-mark-grad:linear-gradient(140deg,#409CFF,#0071E3 60%,#5E5CE6); --team-mark-hi:inset 0 1px 0 rgba(255,255,255,.35);
 }
-@media (prefers-color-scheme: dark){
-  :root:not([data-theme="light"]){
-    --c-req:#0A84FF; --c-task:#40CBE0; --c-defect:#FF375F; --c-analysis:#BF5AF2; --c-adhoc:#FF9F0A;
-    --c-red:#FF453A; --c-green:#30D158; --c-yellow:#FFD60A; --c-indigo:#5E5CE6; --theme:#0A84FF; --theme-soft:rgba(10,132,255,.18);
-    --bg:#0a1b38; --text:#EAF2FF; --text-2:rgba(234,242,255,.66); --text-3:rgba(234,242,255,.42);
-    --field:rgba(16,22,40,.6); --field-brd:rgba(160,195,255,.18); --track:rgba(180,205,255,.16); --glass-brd:rgba(160,195,255,.22); --glass-hi:rgba(190,215,255,.28); --hover:rgba(90,160,255,.12); --sel:rgba(90,160,255,.2);
-    --card:rgba(23,31,52,.86); --card-solid:#171f34; --fill:rgba(160,170,210,.14);
-    --glass-rgb:20,28,48; --glass-edge:rgba(255,255,255,.22); --separator:rgba(200,210,255,.16);
-    --lane-bg:rgba(16,24,44,.4); --lane-brd:rgba(160,195,255,.14); --col-bg:rgba(16,24,44,.32); --col-brd:rgba(160,195,255,.12);
-    --shadow:0 18px 44px rgba(0,0,10,.45),0 3px 10px rgba(0,0,10,.3);
-    --shadow-lift:0 12px 40px rgba(0,0,0,.55);
+/* ===== 石墨（定稿 §3 中性层；彩色与暮光蓝灰共用，故在本块之后仅覆中性层） ===== */
+:root[data-theme="graphite"]{
+  --c-req:#409CFF; --c-task:#40CBE0; --c-defect:#FF375F; --c-analysis:#BF5AF2; --c-adhoc:#FF9F0A;
+  --c-red:#FF453A; --c-green:#30D158; --c-yellow:#FFD60A; --c-indigo:#5E5CE6; --theme:#409CFF; --theme-soft:rgba(64,156,255,.20);
+  --bg:#1C1C1E; --text:#F5F5F7; --text-2:#BCBCC4; --text-3:#8E8E96;
+  --field:#48484A; --field-brd:rgba(255,255,255,.12); --track:#48484A; --glass-brd:rgba(255,255,255,.12); --glass-hi:rgba(255,255,255,.07); --hover:#48484A; --sel:rgba(64,156,255,.20);
+  --card:#2C2C2E; --card-solid:#2C2C2E; --fill:rgba(255,255,255,.08);
+  --glass-rgb:50,50,54; --glass-alpha:.66; --glass-blur:24px; --glass-edge:rgba(255,255,255,.14); --separator:rgba(255,255,255,.10);
+  --lane-bg:rgba(28,28,30,.45); --lane-brd:rgba(255,255,255,.08); --col-bg:rgba(44,44,46,.5); --col-brd:rgba(255,255,255,.08);
+  --shadow:0 18px 44px rgba(0,0,0,.5),0 3px 10px rgba(0,0,0,.35);
+  --shadow-lift:0 12px 40px rgba(0,0,0,.55);
+  --bg-raised:#3A3A3C; --line:rgba(255,255,255,.10);
+  --bg-base:#1C1C1E; --bg-card:#2C2C2E; --bg-hover:#48484A;
+  --text-1:#F5F5F7;
+  --primary:#409CFF; --primary-btn:#0071E3; --primary-btn-hover:#0A7CF0; --primary-btn-active:#0062C4;
+  --primary-soft:rgba(64,156,255,.20);
+  --ai:#FFD60A; --ai-soft:rgba(255,214,10,.12); --ai-brd:rgba(255,214,10,.45);
+  --danger:#FF6961; --unread:#FF453A; --danger-bg-min:rgba(255,105,97,.08); --primary-soft-12:rgba(64,156,255,.16);
+  --glass-highlight:rgba(255,255,255,.07);
+  --ambient-1:rgba(59,130,246,.22); --ambient-2:rgba(94,92,230,.10); --ambient-3:rgba(94,92,230,.06);
+  --page-grad:linear-gradient(160deg,#1C1C1E 0%,#1C1C1E 100%);
+  --st-claim:#9E9BFF; --st-claim-bg:rgba(158,155,255,.20);
+  --st-todo:#BCBCC4; --st-todo-bg:rgba(188,188,196,.20);
+  --st-doing:#409CFF; --st-doing-bg:rgba(64,156,255,.20);
+  --st-review:#FF9F0A; --st-review-bg:rgba(255,159,10,.20);
+  --st-done:#30D158; --st-done-bg:rgba(48,209,88,.20);
+  --st-cancel:#8F9AAE; --st-cancel-bg:rgba(143,154,174,.20);
+  --cat-dev:#409CFF; --cat-analysis:#64D2FF; --cat-test:#30D158; --cat-other:#B7C1D1;
+  --primary-deep:#409CFF;
+  --violet-deep:#BF5AF2; --violet-soft:rgba(191,90,242,.20);
+  --indigo-deep:#9E9BFF; --indigo-soft:rgba(94,92,230,.22); --indigo-bg:rgba(94,92,230,.18); --indigo-bg-soft:rgba(94,92,230,.10); --indigo-bg-mid:rgba(94,92,230,.12);
+  --indigo-brd:rgba(94,92,230,.5); --indigo-brd-soft:rgba(94,92,230,.45);
+  --danger-deep:#FF6961; --danger-soft:rgba(255,105,97,.20);
+  --danger-bg:rgba(255,105,97,.14); --danger-bg-soft:rgba(255,105,97,.10); --danger-bg-strong:rgba(255,105,97,.16);
+  --danger-brd:rgba(255,105,97,.45); --danger-brd-strong:rgba(255,105,97,.5); --danger-brd-soft:rgba(255,105,97,.4);
+  --success-deep:#30D158; --success-text:#30D158; --success-soft:rgba(48,209,88,.20);
+  --success-bg:rgba(48,209,88,.18); --success-bg-mid:rgba(48,209,88,.18); --success-bg-strong:rgba(48,209,88,.22);
+  --warn-deep:#FF9F0A; --warn-text:#FF9F0A; --warn-soft:rgba(255,159,10,.20);
+  --warn-bg-soft:rgba(255,159,10,.12); --warn-bg:rgba(255,159,10,.14); --warn-bg-strong:rgba(255,159,10,.16); --warn-bg-max:rgba(255,159,10,.22);
+  --warn-brd:rgba(255,159,10,.45); --warn-brd-strong:rgba(255,159,10,.5); --warn-brd-deep:rgba(255,159,10,.45); --amber-brd:rgba(255,159,10,.4);
+  --prio-1:#FF9F0A; --prio-1-bg:rgba(255,159,10,.20);
+  --nudge-text:#5C4A00; --halo-yellow:0 0 0 3px rgba(255,214,10,.25);
+  --focus-ring:rgba(64,156,255,.28);
+  --mask:rgba(0,0,0,.5); --mask-strong:rgba(0,0,0,.55);
+  --on-color:#FFFFFF; --knob:#FFFFFF; --strength-empty:#48484A;
+  --card-brd:rgba(255,255,255,.10);
+  --shadow-card:0 4px 14px rgba(0,0,0,.35); --shadow-card-soft:0 4px 14px rgba(0,0,0,.3); --shadow-card-sm:0 1px 3px rgba(0,0,0,.3);
+  --shadow-seg:0 1px 5px rgba(0,0,0,.4); --shadow-seg-sm:0 1px 4px rgba(0,0,0,.4);
+  --shadow-switch:0 2px 6px rgba(0,0,0,.45); --shadow-knob:0 1px 4px rgba(0,0,0,.45);
+  --shadow-btn-primary:0 6px 16px rgba(0,113,227,.4),inset 0 1px 0 rgba(255,255,255,.25);
+  --shadow-btn-danger:0 6px 16px rgba(255,105,97,.3); --shadow-nav-on:0 6px 14px rgba(0,113,227,.35);
+  --shadow-mark:0 0 0 3px rgba(255,214,10,.22); --shadow-nudge:0 3px 8px rgba(0,0,0,.35);
+  --team-mark-grad:linear-gradient(140deg,#409CFF,#0071E3 60%,#5E5CE6); --team-mark-hi:inset 0 1px 0 rgba(255,255,255,.35);
+}
+:root[data-theme="dark"][data-reduce-transparency], :root[data-theme="graphite"][data-reduce-transparency]{ --glass:var(--card-solid); --card:var(--card-solid) }
+/* 打印一律浅色（定稿 §5）：强制浅色令牌 + 去氛围光/玻璃 */
+@media print{
+  :root{
+    --bg:#FFFFFF; --bg-base:#FFFFFF; --bg-card:#FFFFFF; --card:#FFFFFF; --card-solid:#FFFFFF; --bg-raised:#FFFFFF;
+    --text:#10233F; --text-1:#10233F; --text-2:rgba(16,35,63,.64); --text-3:rgba(16,35,63,.44);
+    --line:rgba(16,60,130,.16); --field-brd:rgba(16,60,130,.14); --separator:rgba(60,60,90,.14);
+    --glass:#FFFFFF; --field:#FFFFFF; --track:rgba(16,60,130,.12); --hover:rgba(0,122,255,.08); --sel:rgba(0,122,255,.14);
+    --shadow:none; --shadow-lift:none; --shadow-card:none; --shadow-card-soft:none; --shadow-card-sm:none;
   }
-  :root[data-reduce-transparency]:not([data-theme="light"]){ --glass:var(--card-solid); --card:var(--card-solid) }
 }
-:root[data-theme="dark"][data-reduce-transparency]{ --glass:var(--card-solid); --card:var(--card-solid) }

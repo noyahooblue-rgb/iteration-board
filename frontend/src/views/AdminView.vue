@@ -126,7 +126,7 @@ void teamStore
 <style scoped>
 .tabs{display:flex;gap:4px;margin-bottom:12px}
 .tab{padding:8px 16px;border-radius:11px;font-weight:500;color:var(--text-2);min-height:40px}
-.tab.on{background:var(--theme);color:#fff;font-weight:600}
+.tab.on{background:var(--theme);color:var(--on-color);font-weight:600}
 .body{padding:18px 20px}
 .tbl{width:100%;border-collapse:collapse;font-size:13.5px}
 .tbl th{text-align:left;color:var(--text-2);font-weight:600;padding:8px 10px;border-bottom:1px solid var(--field-brd);white-space:nowrap}
@@ -135,5 +135,5 @@ void teamStore
 .err{color:var(--c-red);font-size:13px;margin-bottom:8px}
 .pager{display:flex;gap:10px;align-items:center;margin-top:12px}
 .acts{display:flex;gap:6px;flex-wrap:wrap}
-.lan{display:inline-block;background:var(--sel);color:#0A5CD6;border-radius:8px;padding:3px 10px;font-weight:600;margin-right:8px}
+.lan{display:inline-block;background:var(--sel);color:var(--primary-deep);border-radius:8px;padding:3px 10px;font-weight:600;margin-right:8px}
 </style>

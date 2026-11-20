@@ -42,7 +42,7 @@
           <text :x="W-PAD/2" :y="H-8" text-anchor="end" class="svg-t">{{selected.endDate}}</text>
           <text :x="4" :y="PAD/2+4" class="svg-t">{{maxY}}</text>
         </svg>
-        <p class="tiny">实线为每日剩余估算（快照＋当天实时点），虚线为理想线（按工作日线性降至结束日 0）。快照每晚 23:30 自动记录，也可在下方手动补记。</p>
+        <p class="tiny">实线为每日剩余估算（快照＋当天实时点），虚线为理想线（按工作日线性降至结束日 0）。快照每晚 23:30 自动记录，也可在下方手动补记。燃尽图只认状态：只有状态变为「已完成」的事项才算烧掉，不看进度百分比——进度拖到 100% 但还没提交验收的事项仍计入剩余。</p>
         <AppButton variant="ghost" @click="snapshotNow">立即补记今日快照</AppButton>
       </GlassPanel>
 
@@ -201,24 +201,24 @@ async function createAndStartNext(){ if (!nextForm.name.trim()) { toast.show('�
 .filters{border-radius:var(--r-card);padding:10px 14px;display:flex;gap:14px;align-items:center;margin-bottom:14px}
 .layout{display:grid;grid-template-columns:280px 1fr;gap:14px;align-items:start}
 .list{display:flex;flex-direction:column;gap:10px}
-.icard{text-align:left;background:var(--card);border:1px solid rgba(255,255,255,.65);border-radius:var(--r-card);padding:12px 14px;box-shadow:0 4px 14px rgba(10,60,140,.06)}
+.icard{text-align:left;background:var(--card);border:1px solid var(--card-brd);border-radius:var(--r-card);padding:12px 14px;box-shadow:var(--shadow-card-soft)}
 .icard.on{outline:2px solid var(--theme)}
 .irow{display:flex;align-items:center;gap:10px}.irow h2{font-size:17px}
 .chip{font-size:11.5px;font-weight:700;border-radius:99px;padding:2px 9px;background:var(--track);color:var(--text-2)}
-.chip.ACTIVE{background:rgba(52,199,89,.18);color:#1D7A3A}.chip.FINISHED{background:var(--sel);color:#0A5CD6}
+.chip.ACTIVE{background:var(--success-bg-strong);color:var(--success-text)}.chip.FINISHED{background:var(--sel);color:var(--primary-deep)}
 .goal{display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden}
 .detail{display:flex;flex-direction:column;gap:14px;min-width:0}
 .dhead,.chart,.keys,.items{padding:16px 18px}
 .stats{display:flex;gap:16px;margin-top:10px;font-size:13px;color:var(--text-2);flex-wrap:wrap}
 .burn{width:100%;height:auto;margin-top:8px}
-.axis{stroke:var(--field-brd);stroke-width:1}
+.axis{stroke:var(--line);stroke-width:1}
 .ideal{fill:none;stroke:var(--text-3);stroke-width:2;stroke-dasharray:6 5}
 .actual{fill:none;stroke:var(--theme);stroke-width:2.5}
 .dot{fill:var(--theme)}
 .svg-t{font-size:11px;fill:var(--text-3)}
 .kdrow{display:flex;align-items:center;gap:10px;padding:8px 0;border-bottom:1px solid var(--field-brd)}
-.kdcat{font-size:11px;font-weight:700;border-radius:6px;padding:2px 7px;background:var(--sel);color:#0A5CD6}
-.kdcat.FREEZE{background:rgba(0,122,255,.14)}.kdcat.RELEASE{background:rgba(52,199,89,.16);color:#1D7A3A}.kdcat.REVIEW{background:rgba(175,82,222,.14);color:#7D2CA8}
+.kdcat{font-size:11px;font-weight:700;border-radius:6px;padding:2px 7px;background:var(--sel);color:var(--primary-deep)}
+.kdcat.FREEZE{background:var(--primary-soft)}.kdcat.RELEASE{background:var(--success-soft);color:var(--success-text)}.kdcat.REVIEW{background:var(--violet-soft);color:var(--violet-deep)}
 .foot-row{display:flex;gap:10px;align-items:center;flex-wrap:wrap}.flexin{flex:1;min-height:40px;border:1px solid var(--field-brd);border-radius:10px;background:var(--field);padding:6px 10px;min-width:120px}
 .iitem{display:flex;align-items:center;gap:10px;width:100%;text-align:left;padding:9px 10px;border-radius:11px}.iitem:hover{background:var(--hover)}.iitem .grow{flex:1;font-weight:500}
 .tdot{width:8px;height:8px;border-radius:50%;flex:none}

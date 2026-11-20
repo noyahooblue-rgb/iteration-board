@@ -25,6 +25,7 @@
           <div class="krow"><span class="small">{{it.code}}</span><span v-if="it.batchId" class="btag">批次</span><span style="flex:1"/><span class="prio">{{it.priority}}</span></div>
           <button class="ktitle press" @click="openId=it.id;drawerOpen=true">{{it.title}}</button>
           <p v-if="it.blocked" class="kblock"><OctagonAlert :size="14"/> 阻塞：{{it.blockReason}}</p>
+          <p v-if="it.rejected || readyMark(it) || (it.estimate==null && it.status==='IN_PROGRESS')" class="kmarks"><span v-if="it.rejected" class="mark red">已退回</span><span v-if="readyMark(it)" class="mark green">可提交验收</span><span v-if="it.estimate==null && it.status==='IN_PROGRESS'" class="mark amber">未估算</span></p>
           <ProgressBar v-if="it.status==='IN_PROGRESS'||it.status==='IN_REVIEW'" :value="it.progressPercent" style="margin:6px 0"/>
           <p class="tiny">上次更新：{{it.lastProgressAt ? fmt(it.lastProgressAt) : '暂无'}}<span v-if="it.dueDate"> · 截止 {{fmtDue(it.dueDate)}}</span></p>
           <div class="acts">
@@ -81,6 +82,8 @@ import AppShell from '../components/AppShell.vue'; import GlassPanel from '../co
 import QuickUpdateBox from '../components/QuickUpdateBox.vue'
 import { api, ApiError, apiMode } from '../api/http'; import { itemColor, type Item } from '../api/types'
 import { fmtDateTime, localToday } from '../utils/datetime'
+import { isPromptDismissed } from '../utils/progressPrompt'
+function readyMark(it:Item){ return it.status==='IN_PROGRESS' && it.progressPercent>=100 && isPromptDismissed(it.id) }
 import { useTeam } from '../stores/team'; import { useAuth } from '../stores/auth'; import { useToast } from '../stores/toast'
 const team = useTeam(), auth = useAuth(), toast = useToast()
 const items = ref<Item[]>([]), quickText = ref(''), quickNote = ref('')
@@ -126,20 +129,25 @@ function quickSubmit(){ if (!quickText.value.trim()) return
 .hello .grow{flex:1}.hello h2{font-size:20px}
 .quick{border-radius:16px;padding:10px 12px;display:flex;gap:10px;align-items:center}
 .quick input{flex:1;min-height:42px;border:0;background:transparent;outline:none;font-size:15px;min-width:0}
-.note{background:rgba(88,86,214,.12);border:1px solid rgba(88,86,214,.35);border-radius:12px;padding:9px 13px;font-size:13px;margin-top:10px}
+.note{background:var(--indigo-bg);border:1px solid var(--indigo-brd);border-radius:12px;padding:9px 13px;font-size:13px;margin-top:10px}
 .layout{display:grid;grid-template-columns:1fr 320px;gap:16px;margin-top:14px;align-items:start}
 .gsec{margin-bottom:18px}.gsec h2{font-size:16px;margin-bottom:10px}
-.kcard{position:relative;background:var(--card);border:1px solid rgba(255,255,255,.65);border-left:4px solid var(--theme);border-radius:var(--r-card);box-shadow:0 4px 14px rgba(10,60,140,.08);padding:12px 14px 12px 18px;margin-bottom:10px;overflow:hidden}
-.nudge{position:absolute;top:0;right:14px;background:var(--c-yellow);color:#5C4A00;font-size:11px;font-weight:700;padding:3px 8px;border-radius:0 0 9px 9px;display:inline-flex;gap:4px;align-items:center}
+.kcard{position:relative;background:var(--card);border:1px solid var(--card-brd);border-left:4px solid var(--theme);border-radius:var(--r-card);box-shadow:var(--shadow-card);padding:12px 14px 12px 18px;margin-bottom:10px;overflow:hidden}
+.nudge{position:absolute;top:0;right:14px;background:var(--c-yellow);color:var(--nudge-text);font-size:11px;font-weight:700;padding:3px 8px;border-radius:0 0 9px 9px;display:inline-flex;gap:4px;align-items:center}
 .krow{display:flex;align-items:center;gap:6px}.prio{font-size:13px;font-weight:700}
-.btag{font-size:11px;font-weight:600;color:#7D2CA8;background:rgba(175,82,222,.14);border-radius:6px;padding:1px 6px}
+.btag{font-size:11px;font-weight:600;color:var(--violet-deep);background:var(--violet-soft);border-radius:6px;padding:1px 6px}
 .ktitle{display:block;font-size:15px;font-weight:600;line-height:1.4;margin:6px 0;text-align:left}
 .kblock{color:var(--c-red);font-size:12.5px;display:flex;gap:5px;align-items:center}
+.kmarks{display:flex;gap:5px;flex-wrap:wrap;margin:4px 0}
+.mark{font-size:11px;font-weight:700;padding:2px 8px;border-radius:999px}
+.mark.red{color:var(--danger-deep);background:var(--danger-soft)}
+.mark.green{color:var(--success-deep);background:var(--success-soft)}
+.mark.amber{color:var(--warn-deep);background:var(--warn-soft)}
 .acts{display:flex;gap:8px;margin-top:9px;flex-wrap:wrap}
 .empty{padding:4px 2px}
 .side{display:flex;flex-direction:column;gap:12px}
 .spanel{padding:14px 16px}.spanel h3{display:flex;gap:7px;align-items:center;font-size:14.5px;margin-bottom:8px}
-.spanel.warn{background:rgba(255,204,0,.14)}
+.spanel.warn{background:var(--warn-bg-soft)}
 .srow{display:flex;gap:8px;align-items:center;width:100%;text-align:left;padding:7px 6px;border-radius:9px}.srow:hover{background:var(--hover)}.srow .grow{flex:1;font-size:13.5px}
 .over{color:var(--c-red);font-weight:700}
 @media(max-width:1000px){.layout{grid-template-columns:1fr}}

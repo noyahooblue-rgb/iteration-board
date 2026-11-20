@@ -76,14 +76,14 @@ void auth
 <style scoped>
 .fhead{display:flex;align-items:center;gap:10px}.fhead h2{font-size:18px}
 .icon{width:36px;height:36px;display:grid;place-items:center;border-radius:10px;background:var(--fill)}
-.warn{margin-top:10px;background:rgba(255,204,0,.16);border:1px solid rgba(230,180,0,.4);border-radius:10px;padding:8px 12px;font-size:13px}
+.warn{margin-top:10px;background:var(--warn-bg);border:1px solid var(--warn-brd);border-radius:10px;padding:8px 12px;font-size:13px}
 .fld{display:block;font-size:12px;color:var(--text-2);margin-top:12px}
 .fld textarea{width:100%;margin-top:6px;padding:9px 12px;border-radius:var(--r-ctl);border:1px solid var(--separator);background:var(--fill);resize:vertical;font-size:14px;color:var(--text)}
 .types{display:flex;gap:8px;margin-top:6px}.tp{padding:7px 14px;border-radius:999px;border:1.5px solid var(--separator);font-weight:600;background:var(--card);color:var(--text)}
 .tp.on{border-color:var(--theme);background:var(--theme-soft);color:var(--theme)}
 .imgs{display:flex;gap:8px;flex-wrap:wrap;margin-top:6px}
 .imchip{display:inline-flex;gap:6px;align-items:center;border:1px solid var(--field-brd);background:var(--field);border-radius:10px;padding:4px 8px 4px 4px;font-size:12px;max-width:220px}
-.imchip img{width:30px;height:30px;object-fit:cover;border-radius:7px}
+.imchip img{width:30px;height:30px;object-fit:cover;border-radius:7px;border:1px solid var(--line)}
 .imname{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 .addimg{display:inline-flex;align-items:center;border:1.5px dashed var(--separator);border-radius:10px;padding:7px 12px;font-size:13px;font-weight:600;color:var(--theme);cursor:pointer}
 .foot{display:flex;gap:10px;align-items:center;margin-top:16px}

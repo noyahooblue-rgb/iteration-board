@@ -1,6 +1,6 @@
 <template>
   <GlassPanel class="qu">
-    <div class="qhead"><Sparkles :size="16" class="indigo"/><b>一句话更新</b><span class="tiny">说一句你负责事项的进展，AI 帮你对上号</span></div>
+    <div class="qhead"><AiSpark :size="16"/><b>一句话更新</b><span class="tiny">说一句你负责事项的进展，AI 帮你对上号</span></div>
     <template v-if="ai.featureOn('quickUpdate')">
       <div class="qrow">
         <input v-model="text" class="flexin grow" placeholder="如：登录页切图做到 80% 了 / 导出分页修复完成了" @keyup.enter="submit"/>
@@ -46,7 +46,7 @@
 <script setup lang="ts">
 // 契约 0.5.0：一句话更新解析返回 {actions: QuickAction[], unmatched: string[]}；确认走 apply 发 {actions}（带 Idempotency-Key），返回 {results:[{kind,itemId,ok}]}。
 import { ref, reactive } from 'vue'
-import { Sparkles } from 'lucide-vue-next'
+import AiSpark from './AiSpark.vue'
 import GlassPanel from './GlassPanel.vue'; import AppButton from './AppButton.vue'
 import { api, ApiError, newIdempotencyKey } from '../api/http'; import type { QuickAction } from '../api/types'
 import { useTeam } from '../stores/team'; import { useToast } from '../stores/toast'; import { useAi } from '../stores/ai'
@@ -73,15 +73,15 @@ async function applyAll(){ await busy.wrap('apply', async () => {
 </script>
 <style scoped>
 .qu{padding:14px 16px;margin-bottom:14px}
-.qhead{display:flex;gap:8px;align-items:center;margin-bottom:10px}.indigo{color:#5856D6}
+.qhead{display:flex;gap:8px;align-items:center;margin-bottom:10px}.indigo{color:var(--c-indigo)}
 .qrow{display:flex;gap:8px;align-items:center;flex-wrap:wrap}.grow{flex:1}
 .flexin{min-height:40px;border:1px solid var(--field-brd);border-radius:10px;background:var(--field);padding:6px 10px}
-.qcard{border:1px solid rgba(88,86,214,.3);background:rgba(88,86,214,.06);border-radius:12px;padding:10px 12px;margin-top:8px}
+.qcard{border:1px solid var(--indigo-brd-soft);background:var(--indigo-bg-mid);border-radius:12px;padding:10px 12px;margin-top:8px}
 .crow{display:flex;gap:8px;align-items:center}
 .mini{font-size:12px;color:var(--text-2);font-weight:600}
 .numin{width:64px;min-height:30px;border:1px solid var(--field-brd);border-radius:8px;background:var(--field);padding:2px 6px}
 .chip{border:1px solid var(--field-brd);background:var(--field);border-radius:999px;padding:5px 11px;font-size:12.5px;font-weight:500}
-.chip.on{border-color:#5856D6;background:rgba(88,86,214,.14);color:#3730A3}
+.chip.on{border-color:var(--c-indigo);background:var(--indigo-soft);color:var(--indigo-deep)}
 .chk{display:inline-flex;gap:6px;align-items:center;margin-top:6px;margin-right:14px}
 .una{color:var(--text-2)}
 </style>

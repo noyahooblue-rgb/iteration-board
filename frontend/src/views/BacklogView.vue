@@ -60,7 +60,7 @@ function newStory(t: Item){ ui.createPreset = { type: 'STORY', parentId: t.id };
 .thead{display:flex;align-items:center;gap:10px;width:100%;text-align:left;padding:9px 4px;flex-wrap:wrap}
 .thead .rot{transform:rotate(-90deg)}.thead svg{transition:transform .2s}
 .bar{width:4px;height:22px;border-radius:2px;flex:none}.code{color:var(--theme);font-weight:700}.grow{flex:1}
-.tpill{font-size:12px;font-weight:600;background:var(--sel);color:#0A5CD6;padding:2px 9px;border-radius:999px}
+.tpill{font-size:12px;font-weight:600;background:var(--sel);color:var(--primary-deep);padding:2px 9px;border-radius:999px}
 .stories{border-top:1px solid var(--field-brd);padding:8px 2px}
 .srow{display:flex;align-items:center;gap:9px;width:100%;text-align:left;padding:8px 10px;border-radius:11px}.srow:hover{background:var(--hover)}
 .tdot{width:8px;height:8px;border-radius:50%;flex:none}

@@ -49,7 +49,7 @@ this.teamRepo = teamRepo;
 public record NewStoryInput(String title, StoryCategory storyCategory) {}
 public record Extras(Long replaceUserId, List<Long> reopenItemIds, List<NewStoryInput> newStories) {}
 
-public enum Action { CLAIM, START, SUBMIT, APPROVE, REJECT, RELEASE, TRANSFER, DECLINE, CANCEL, REOPEN}
+public enum Action { CLAIM, START, UNSTART, SUBMIT, APPROVE, REJECT, RELEASE, TRANSFER, DECLINE, CANCEL, REOPEN}
 
 private boolean isLeaderOrPo(Long teamId, AppUser u) {
 return memberRepo.findByTeamIdAndUserId(teamId, u.getId())
@@ -149,6 +149,14 @@ switch (action) {
 case APPROVE -> {
 if (from!= ItemStatus.IN_REVIEW) throw illegal(item, action);
 if (!isPo) throw ApiException.forbidden("仅组长或 PO 可验收通过任务");
+// 修订五规则 7：父已完成而子未完成禁止——任务验收前显式校验（推算通常已保证，此处兜底防数据不一致）
+boolean childOpen = itemRepo.findByParentId(item.getId()).stream()
+.filter(s -> s.getDeletedAt() == null && s.getStatus()!= ItemStatus.CANCELLED)
+.anyMatch(s -> s.getStatus()!= ItemStatus.DONE);
+if (childOpen) {
+throw new ApiException(HttpStatus.UNPROCESSABLE_ENTITY, "PARENT_CHILD_CONFLICT",
+"任务下仍有未完成的故事，不能验收通过任务");
+}
 item.setStatus(ItemStatus.DONE);
 item.setProgressPercent(100);
 notifyService.notify(item.getCreator(), "APPROVE", item, actor, "任务已验收通过");
@@ -239,6 +247,13 @@ case START -> {
 if (from!= ItemStatus.NOT_STARTED) throw illegal(item, action);
 if (!isOwner(item, actor)) throw ApiException.forbidden("仅负责人可开始事项");
 item.setStatus(ItemStatus.IN_PROGRESS);
+}
+case UNSTART -> {
+// 修订五：自动开始（进展登记/拖动进度触发 START）的撤销动作——回到待开始，进度清零，留痕在动态里。
+if (from!= ItemStatus.IN_PROGRESS) throw illegal(item, action);
+if (!isOwner(item, actor)) throw ApiException.forbidden("仅负责人可撤销开始");
+item.setStatus(ItemStatus.NOT_STARTED);
+item.setProgressPercent(0);
 }
 case SUBMIT -> {
 if (from!= ItemStatus.IN_PROGRESS) throw illegal(item, action);
@@ -368,6 +383,24 @@ boolean allowed = eq(item.getCreator(), actor) || eq(item.getAcceptor(), actor) 
 if (!allowed) throw ApiException.forbidden("仅创建人、验收人、PO 或组长可重新打开");
 item.setStatus(!ownerIds(item).isEmpty()? ItemStatus.IN_PROGRESS: ItemStatus.UNCLAIMED);
 }
+}
+// 修订五 B：状态×进度联动（唯一实现点，前后端不可绕过）
+// - 转待验收/已完成：进度自动补满 100%；
+// - 提交验收/完成时若带阻塞标记：自动清除阻塞并在历史留一笔 UNBLOCK；
+// - 放回待认领（RELEASE）/婉拒（DECLINE）：进度清零，新认领人从 0 开始；
+// - 退回（REJECT）：进度保持不变（不处理），「已退回」标记由 DTO 按最近流转记录派生。
+if (action == Action.SUBMIT || action == Action.APPROVE) {
+item.setProgressPercent(100);
+if (item.isBlocked()) {
+item.setBlocked(false);
+item.setBlockReason(null);
+item.setBlockedAt(null);
+activityRepo.save(new Activity(item, actor, "UNBLOCK", from.name(), item.getStatus().name(),
+"提交验收/完成时自动清除阻塞标记"));
+}
+}
+if (action == Action.RELEASE || action == Action.DECLINE) {
+item.setProgressPercent(0);
 }
 if (item.getStatus()!= from) item.setStatusChangedAt(Instant.now());
 itemRepo.save(item);

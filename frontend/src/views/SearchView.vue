@@ -62,7 +62,7 @@ watch(()=> route.query, ()=>{ if (route.path === '/search') initFromRoute() })
 .chips{display:flex;gap:8px;align-items:center;flex-wrap:wrap;margin-top:12px}
 .fchip{display:inline-flex;align-items:center;gap:2px;background:var(--sel);border-radius:999px;padding:4px 6px 4px 12px;font-weight:600;font-size:13px}
 .fchip .del{width:22px;height:22px;display:grid;place-items:center;border-radius:50%}
-.kcard{position:relative;background:var(--card);border:1px solid rgba(255,255,255,.65);border-left:4px solid var(--theme);border-radius:var(--r-card);box-shadow:0 4px 14px rgba(10,60,140,.08);padding:12px 14px 12px 18px;margin-bottom:10px}
+.kcard{position:relative;background:var(--card);border:1px solid var(--card-brd);border-left:4px solid var(--theme);border-radius:var(--r-card);box-shadow:var(--shadow-card);padding:12px 14px 12px 18px;margin-bottom:10px}
 .krow{display:flex;align-items:center;gap:8px}.krow.foot{margin-top:8px}
 .ktitle{display:block;font-size:15px;font-weight:600;margin:7px 0;text-align:left}
 .desc{display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden}

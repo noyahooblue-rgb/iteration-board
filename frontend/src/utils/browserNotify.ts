@@ -9,43 +9,13 @@ export function applyTitleBadge(unread: number) {
   document.title = unread > 0 ? `(${unread}) ${BASE_TITLE}` : BASE_TITLE
 }
 
-// ---------- 第 2 层：favicon 红点角标（canvas 在现有 favicon 上叠加） ----------
-let originalIconHref: string | null = null
-let iconLink: HTMLLinkElement | null = null
-function ensureIconLink(): HTMLLinkElement {
-  if (iconLink) return iconLink
-  let link = document.querySelector<HTMLLinkElement>('link[rel="icon"]')
-  if (!link) { link = document.createElement('link'); link.rel = 'icon'; document.head.appendChild(link) }
-  iconLink = link
-  originalIconHref = link.getAttribute('href') || '/favicon.svg'
-  return link
-}
-const drawnFor = new Map<number, string>()
+// ---------- 第 2 层：favicon 未读角标（1.1.0 品牌定稿：改用定稿 badges 资产，不再 canvas 现画） ----------
+// 有未读 → 定稿未读角标版 favicon（红点（定稿未读红） + 白描边，右上角覆盖星芒位置，定稿第 2 条）；
+// 无未读 → 按当前主题恢复标准/深色版。切换逻辑统一在 utils/favicon.ts 的 setAppIcon，
+// 主题切换（外观子任务）调用同一函数，两边状态互不冲掉。
+import { setAppIcon } from './favicon'
 export function applyFaviconBadge(unread: number) {
-  const link = ensureIconLink()
-  if (unread <= 0) { if (originalIconHref) link.href = originalIconHref; return }
-  const cached = drawnFor.get(unread)
-  if (cached) { link.href = cached; return }
-  const img = new Image()
-  img.onload = () => {
-    try {
-      const S = 64
-      const cv = document.createElement('canvas'); cv.width = S; cv.height = S
-      const ctx = cv.getContext('2d'); if (!ctx) return
-      ctx.drawImage(img, 0, 0, S, S)
-      // 红点：右上角，白描边保证深/浅色浏览器主题下都清晰；≤9 显示数字、>9 显示 9+
-      const cx = 45, cy = 19, r = 18
-      ctx.beginPath(); ctx.arc(cx, cy, r, 0, Math.PI * 2)
-      ctx.fillStyle = '#FF3B30'; ctx.fill()
-      ctx.lineWidth = 3.5; ctx.strokeStyle = '#FFFFFF'; ctx.stroke()
-      ctx.fillStyle = '#FFFFFF'; ctx.textAlign = 'center'; ctx.textBaseline = 'middle'
-      ctx.font = `700 ${unread > 9 ? 17 : 21}px sans-serif`
-      ctx.fillText(unread > 9 ? '9+' : String(unread), cx, cy + 1)
-      const url = cv.toDataURL('image/png')
-      drawnFor.set(unread, url); link.href = url
-    } catch {}
-  }
-  img.src = originalIconHref || '/favicon.svg'
+  setAppIcon(document.documentElement.dataset.theme || 'light', unread)
 }
 export function applyUnreadBadge(unread: number) { applyTitleBadge(unread); applyFaviconBadge(unread) }
 
@@ -82,7 +52,7 @@ export function tryDesktopNotify(n: any, navigate: (n: any) => void) {
   if (key && now - (recentByItem.get(key) ?? 0) < DEDUPE_MS) return
   recentByItem.set(key, now)
   try {
-    const notif = new Notification(BASE_TITLE, { body: n.content ?? '', tag: 'ib-' + key })
+    const notif = new Notification(BASE_TITLE, { body: n.content ?? '', tag: 'ib-' + key, icon: '/icons/icon-192.png' })
     notif.onclick = () => { window.focus(); navigate(n); notif.close() }
   } catch {}
 }

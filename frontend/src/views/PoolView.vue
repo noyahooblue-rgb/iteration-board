@@ -80,15 +80,15 @@ async function claim(it:Item){
 <style scoped>
 .filters{border-radius:var(--r-card);padding:10px 14px;display:flex;gap:14px;align-items:center;flex-wrap:wrap;margin-bottom:12px}
 .fld-sm{font-size:13px;display:inline-flex;gap:6px;align-items:center}.fld-sm select{min-height:32px;border-radius:9px;border:1px solid var(--field-brd);background:var(--field);padding:0 6px}
-.warnbar{background:rgba(255,204,0,.18);border:1px solid rgba(230,180,0,.45);border-radius:12px;padding:10px 14px;font-size:13px;margin-bottom:12px}
+.warnbar{background:var(--warn-bg-strong);border:1px solid var(--warn-brd-strong);border-radius:12px;padding:10px 14px;font-size:13px;margin-bottom:12px}
 .ghead{font-size:16px;margin:16px 0 10px;display:flex;gap:9px;align-items:center}.lcode{color:var(--theme);font-weight:700}.ghead .link{color:var(--theme)}
 .grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(300px,1fr));gap:12px}
-.kcard{position:relative;background:var(--card);border:1px solid rgba(255,255,255,.65);border-left:4px solid var(--theme);border-radius:var(--r-card);box-shadow:0 4px 14px rgba(10,60,140,.08);padding:14px 14px 14px 18px;overflow:hidden}
+.kcard{position:relative;background:var(--card);border:1px solid var(--card-brd);border-left:4px solid var(--theme);border-radius:var(--r-card);box-shadow:var(--shadow-card);padding:14px 14px 14px 18px;overflow:hidden}
 .invrow{margin-bottom:7px}
-.inv{display:inline-block;background:var(--c-indigo);color:#fff;font-size:11px;font-weight:700;padding:3px 8px;border-radius:99px}
+.inv{display:inline-block;background:var(--c-indigo);color:var(--on-color);font-size:11px;font-weight:700;padding:3px 8px;border-radius:99px}
 .krow{display:flex;align-items:center;gap:6px;flex-wrap:wrap}.krow.foot{margin-top:8px}
 .ktitle{font-size:15px;font-weight:600;line-height:1.4;margin:7px 0}
 .desc{display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden}
 .prio{font-size:13px;font-weight:700}.meta-ico{display:inline-flex;gap:4px;align-items:center;font-size:12px;color:var(--text-2)}
-.btag{font-size:11px;font-weight:600;color:#7D2CA8;background:rgba(175,82,222,.14);border-radius:6px;padding:1px 6px}
+.btag{font-size:11px;font-weight:600;color:var(--violet-deep);background:var(--violet-soft);border-radius:6px;padding:1px 6px}
 </style>
