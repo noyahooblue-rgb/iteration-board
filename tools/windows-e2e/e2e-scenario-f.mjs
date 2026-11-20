@@ -313,7 +313,7 @@ try {
   // (e)+(f) multi-team: a notification in another team must not enter the
   // current badge; the team switcher shows that team's own unread count;
   // switching teams moves the badge to the new view
-  const team2 = await api(S.ctx, 'POST', '/teams', { name: 'F7第二小组', code: 'F2', joinApproval: false })
+  const team2 = await api(S.ctx, 'POST', '/teams', { name: 'F7第二小组', code: 'FZ', joinApproval: false })
   await api(P.ctx, 'POST', '/teams/join', { inviteCode: team2.inviteCode })
   await api(P.ctx, 'POST', `/teams/${team2.id}/items`, { type: 'DEFECT', title: 'F7 second-team assignment', destination: 'ASSIGN', ownerIds: [meS.id], priority: 'P2' })
   await S.page.waitForTimeout(1500)
