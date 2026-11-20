@@ -1,10 +1,10 @@
 // Windows runner E2E: drive a real browser DIRECTLY against the
 // installed application's own address (http://localhost:18080) - no proxy,
 // no mock. Flow: open / -> login page (must be HTML, never a 401 JSON body)
-// -> register the first account (captcha read from the SVG the page itself
+// -> register an account (captcha read from the SVG the page itself
 // renders) -> create a team -> create an item -> open /board, refresh it,
-// and assert it still renders (not 401/404). Three screenshots are kept as
-// delivery evidence:
+// and assert it still renders (not 401/404) -> direct-open /admin and
+// /feedback (SPA fallback). Screenshots are kept as delivery evidence:
 //   01-home-login.png        home page redirected to the login page
 //   02-workbench.png         workbench after login + team creation
 //   03-board-after-refresh.png  /board after a full page refresh
@@ -93,17 +93,31 @@ try {
   await page.screenshot({ path: `${SHOTS}/03-board-after-refresh.png` })
   step('/board survives a full refresh with the item visible')
 
-  // --- 6. /admin direct open: the first account is platform admin, and the
-  // SPA fallback list must include /admin (1.0.4 regression: a missing entry
-  // returns a JSON 404 instead of index.html).
+  // --- 6. /admin direct open: the SPA fallback list must include /admin
+  // (1.0.4 regression: a missing entry returns a JSON 404 instead of
+  // index.html). 1.1.0 P01 changed WHO is admin: self-registered accounts
+  // are never platform admins any more (only the installer-created
+  // built-in "admin" account is), so this account must NOT see the admin
+  // view - what is asserted here is the fallback itself (HTTP 200 SPA,
+  // never a JSON error). The admin view rendering for the real admin is
+  // covered by scenario F (F6b).
   const aresp = await page.goto(BASE + '/admin', { waitUntil: 'load' })
   if (!aresp || aresp.status() !== 200) fail(`GET /admin returned ${aresp && aresp.status()}, expected 200`)
   await page.waitForTimeout(1200)
   const atext = await page.locator('body').innerText()
   if (atext.includes('接口不存在') || atext.trim().startsWith('{')) fail('/admin shows a JSON error instead of the SPA (SPA fallback list missing /admin)')
-  if (!atext.includes('平台管理')) fail('/admin did not render the platform admin view for the first account')
   await page.screenshot({ path: `${SHOTS}/04-admin.png` })
-  step('/admin renders for the platform admin on direct open')
+  step('/admin direct open serves the SPA for a non-admin account (no JSON 404)')
+
+  // --- 7. /feedback direct open: same SPA-fallback assertion as /admin,
+  // plus the feedback view itself must render for a normal account.
+  const fresp = await page.goto(BASE + '/feedback', { waitUntil: 'networkidle' })
+  if (!fresp || fresp.status() !== 200) fail(`GET /feedback returned ${fresp && fresp.status()}, expected 200`)
+  const ftext = await page.locator('body').innerText()
+  if (ftext.includes('接口不存在') || ftext.trim().startsWith('{')) fail('/feedback shows a JSON error instead of the SPA (SPA fallback list missing /feedback)')
+  if (!ftext.includes('意见反馈')) fail('/feedback did not render the feedback view')
+  await page.screenshot({ path: `${SHOTS}/05-feedback.png` })
+  step('/feedback renders on direct open')
   console.log('[e2e] ALL PASSED')
 } catch (e) {
   console.error('[e2e] FAILED:', e.message)
