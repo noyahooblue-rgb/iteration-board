@@ -216,9 +216,37 @@ if exist "%WORK%\config\application.yml" (
   echo [INFO] Applying the exported port and AI connection settings ...
   set "IB_OLD=%WORK%\config\application.yml"
   set "IB_NEW=%TARGET%\config\application.yml"
-  powershell -NoProfile -Command "$old = [IO.File]::ReadAllText($env:IB_OLD); $new = [IO.File]::ReadAllText($env:IB_NEW); foreach ($k in @('base-url','api-key','text-model','vision-model','mode')) { if ($old -match ('(?m)^\s*' + $k + ':\s*(.*)$')) { $v = $Matches[1]; $new = $new -replace ('(?m)^(\s*' + $k + ':\s*).*$'), ('$1' + $v) } }; if ($old -match '(?m)^\s*port:\s*(\d+)') { $p = $Matches[1]; $new = $new -replace '(?m)^(\s*port:\s*)\d+', ('$1' + $p) }; [IO.File]::WriteAllText($env:IB_NEW, $new, [Text.Encoding]::ASCII)"
-  echo [INFO] Port and AI settings applied. This installation's own
-  echo [INFO] database password was kept.
+  rem IB-SETTINGS-COMMAND-BEGIN
+  rem The powershell command below is extracted and run verbatim
+  rem by tools/ci/test-migrate-settings.ps1 - keep it on one line
+  rem and keep these markers. It writes the exported values with
+  rem braced group references: a plain $1 directly followed by a
+  rem digit is parsed by .NET as one large group number and
+  rem leaks into the file literally - root-cause ledger entry 8.
+  rem The command validates the rewritten file before returning;
+  rem on failure this script restores the previous config from
+  rem the pre-import backup and aborts without starting the app.
+  powershell -NoProfile -Command "$ErrorActionPreference = 'Stop'; try { $old = [IO.File]::ReadAllText($env:IB_OLD); $before = [IO.File]::ReadAllText($env:IB_NEW); $new = $before; $applied = @{}; foreach ($k in @('base-url','api-key','text-model','vision-model','mode')) { if ($old -match ('(?m)^\s*' + $k + ':\s*(.*)$')) { $v = $Matches[1].Trim(); $applied[$k] = $v; $new = $new -replace ('(?m)^(\s*' + $k + ':\s*).*$'), ('${1}' + $v.Replace('$', '$$')) } }; $wantPort = $null; if ($old -match '(?m)^\s*port:\s*(\d+)') { $wantPort = $Matches[1]; $new = $new -replace '(?m)^(\s*port:\s*)\d+', ('${1}' + $wantPort) }; [IO.File]::WriteAllText($env:IB_NEW, $new, [Text.Encoding]::ASCII); $written = [IO.File]::ReadAllText($env:IB_NEW); foreach ($line in ($written -split '\r?\n')) { if ($line -match '^\s*$' -or $line -match '^\s*#' -or $line -match '^\s*-(\s+.*)?$') { continue }; if ($line -notmatch '^(\s*)([A-Za-z0-9_.\-]+):(\s+.*)?$') { Write-Host ('[ERROR] Rewritten config line is not valid YAML mapping syntax: ' + $line); exit 1 }; if ($Matches[1].Contains([char]9)) { Write-Host '[ERROR] Rewritten config uses a tab character for indentation.'; exit 1 } }; if ($wantPort) { if ($written -notmatch '(?m)^\s*port:\s*(\d+)') { Write-Host '[ERROR] Rewritten config has no readable port line.'; exit 1 }; if ($Matches[1] -ne $wantPort) { Write-Host ('[ERROR] Rewritten config port is ' + $Matches[1] + ' but the exported port is ' + $wantPort + '.'); exit 1 } }; foreach ($k in $applied.Keys) { if ($written -notmatch ('(?m)^\s*' + $k + ':\s*(.*)$')) { Write-Host ('[ERROR] Rewritten config lost its ' + $k + ' line.'); exit 1 }; if ($Matches[1].Trim() -ne $applied[$k]) { Write-Host ('[ERROR] Rewritten config value for ' + $k + ' does not match the exported value.'); exit 1 } }; $pwdB = $null; if ($before -match '(?m)^\s*password:\s*(.*)$') { $pwdB = $Matches[1] }; $pwdA = $null; if ($written -match '(?m)^\s*password:\s*(.*)$') { $pwdA = $Matches[1] }; if ($pwdB -ne $pwdA) { Write-Host '[ERROR] Rewritten config changed the database password line.'; exit 1 }; Write-Host '[INFO] Rewritten config validated: YAML structure OK; port and AI values read back as intended.'; exit 0 } catch { Write-Host ('[ERROR] Applying the exported settings failed: ' + $_.Exception.Message); exit 1 }"
+  if errorlevel 1 (
+    echo [ERROR] The exported settings were NOT applied safely: the
+    echo [ERROR] rewritten config failed validation. Restoring the
+    echo [ERROR] previous config from the pre-import backup ...
+    copy /Y "%DBBACKUP%\application.yml" "%TARGET%\config\application.yml" >nul
+    if errorlevel 1 (
+      echo [ERROR] Restoring the previous config FAILED too. Copy
+      echo [ERROR] application.yml back manually from this folder:
+      echo [ERROR]   %DBBACKUP%
+    )
+    echo [ERROR] Import aborted - the application was not started.
+    echo [ERROR] The database here was already restored from the
+    echo [ERROR] migration package. To return to the pre-import
+    echo [ERROR] database instead, run restore.bat and pick:
+    echo [ERROR]   %DBBACKUP%
+    goto :fail
+  )
+  rem IB-SETTINGS-COMMAND-END
+  echo [INFO] Port and AI settings applied and validated. This
+  echo [INFO] installation's own database password was kept.
 )
 
 rem --- step 6: start the application - Flyway migrates -----------------------

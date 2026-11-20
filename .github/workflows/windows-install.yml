@@ -66,6 +66,10 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: '20'
+      - name: 迁移设置应用回归测试（台账第 8 条：从 migrate-import.bat 提取出货命令原文实测，防 $1 替换泄漏）
+        shell: powershell
+        timeout-minutes: 5
+        run: ./tools/ci/test-migrate-settings.ps1
       - name: 安装 Playwright（S5 门禁脚本 + 自带 Chromium 129 对照组）
         shell: pwsh
         timeout-minutes: 10
