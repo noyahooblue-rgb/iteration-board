@@ -40,6 +40,17 @@ const USERS = {
 }
 const TEAM = { name: '协作验证小组', code: 'EV' }
 
+// 1.1.0 first-run overlays (release-notes modal + onboarding guide)
+// intercept clicks until dismissed; close whichever is visible.
+async function dismissOverlays(page) {
+  for (let i = 0; i < 4; i++) {
+    const btn = page.locator('button', { hasText: /^(知道了|跳过引导|知道了，开始使用)$/ }).first()
+    if (await btn.count() === 0 || !(await btn.isVisible().catch(() => false))) return
+    await btn.click().catch(() => {})
+    await page.waitForTimeout(400)
+  }
+}
+
 async function registerViaUi(page, u) {
   await page.goto(BASE + '/', { waitUntil: 'networkidle' })
   await page.waitForSelector('label.field', { timeout: 15000 })
@@ -119,6 +130,7 @@ try {
     await api(sess.ctx, 'POST', '/teams/join', { inviteCode: team.inviteCode })
     await sess.page.goto(BASE + '/workbench', { waitUntil: 'load' })
     await sess.page.waitForSelector('aside.sidebar', { timeout: 15000 })
+    await dismissOverlays(sess.page)
   }
   const members = await api(L.ctx, 'GET', `/teams/${teamId}/members`)
   const idOf = (login) => {
@@ -128,7 +140,7 @@ try {
   const ids = { leader: idOf('e_leader'), po: idOf('e_po'), m1: idOf('e_m1'), m2: idOf('e_m2') }
   if (!ids.m1 || !ids.m2 || !ids.po) fail(`member ids unresolved: ${JSON.stringify({ members: members.slice(0, 2), ids })}`)
   await api(L.ctx, 'PATCH', `/teams/${teamId}/members/${ids.po}/role`, { role: 'PO' })
-  for (const sess of [L, P, A, B]) { await sess.page.goto(BASE + '/workbench', { waitUntil: 'load' }); await sess.page.waitForSelector('aside.sidebar', { timeout: 15000 }) }
+  for (const sess of [L, P, A, B]) { await sess.page.goto(BASE + '/workbench', { waitUntil: 'load' }); await sess.page.waitForSelector('aside.sidebar', { timeout: 15000 }); await dismissOverlays(sess.page) }
   step('setup complete: 4 users online, roles leader/PO/member/member')
 
   // --- E1: leader invites m1 to claim -----------------------------------
@@ -139,6 +151,10 @@ try {
   // global badge: m1 goes to a non-pool, non-board page; pool badge stays
   await A.page.goto(BASE + '/overview', { waitUntil: 'load' }); await A.page.waitForSelector('aside.sidebar', { timeout: 15000 })
   const poolBadge = A.page.locator('a[href="/pool"] .badge-n, a[href="/pool"] .badge, a[href="/pool"] .mini-badge')
+  // Shell counts refresh asynchronously (SSE debounce + refetch): poll
+  // up to 10 s instead of asserting on the first render.
+  const badgeDeadline = Date.now() + 10000
+  while (await poolBadge.count() === 0 && Date.now() < badgeDeadline) await A.page.waitForTimeout(400)
   if (await poolBadge.count() === 0) fail('E1: pool badge not visible on /overview (global shell counts broken)')
   step('E1: pool badge visible on /overview page')
   await A.page.screenshot({ path: `${SHOTS}/E1-invite-and-global-badge.png` })

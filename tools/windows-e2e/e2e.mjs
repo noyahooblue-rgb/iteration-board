@@ -27,6 +27,18 @@ const ITEM_TITLE = 'CI 验证缺陷事项'
 function step(msg) { console.log(`[e2e] ${msg}`) }
 function fail(msg) { throw new Error(msg) }
 
+// 1.1.0: two first-run overlays (release-notes modal + onboarding guide)
+// appear over the workbench and intercept clicks until dismissed. Close
+// whichever is visible; safe to call when none is open.
+async function dismissOverlays(page) {
+  for (let i = 0; i < 4; i++) {
+    const btn = page.locator('button', { hasText: /^(知道了|跳过引导|知道了，开始使用)$/ }).first()
+    if (await btn.count() === 0 || !(await btn.isVisible().catch(() => false))) return
+    await btn.click().catch(() => {})
+    await page.waitForTimeout(400)
+  }
+}
+
 const browser = await chromium.launch()
 const page = await browser.newPage({ viewport: { width: 1440, height: 900 } })
 try {
@@ -64,6 +76,7 @@ try {
   await page.getByRole('button', { name: '创建小组' }).click()
   await page.waitForURL('**/workbench', { timeout: 20000 })
   await page.waitForLoadState('networkidle')
+  await dismissOverlays(page)
   await page.screenshot({ path: `${SHOTS}/02-workbench.png` })
   step('team created, workbench rendered')
 

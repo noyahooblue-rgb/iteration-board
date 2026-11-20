@@ -55,7 +55,14 @@ $Evidence = Join-Path $Work 'evidence'
 New-Item -ItemType Directory -Force $Evidence | Out-Null
 $script:Failures = @()
 
-function Check([string]$Name, [bool]$Ok) {
+function Check([string]$Name, $Ok) {
+  # $Ok is deliberately untyped: several call sites pass -match results
+  # or cmdlet output that can materialize as an array; a [bool]-typed
+  # parameter turned that into a script-killing binding error (1.1.0
+  # first runner round). Coerce: arrays count as their -match/filter
+  # semantics (non-empty = true).
+  if ($Ok -is [System.Array]) { $Ok = $Ok.Count -gt 0 }
+  $Ok = [bool]$Ok
   if ($Ok) { Write-Host "  PASS  $Name" }
   else {
     Write-Host "  FAIL  $Name"
@@ -545,6 +552,8 @@ if ($script:Failures.Count -gt 0) {
   Write-Host "WINDOWS VERIFY: $($script:Failures.Count) FAILURE(S)"
   $script:Failures | ForEach-Object { Write-Host "  - $_" }
   if ($script:Failures -match 'P1 ') { Dump-Tail 'p1-install.log' }
+  if ($script:Failures -match 'P1b') { Dump-Tail 'p1-install.log'; Dump-Tail 'p1b-stop.log'; Dump-Tail 'p1b-start.log' }
+  if ($script:Failures -match 'P12') { Dump-Tail 'p12-stop.log'; Dump-Tail 'p12-start.log' }
   if ($script:Failures -match 'P2 ') { Dump-Tail 'p2-playwright.log' }
   if ($script:Failures -match 'P2b ') { Dump-Tail 'p2b-scenario-e.log' }
   if ($script:Failures -match 'P2c ') { Dump-Tail 'p2c-scenario-f.log' }

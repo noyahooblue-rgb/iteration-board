@@ -44,6 +44,17 @@ const USERS = {
 const FB_TITLE = 'F 剧本反馈标记：看板刷新后希望保留筛选条件'
 const PNG_1X1 = 'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8Xw8AAwMCAO+ip1sAAAAASUVORK5CYII='
 
+// 1.1.0 first-run overlays (release-notes modal + onboarding guide)
+// intercept clicks until dismissed; close whichever is visible.
+async function dismissOverlays(page) {
+  for (let i = 0; i < 4; i++) {
+    const btn = page.locator('button', { hasText: /^(知道了|跳过引导|知道了，开始使用)$/ }).first()
+    if (await btn.count() === 0 || !(await btn.isVisible().catch(() => false))) return
+    await btn.click().catch(() => {})
+    await page.waitForTimeout(400)
+  }
+}
+
 async function registerViaUi(page, u) {
   await page.goto(BASE + '/', { waitUntil: 'networkidle' })
   await page.waitForSelector('label.field', { timeout: 15000 })
@@ -139,7 +150,17 @@ try {
   const S = await mk(), P = await mk()
   await registerViaUi(S.page, USERS.sub)
   await registerViaUi(P.page, USERS.plus)
-  step('setup complete: submitter + supporter registered')
+  // Both users need a team: team-scoped routes (/feedback included) are
+  // guarded to /teams/new for teamless users. S creates one, P joins.
+  const fteam = await api(S.ctx, 'POST', '/teams', { name: '反馈验证小组', code: 'FB', joinApproval: false })
+  if (!fteam.inviteCode) fail('feedback team DTO has no inviteCode')
+  await api(P.ctx, 'POST', '/teams/join', { inviteCode: fteam.inviteCode })
+  for (const sess of [S, P]) {
+    await sess.page.goto(BASE + '/workbench', { waitUntil: 'load' })
+    await sess.page.waitForSelector('aside.sidebar', { timeout: 15000 })
+    await dismissOverlays(sess.page)
+  }
+  step('setup complete: submitter + supporter registered and teamed')
 
   // --- admin API login ---------------------------------------------------
   await adminFetch('GET', '/auth/captcha') // seed session + XSRF cookie
