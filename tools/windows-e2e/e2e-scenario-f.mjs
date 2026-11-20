@@ -317,6 +317,12 @@ try {
   await api(P.ctx, 'POST', '/teams/join', { inviteCode: team2.inviteCode })
   await api(P.ctx, 'POST', `/teams/${team2.id}/items`, { type: 'DEFECT', title: 'F7 second-team assignment', destination: 'ASSIGN', ownerIds: [meS.id], priority: 'P2' })
   await S.page.waitForTimeout(1500)
+  // team2 was created via API behind S's browser; a real user creating or
+  // joining a team in the UI refreshes the team list - a reload is the
+  // equivalent (loadTeams refetches /teams/mine on a fresh store)
+  await S.page.reload({ waitUntil: 'load' })
+  await S.page.waitForSelector('aside.sidebar', { timeout: 15000 })
+  await S.page.waitForTimeout(900)
   const stillZero = await assertInvariant(S.page, 'other-team notification excluded')
   if (stillZero !== 0) fail(`F7: other-team notification leaked into current badge: ${stillZero}`)
   await S.page.locator('button.team-switch').click()
