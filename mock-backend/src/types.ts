@@ -26,7 +26,7 @@ export interface Iteration { id:number; teamId:number; name:string; goal:string;
 export interface Batch { id:number; teamId:number; creatorId:number; title:string; type:ItemType; createdAt:string }
 export interface Nudge { id:number; itemId:number; fromUserId:number; toUserId:number; date:string; createdAt:string }
 export interface SavedFilter { id:number; userId:number; teamId:number; name:string; criteria:any; createdAt:string }
-export interface Notification { id:number; userId:number; teamId:number|null; type:string; category:string; itemId:number|null; itemCode:string|null; actorId:number|null; content:string; readAt:string|null; createdAt:string }
+export interface Notification { id:number; userId:number; teamId:number|null; type:string; category:string; itemId:number|null; itemCode:string|null; refId:number|null; actorId:number|null; content:string; readAt:string|null; createdAt:string }
 export interface KeyDate { id:number; teamId:number; iterationId:number; title:string; date:string; category:string }
 export interface MockReportVersion { id:number; reportId:number; title:string; contentMd:string; editedByHuman:boolean; createdAt:string }
 export interface MockReport { id:number; teamId:number; kind:string; title:string; periodStart:string|null; periodEnd:string|null; ownerId:number|null; content:string; aiGenerated:boolean; edited:boolean; editedByHuman:boolean; version:number; deletedAt:string|null; lastRegeneratedAt:string|null; versions:MockReportVersion[]; createdAt:string; updatedAt:string }

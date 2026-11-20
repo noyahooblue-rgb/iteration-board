@@ -285,7 +285,7 @@ public class FeedbackController {
         commentRepo.save(c);
         if (!f.getSubmitter().getId().equals(me.getId())) {
             notifyService.notifyInTeam(f.getSubmitter(), "FEEDBACK_COMMENT", null, null, me,
-                    "你的反馈「" + f.getTitle() + "」有新评论");
+                    "你的反馈「" + f.getTitle() + "」有新评论", false, f.getId());
         }
         Map<String, Object> m = new LinkedHashMap<>();
         m.put("id", c.getId());
@@ -333,11 +333,11 @@ public class FeedbackController {
         java.util.Set<Long> notified = new java.util.HashSet<>();
         String content = "反馈「" + f.getTitle() + "」状态变更：" + from + " → " + target;
         if (notified.add(f.getSubmitter().getId())) {
-            notifyService.notifyInTeam(f.getSubmitter(), "FEEDBACK_STATUS", null, null, me, content);
+            notifyService.notifyInTeam(f.getSubmitter(), "FEEDBACK_STATUS", null, null, me, content, false, f.getId());
         }
         for (FeedbackPlusOne p : plusOneRepo.findByFeedbackId(id)) {
             if (notified.add(p.getUser().getId())) {
-                notifyService.notifyInTeam(p.getUser(), "FEEDBACK_STATUS", null, null, me, content);
+                notifyService.notifyInTeam(p.getUser(), "FEEDBACK_STATUS", null, null, me, content, false, f.getId());
             }
         }
         return toMap(f, me);
@@ -353,8 +353,26 @@ public class FeedbackController {
         f.setOfficialReply(req.officialReply());
         feedbackRepo.save(f);
         notifyService.notifyInTeam(f.getSubmitter(), "FEEDBACK_STATUS", null, null, me,
-                "你的反馈「" + f.getTitle() + "」有官方回复");
+                "你的反馈「" + f.getTitle() + "」有官方回复", false, f.getId());
         return toMap(f, me);
+    }
+
+    /**
+     * 全局搜索的反馈部分（P2c 裁定举一反三项 2）：只搜本人提交的反馈（标题/描述含关键词），
+     * 不含他人反馈；事项仍走团队搜索 /teams/{id}/search。
+     */
+    @GetMapping("/search")
+    @Transactional(readOnly = true)
+    public List<Map<String, Object>> search(@RequestParam(required = false) String q) {
+        AppUser me = currentUser.require();
+        String kw = q == null ? "" : q.trim().toLowerCase();
+        if (kw.isEmpty()) return List.of();
+        return feedbackRepo.findBySubmitterIdOrderByCreatedAtDesc(me.getId()).stream()
+                .filter(f -> f.getTitle().toLowerCase().contains(kw)
+                        || f.getDescription().toLowerCase().contains(kw))
+                .limit(20)
+                .map(f -> toMap(f, me))
+                .toList();
     }
 
     /** 管理员导出 zip：summary.md（Markdown 汇总）+ images/<feedbackId>/<fileName>。 */

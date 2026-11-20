@@ -90,7 +90,7 @@ function compactAllows(category: string, type: string, content: string) {
   if (category === 'SYSTEM' && content.includes('加入申请')) return true
   return false
 }
-function notify(userId: number, teamId: number | null, category: string, item: Item | null, content: string, actorId: number | null = null, typeOverride?: string) {
+function notify(userId: number, teamId: number | null, category: string, item: Item | null, content: string, actorId: number | null = null, typeOverride?: string, refId: number | null = null) {
   const prefs = prefsOf(userId)
   if (prefs[category] === false && category !== 'ASSIGNMENT' && category !== 'NUDGE') return
   const nType = typeOverride ?? category
@@ -100,18 +100,28 @@ function notify(userId: number, teamId: number | null, category: string, item: I
     const prev = notifications.find(n => n.userId === userId && n.itemId === item.id && n.category === category && !n.readAt && Date.now() - new Date(n.createdAt).getTime() < 5 * 60 * 1000)
     if (prev) { prev.content = content; prev.createdAt = new Date().toISOString(); return }
   }
-  const n: Notification = { id: nextId++, userId, teamId, type: nType, category, itemId: item?.id ?? null, itemCode: item?.code ?? null, actorId, content, readAt: null, createdAt: new Date().toISOString() }
+  const n: Notification = { id: nextId++, userId, teamId, type: nType, category, itemId: item?.id ?? null, itemCode: item?.code ?? null, refId, actorId, content, readAt: null, createdAt: new Date().toISOString() }
   notifications.unshift(n)
-  if (sessionUserId === userId) { try { const set = (globalThis as any).__ibMockEventListeners as Set<(x: any) => void> | undefined; set?.forEach(cb => { try { cb(notifView(n)) } catch {} }) } catch {} }
+  pushNotif(n)
 }
-const notifView = (n: Notification) => ({ id: n.id, teamId: n.teamId, type: n.type, category: n.category, itemId: n.itemId, itemCode: n.itemCode, actorId: n.actorId, content: n.content, readAt: n.readAt, createdAt: n.createdAt })
+// P2c 裁定：推送增量带 unreadCount——团队通知按「该团队 + 平台」口径（与真实后端连接视图口径等价）；
+// 平台通知不带（mock 无连接视图概念，前端按当前视图 +1 兜底，防抖对账再拉 scope=current 校正）。
+function pushNotif(n: Notification) {
+  if (sessionUserId !== n.userId) return
+  const payload: any = notifView(n)
+  if (n.teamId != null) {
+    payload.unreadCount = notifications.filter(x => x.userId === n.userId && !x.readAt && (x.teamId === n.teamId || x.teamId === null)).length
+  }
+  try { const set = (globalThis as any).__ibMockEventListeners as Set<(x: any) => void> | undefined; set?.forEach(cb => { try { cb(payload) } catch {} }) } catch {}
+}
+const notifView = (n: Notification) => ({ id: n.id, teamId: n.teamId, type: n.type, category: n.category, itemId: n.itemId, itemCode: n.itemCode, refId: n.refId ?? null, actorId: n.actorId, content: n.content, readAt: n.readAt, createdAt: n.createdAt })
 // 同步连败通知（对齐真实后端 yefqkvf3 待问 1）：type=SYNC_FAILED、类别 ITEM_UPDATE（后端 NotificationView.categoryOf 的默认归口）；
 // 发给所有组长，包括触发者本人（此路径不跳过自己）；偏好层不变——关闭 ITEM_UPDATE 者不生成。
 function notifySyncFailed(userId: number, teamId: number, content: string, actorId: number) {
   if (prefsOf(userId)['ITEM_UPDATE'] === false) return
-  const n: Notification = { id: nextId++, userId, teamId, type: 'SYNC_FAILED', category: 'ITEM_UPDATE', itemId: null, itemCode: null, actorId, content, readAt: null, createdAt: new Date().toISOString() }
+  const n: Notification = { id: nextId++, userId, teamId, type: 'SYNC_FAILED', category: 'ITEM_UPDATE', itemId: null, itemCode: null, refId: null, actorId, content, readAt: null, createdAt: new Date().toISOString() }
   notifications.unshift(n)
-  if (sessionUserId === userId) { try { const set = (globalThis as any).__ibMockEventListeners as Set<(x: any) => void> | undefined; set?.forEach(cb => { try { cb(notifView(n)) } catch {} }) } catch {} }
+  pushNotif(n)
 }
 function act(itemId: number, actorId: number, action: string, from: string | null, to: string | null, detail: string | null) {
   activities.unshift({ id: nextId++, itemId, actorId, action, fromStatus: from, toStatus: to, detail, createdAt: new Date().toISOString() })
@@ -290,6 +300,7 @@ function feedbackRoute(method: string, seg: string[], body: any, q: URLSearchPar
     if (todayCount >= 20) throw err(429, 'FEEDBACK_DAILY_LIMIT', '每人每天最多提交 20 条反馈，明天再来')
     const f: Feedback = { id: feedbackSeq++, submitterId: u.id, submitterName: u.displayName, submitterLoginName: u.loginName, type: body.type, title: body.title.trim(), description: body.description.trim(), status: 'NEW', plannedVersion: null, rejectReason: null, releasedVersion: null, officialReply: null, pageUrl: body.pageUrl ?? null, appVersion: body.appVersion ?? APP_VERSION, browserInfo: body.browserInfo ?? null, images: imgs.map(im => ({ id: feedbackImageSeq++, fileName: im.fileName ?? '截图.png', contentType: im.contentType, sizeBytes: Math.floor(String(im.contentBase64 ?? '').length * 3 / 4) })), plusOneUserIds: [], comments: [], createdAt: new Date().toISOString(), updatedAt: new Date().toISOString() }
     feedbacks.unshift(f); return { status: 201, data: feedbackView(f, u.id) } })
+  if (method === 'GET' && seg[1] === 'search') { const kw = (q.get('q') ?? '').trim().toLowerCase(); if (!kw) return { status: 200, data: [] }; return { status: 200, data: feedbacks.filter(f => f.submitterId === u.id && (f.title.toLowerCase().includes(kw) || f.description.toLowerCase().includes(kw))).slice(0, 20).map(f => feedbackView(f, u.id)) } }
   const f = feedbacks.find(x => x.id === Number(seg[1])); if (!f) throw err(404, 'NOT_FOUND', '反馈不存在')
   if (method === 'GET' && seg.length === 2) return { status: 200, data: feedbackView(f, u.id) }
   if (method === 'PATCH' && seg.length === 2) { if (f.submitterId !== u.id) throw err(403, 'FORBIDDEN', '只能修改自己提交的反馈'); if (f.status !== 'NEW') throw err(409, 'FEEDBACK_LOCKED', '反馈已开始处理，不能再修改')
@@ -299,7 +310,7 @@ function feedbackRoute(method: string, seg: string[], body: any, q: URLSearchPar
   if (method === 'DELETE' && seg[2] === 'plus-one') { f.plusOneUserIds = f.plusOneUserIds.filter(x => x !== u.id); f.updatedAt = new Date().toISOString(); return { status: 200, data: feedbackView(f, u.id) } }
   if (method === 'GET' && seg[2] === 'comments') return { status: 200, data: f.comments }
   if (method === 'POST' && seg[2] === 'comments') { if (!body?.content?.trim()) throw err(400, 'VALIDATION', '评论内容不能为空')
-    const c: FeedbackComment = { id: feedbackCommentSeq++, feedbackId: f.id, authorId: u.id, authorName: u.displayName, content: body.content.trim(), createdAt: new Date().toISOString() }; f.comments.push(c); f.updatedAt = new Date().toISOString(); return { status: 201, data: c } }
+    const c: FeedbackComment = { id: feedbackCommentSeq++, feedbackId: f.id, authorId: u.id, authorName: u.displayName, content: body.content.trim(), createdAt: new Date().toISOString() }; f.comments.push(c); f.updatedAt = new Date().toISOString(); if (f.submitterId !== u.id) notify(f.submitterId, null, 'SYSTEM', null, `你的反馈「${f.title}」有新评论`, u.id, 'FEEDBACK_COMMENT', f.id); return { status: 201, data: c } }
   if (method === 'PATCH' && seg[2] === 'status') { if (!u.platformAdmin) throw err(403, 'FORBIDDEN', '仅平台管理员可变更反馈状态')
     const st = body?.status; if (!st) throw err(400, 'VALIDATION', 'status 必填')
     if (!(FB_TRANSITIONS[f.status] ?? []).includes(st)) throw err(422, 'ILLEGAL_TRANSITION', `反馈状态不能从 ${f.status} 直接变为 ${st}（流程：新提交→分析中→已采纳/不采纳→已上线）`)
@@ -309,10 +320,10 @@ function feedbackRoute(method: string, seg: string[], body: any, q: URLSearchPar
     f.status = st; if (body?.plannedVersion) f.plannedVersion = body.plannedVersion; if (body?.rejectReason) f.rejectReason = body.rejectReason; if (body?.releasedVersion) f.releasedVersion = body.releasedVersion; if (body?.officialReply) f.officialReply = body.officialReply
     f.updatedAt = new Date().toISOString()
     const targets = new Set([f.submitterId, ...f.plusOneUserIds]); targets.delete(u.id)
-    for (const tid of targets) notify(tid, null, 'SYSTEM', null, `反馈「${f.title}」状态变更：${st}`, u.id)
+    for (const tid of targets) notify(tid, null, 'SYSTEM', null, `反馈「${f.title}」状态变更：${st}`, u.id, 'FEEDBACK_STATUS', f.id)
     return { status: 200, data: feedbackView(f, u.id) } }
   if (method === 'PATCH' && seg[2] === 'official-reply') { if (!u.platformAdmin) throw err(403, 'FORBIDDEN', '仅平台管理员可官方回复'); if (!body?.officialReply?.trim()) throw err(400, 'VALIDATION', '官方回复不能为空')
-    f.officialReply = body.officialReply.trim(); f.updatedAt = new Date().toISOString(); if (f.submitterId !== u.id) notify(f.submitterId, null, 'SYSTEM', null, `反馈「${f.title}」有官方回复`, u.id); return { status: 200, data: feedbackView(f, u.id) } }
+    f.officialReply = body.officialReply.trim(); f.updatedAt = new Date().toISOString(); if (f.submitterId !== u.id) notify(f.submitterId, null, 'SYSTEM', null, `反馈「${f.title}」有官方回复`, u.id, 'FEEDBACK_STATUS', f.id); return { status: 200, data: feedbackView(f, u.id) } }
   throw err(404, 'NOT_FOUND', '接口不存在')
 }
 // ---------------- 平台管理（M5 Q6 审计日志） ----------------
@@ -348,9 +359,13 @@ function adminRoute(method: string, seg: string[], body: any, q: URLSearchParams
 // ---------------- 通知中心（M3） ----------------
 function notifRoute(method: string, seg: string[], body: any, q: URLSearchParams) {
   const u = me()
-  if (method === 'GET' && seg[1] === 'unread-count') { const tid = Number(q.get('teamId') ?? 0); return { status: 200, data: { unread: notifications.filter(n => n.userId === u.id && !n.readAt && (!tid || n.teamId === tid)).length } } }
-  if (method === 'POST' && seg[1] === 'read-all') { const tid = Number(body?.teamId ?? 0); for (const n of notifications) if (n.userId === u.id && !n.readAt && (!tid || n.teamId === tid)) n.readAt = new Date().toISOString(); return { status: 200, data: { updated: 0 } } }
+  // P2c 裁定「当前视图」谓词：当前团队通知 + 平台通知（teamId 为空）
+  const inCurrentView = (n: Notification, tid: number) => n.userId === u.id && (n.teamId === tid || n.teamId === null)
+  if (method === 'GET' && seg[1] === 'unread-counts-by-team') { const teams: Record<string, number> = {}; for (const n of notifications) if (n.userId === u.id && !n.readAt && n.teamId != null) teams[String(n.teamId)] = (teams[String(n.teamId)] ?? 0) + 1; return { status: 200, data: { teams, platform: notifications.filter(n => n.userId === u.id && !n.readAt && n.teamId === null).length } } }
+  if (method === 'GET' && seg[1] === 'unread-count') { const tid = Number(q.get('teamId') ?? 0); return { status: 200, data: { unread: notifications.filter(n => n.userId === u.id && !n.readAt && (!tid || inCurrentView(n, tid))).length } } }
+  if (method === 'POST' && seg[1] === 'read-all') { const tid = Number(body?.teamId ?? 0); let marked = 0; for (const n of notifications) if (n.userId === u.id && !n.readAt && (!tid || inCurrentView(n, tid))) { n.readAt = new Date().toISOString(); marked++ } return { status: 200, data: { marked } } }
   if (method === 'POST' && seg[2] === 'read') { const n = notifications.find(x => x.id === Number(seg[1]) && x.userId === u.id); if (!n) throw err(404, 'NOT_FOUND', '通知不存在'); n.readAt = n.readAt ?? new Date().toISOString(); return { status: 200, data: notifView(n) } }
+  if (method === 'GET' && seg.length === 1 && q.get('scope') === 'current') { const tid = Number(q.get('teamId') ?? 0); if (!tid) throw err(400, 'VALIDATION', 'scope=current 需要 teamId（当前团队）'); const all = notifications.filter(n => inCurrentView(n, tid)); const limit = Number(q.get('limit') ?? 50); return { status: 200, data: { items: all.slice(0, limit).map(notifView), unreadCount: all.filter(n => !n.readAt).length } } }
   if (method === 'GET' && seg.length === 1) { const tid = Number(q.get('teamId') ?? 0); const limit = Number(q.get('limit') ?? 50); return { status: 200, data: notifications.filter(n => n.userId === u.id && (!tid || n.teamId === tid)).slice(0, limit).map(notifView) } }
   throw err(404, 'NOT_FOUND', '接口不存在')
 }

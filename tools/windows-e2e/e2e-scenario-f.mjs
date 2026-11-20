@@ -247,6 +247,100 @@ try {
   step('F6b: /admin renders the platform admin view for the built-in admin')
   await actx.close()
 
+  // --- F7: P2c invariant - badge == panel unread == title (n), 7 scenarios ---
+  // (zu5skyzg ruling: one backend query feeds badge, panel and title.)
+  async function panelUnread(page) {
+    await page.locator('button.bell').click()
+    await page.waitForTimeout(700)
+    const n = await page.locator('.bp-item.un').count()
+    await page.locator('button.bell').click()
+    await page.waitForTimeout(200)
+    return n
+  }
+  async function titleUnread(page) {
+    const t = await page.title()
+    const m = t.match(/^\((\d+)\)/)
+    return m ? parseInt(m[1], 10) : 0
+  }
+  async function assertInvariant(page, label) {
+    const deadline = Date.now() + 10000
+    let badge = -1, title = -1
+    while (Date.now() < deadline) {
+      badge = await bellCount(page)
+      title = await titleUnread(page)
+      if (badge === title) break
+      await page.waitForTimeout(400)
+    }
+    const panel = await panelUnread(page)
+    if (!(badge === panel && badge === title)) fail(`F7 ${label}: badge=${badge} panelUnread=${panel} title=${title} disagree`)
+    step(`F7 ${label}: badge == panel unread == title == ${badge}`)
+    return badge
+  }
+  await S.page.goto(BASE + '/workbench', { waitUntil: 'load' })
+  await S.page.waitForSelector('aside.sidebar', { timeout: 15000 })
+  await dismissOverlays(S.page)
+  // (b) platform notification already delivered in F3/F4
+  await assertInvariant(S.page, 'platform notification (feedback status)')
+  // (a) team notification: P assigns an item to S inside the feedback team
+  const meS = await api(S.ctx, 'GET', '/auth/me')
+  const before7 = await bellCount(S.page)
+  await api(P.ctx, 'POST', `/teams/${fteam.id}/items`, { type: 'DEFECT', title: 'F7 assign to submitter', destination: 'ASSIGN', ownerIds: [meS.id], priority: 'P1' })
+  await waitBell(S.page, before7 + 1, 'F7 team assignment -> submitter')
+  await assertInvariant(S.page, 'team notification (assignment)')
+  // (c) mark single read: click the feedback notification in the panel;
+  // it must also navigate to the feedback detail (ruling rule 5)
+  await S.page.locator('button.bell').click()
+  await S.page.waitForSelector('.bp-item', { timeout: 8000 })
+  const fbItem = S.page.locator('.bp-item', { hasText: FB_TITLE }).first()
+  if (await fbItem.count() === 0) fail('F7: no feedback entry in bell panel')
+  const unreadBeforeClick = await bellCount(S.page)
+  await fbItem.click()
+  await S.page.waitForURL(/\/feedback\?focus=\d+/, { timeout: 10000 })
+  step('F7: feedback notification click navigates to /feedback?focus=' + fb.id)
+  const afterClick = await assertInvariant(S.page, 'single mark-read (feedback click)')
+  if (afterClick !== unreadBeforeClick - 1) fail(`F7: single read should drop unread by 1: ${unreadBeforeClick} -> ${afterClick}`)
+  // (d) mark all read: only the current view is affected, everything zeroes
+  await S.page.goto(BASE + '/workbench', { waitUntil: 'load' })
+  await S.page.waitForSelector('aside.sidebar', { timeout: 15000 })
+  await S.page.locator('button.bell').click()
+  await S.page.waitForTimeout(700)
+  await S.page.locator('.bp-link', { hasText: '全部已读' }).click()
+  await S.page.waitForTimeout(800)
+  await S.page.locator('button.bell').click()
+  const zero = await assertInvariant(S.page, 'mark all read')
+  if (zero !== 0) fail(`F7: unread after mark-all should be 0, got ${zero}`)
+  if ((await S.page.title()).startsWith('(')) fail('F7: title still carries a count after mark-all')
+  // (e)+(f) multi-team: a notification in another team must not enter the
+  // current badge; the team switcher shows that team's own unread count;
+  // switching teams moves the badge to the new view
+  const team2 = await api(S.ctx, 'POST', '/teams', { name: 'F7第二小组', code: 'F2', joinApproval: false })
+  await api(P.ctx, 'POST', '/teams/join', { inviteCode: team2.inviteCode })
+  await api(P.ctx, 'POST', `/teams/${team2.id}/items`, { type: 'DEFECT', title: 'F7 second-team assignment', destination: 'ASSIGN', ownerIds: [meS.id], priority: 'P2' })
+  await S.page.waitForTimeout(1500)
+  const stillZero = await assertInvariant(S.page, 'other-team notification excluded')
+  if (stillZero !== 0) fail(`F7: other-team notification leaked into current badge: ${stillZero}`)
+  await S.page.locator('button.team-switch').click()
+  await S.page.waitForTimeout(700)
+  const team2Row = S.page.locator('.ovl-item', { hasText: 'F7第二小组' }).first()
+  const tmUnread = team2Row.locator('.tm-unread')
+  if (await tmUnread.count() === 0 || (await tmUnread.first().innerText()).trim() !== '1') fail('F7: team switcher does not show unread=1 for the second team')
+  step('F7: team switcher shows second team unread = 1')
+  await team2Row.click()
+  await S.page.waitForSelector('aside.sidebar', { timeout: 15000 })
+  await S.page.waitForTimeout(900)
+  const inTeam2 = await assertInvariant(S.page, 'after team switch')
+  if (inTeam2 !== 1) fail(`F7: unread in second team view should be 1, got ${inTeam2}`)
+  // (g) SSE reconnect: a full reload re-subscribes (connected reconcile);
+  // a platform notification afterwards still lands live and stays invariant
+  await S.page.reload({ waitUntil: 'load' })
+  await S.page.waitForSelector('aside.sidebar', { timeout: 15000 })
+  await S.page.waitForTimeout(900)
+  await adminApi('PATCH', `/feedback/${fb.id}/official-reply`, { officialReply: 'F7 重连后官方回复' })
+  await waitBell(S.page, 2, 'F7 reconnect -> platform notification')
+  await assertInvariant(S.page, 'platform notification after reconnect')
+  await S.page.screenshot({ path: `${SHOTS}/F4-p2c-invariant.png` })
+  step('F7: P2c invariant holds across all 7 scenarios')
+
   console.log('[scenario-f] ALL PASSED')
 } catch (e) {
   console.error('[scenario-f] FAILED:', e.message)

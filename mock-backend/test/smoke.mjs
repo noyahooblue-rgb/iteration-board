@@ -447,6 +447,18 @@ r = await req('PATCH', `/feedback/${fb.id}/status`, { status: 'REJECTED' }); che
 r = await req('PATCH', `/feedback/${fb.id}/status`, { status: 'ACCEPTED', plannedVersion: '1.2.0' }); check('1.1.0 管理员采纳填计划版本', r.status === 200 && r.data.status === 'ACCEPTED' && r.data.plannedVersion === '1.2.0')
 check('1.1.0 状态变化已通知提交人', __testHooks.notifications().some(n => n.userId === 3 && n.content.includes('冒烟反馈')))
 r = await req('PATCH', `/feedback/${fb.id}/official-reply`, { officialReply: '已排入 1.2.0' }); check('1.1.0 管理员官方回复（PATCH）', r.status === 200 && r.data.officialReply === '已排入 1.2.0')
+// P2c 裁定（zu5skyzg）：当前视图 = 当前团队 + 平台通知；角标与面板同源恒等；全部已读只作用于当前视图；反馈搜索仅本人
+await login('member')
+const myNotifsP2c = __testHooks.notifications().filter(n => n.userId === 3)
+const expPlatformUnread = myNotifsP2c.filter(n => n.teamId === null && !n.readAt).length
+const expTeam1Unread = myNotifsP2c.filter(n => n.teamId === 1 && !n.readAt).length
+r = await req('GET', '/notifications?scope=current&teamId=1'); check('P2c 当前视图含平台通知（反馈带 refId）且条目 teamId 仅 1/空', r.status === 200 && Array.isArray(r.data.items) && r.data.items.some(n => n.type === 'FEEDBACK_STATUS' && n.teamId === null && n.refId === fb.id) && r.data.items.every(n => n.teamId === 1 || n.teamId === null), JSON.stringify(r.data).slice(0, 200))
+check('P2c 当前视图 unreadCount = 团队未读 + 平台未读', r.data.unreadCount === expTeam1Unread + expPlatformUnread, `unreadCount=${r.data.unreadCount} team=${expTeam1Unread} platform=${expPlatformUnread}`)
+r = await req('GET', '/notifications/unread-count?teamId=1'); check('P2c 角标口径与面板恒等（unread-count == scope unreadCount）', r.status === 200 && r.data.unread === expTeam1Unread + expPlatformUnread, JSON.stringify(r.data))
+r = await req('GET', '/notifications/unread-counts-by-team'); check('P2c 按团队未读拆分（平台单列）', r.status === 200 && r.data.platform === expPlatformUnread && (r.data.teams['1'] ?? 0) === expTeam1Unread, JSON.stringify(r.data))
+r = await req('GET', '/feedback/search?q=冒烟'); check('P2c 反馈搜索只返回本人提交', r.status === 200 && r.data.length >= 1 && r.data.every(f => f.submitterId === 3), JSON.stringify(r.data).slice(0, 120))
+r = await req('POST', '/notifications/read-all', { teamId: 1 }); check('P2c 全部已读作用于当前视图（团队+平台）', r.status === 200 && r.data.marked === expTeam1Unread + expPlatformUnread, JSON.stringify(r.data))
+r = await req('GET', '/notifications?scope=current&teamId=1'); check('P2c 全部已读后当前视图未读归零', r.status === 200 && r.data.unreadCount === 0, JSON.stringify(r.data))
 await login('member')
 r = await req('PATCH', `/feedback/${fb.id}`, { title: '再改' }); check('1.1.0 非 NEW 状态反馈不可编辑 409 FEEDBACK_LOCKED', r.status === 409 && r.data.code === 'FEEDBACK_LOCKED', JSON.stringify(r.data))
 await login('admin')

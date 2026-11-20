@@ -35,6 +35,7 @@ public final class NotificationView {
         m.put("type", n.getType());
         m.put("category", categoryOf(n.getType()));
         m.put("itemId", n.getItem() == null ? null : n.getItem().getId());
+        m.put("refId", n.getRefId());
         m.put("itemCode", n.getItem() == null ? null : n.getItem().getCode());
         m.put("actorId", n.getActor() == null ? null : n.getActor().getId());
         m.put("content", n.getContent());

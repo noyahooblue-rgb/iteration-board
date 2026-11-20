@@ -9,7 +9,7 @@
       </button>
       <OverlayMenu :open="teamMenu && !ui.collapsed" :anchor="teamBtn" @close="teamMenu=false">
         <div class="ovl-col">
-          <button v-for="t in team.teams" :key="t.id" class="ovl-item" @click="onSwitch(t.id)">{{ t.name }}（{{ t.code }}）<Check v-if="t.id===team.currentId" :size="15" class="ovl-check"/></button>
+          <button v-for="t in team.teams" :key="t.id" class="ovl-item" @click="onSwitch(t.id)">{{ t.name }}（{{ t.code }}）<span v-if="shell.teamUnread[t.id]" class="tm-unread">{{ shell.teamUnread[t.id] > 99 ? '99+' : shell.teamUnread[t.id] }}</span><Check v-if="t.id===team.currentId" :size="15" class="ovl-check"/></button>
           <RouterLink to="/teams/new" class="tm-link" @click="teamMenu=false">＋ 创建 / 加入小组</RouterLink>
         </div>
       </OverlayMenu>
@@ -53,6 +53,7 @@
           <div class="bp-list">
             <button v-for="n in shell.notifs" :key="n.id" class="bp-item" :class="{un:n.readAt===null}" @click="openNotif(n)">
               <span class="bp-cat">{{NOTIFICATION_CATEGORY_META[n.category] ?? n.category}}</span>
+              <span v-if="n.teamId===null" class="bp-plat">平台</span>
               <span class="bp-body"><span class="bp-content">{{n.content}}</span><span class="bp-time">{{n.itemCode ? n.itemCode+' · ' : ''}}{{fmtDateTime(n.createdAt)}}</span></span>
               <span v-if="n.readAt===null" class="bp-dot"/>
             </button>
@@ -126,8 +127,16 @@ function onKey(e: KeyboardEvent){
 // ---------- 通知中心（M3）：未读数/列表/已读在 shell store（1.0.4 并入全局计数），SSE 实时推送也在 store ----------
 const bellOpen = ref(false)
 function toggleBell(){ bellOpen.value = !bellOpen.value; if (bellOpen.value) { shell.loadNotifs(); shell.loadUnread() } }
-async function openNotif(n: NotificationItem){ await shell.markRead(n); bellOpen.value = false; if (n.itemId) router.push(`/task/${n.itemId}`) }
-function navigateNotif(n: any){ if (n?.itemId) router.push(`/task/${n.itemId}`) }
+// 通知点击跳转（P2c 裁定规则 5）：事项 → 事项详情；反馈类（平台通知，带 refId）→ 反馈详情定位；
+// 账号安全类 → 个人设置（改密区）；公告类暂无独立详情页（平台无公告功能），仅标已读不跳转。
+function notifTarget(n: NotificationItem): string | null {
+  if (n.itemId) return `/task/${n.itemId}`
+  if (n.type.startsWith('FEEDBACK') && n.refId) return `/feedback?focus=${n.refId}`
+  if (/PASSWORD|SECURITY/.test(n.type)) return '/me/settings'
+  return null
+}
+async function openNotif(n: NotificationItem){ await shell.markRead(n); bellOpen.value = false; const t = notifTarget(n); if (t) router.push(t) }
+function navigateNotif(n: any){ const t = n ? notifTarget(n as NotificationItem) : null; if (t) router.push(t) }
 async function markAllRead(){ const ok = await shell.markAllRead(); toast.show(ok ? '已全部标为已读' : '操作失败') }
 // 路由变化刷新一次计数（1.0.4 A）：进入相应页面/处理后角标随之减少。
 watch(() => route.path, () => { shell.refresh() })
@@ -205,6 +214,9 @@ nav{display:flex;flex-direction:column;gap:2px;margin-top:8px}
 .bp-item:hover{background:var(--hover)}
 .bp-item.un{background:color-mix(in srgb, var(--theme) 6%, transparent)}
 .bp-cat{flex:none;font-size:11px;font-weight:700;color:var(--primary-deep);background:var(--sel);border-radius:6px;padding:2px 6px;margin-top:1px}
+.bp-plat{flex:none;font-size:11px;font-weight:700;color:var(--on-color);background:var(--c-adhoc);border-radius:6px;padding:2px 6px;margin-top:1px}
+.tm-unread{margin-left:auto;background:var(--unread);color:var(--on-color);font-size:11px;font-weight:700;border-radius:99px;padding:0 7px}
+.tm-unread + .ovl-check{margin-left:8px}
 .bp-body{flex:1;display:flex;flex-direction:column;gap:2px;min-width:0}
 .bp-content{font-size:13.5px;line-height:1.45}
 .bp-time{font-size:11.5px;color:var(--text-3)}

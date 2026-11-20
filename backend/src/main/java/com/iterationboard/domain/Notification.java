@@ -21,6 +21,9 @@ public class Notification {
     private String type;
     @ManyToOne(fetch = FetchType.LAZY) @JoinColumn(name = "item_id")
     private Item item;
+    /** 平台级对象的引用 id（如意见反馈 id），供通知点击跳转定位；事项类通知为空（走 item）。 */
+    @Column(name = "ref_id")
+    private Long refId;
     @ManyToOne(fetch = FetchType.LAZY) @JoinColumn(name = "actor_id")
     private AppUser actor;
     @Column(length = 500)
@@ -36,6 +39,8 @@ public class Notification {
     public void setTeam(Team v) { team = v; }
     public String getType() { return type; }
     public Item getItem() { return item; }
+    public Long getRefId() { return refId; }
+    public void setRefId(Long v) { refId = v; }
     public AppUser getActor() { return actor; }
     public String getContent() { return content; }
     public void setContent(String v) { content = v; }

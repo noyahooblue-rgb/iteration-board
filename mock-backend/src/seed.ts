@@ -61,10 +61,10 @@ export function buildSeedAuditLogs() {
 }
 export function buildSeedNotifications() {
   return [
-    { id: 9001, userId: 1, teamId: 1, type: 'ASSIGNMENT', category: 'ASSIGNMENT', itemId: 25, itemCode: 'SKY-25', actorId: 2, content: '你被指派了 SKY-25 编辑器协同冲突方案分析', readAt: null as string|null, createdAt: '2026-11-17T08:32:00' },
-    { id: 9002, userId: 1, teamId: 1, type: 'REMINDER', category: 'REMINDER', itemId: 14, itemCode: 'SKY-14', actorId: null, content: 'SKY-14 已阻塞：等设计稿确认', readAt: null as string|null, createdAt: '2026-11-17T09:05:00' },
-    { id: 9003, userId: 3, teamId: 1, type: 'NUDGE', category: 'NUDGE', itemId: 4, itemCode: 'SKY-4', actorId: 1, content: '林小满 催了你一下：SKY-4 登录页视觉还原与切图', readAt: null as string|null, createdAt: '2026-11-17T09:12:00' },
-    { id: 9004, userId: 2, teamId: 1, type: 'MENTION', category: 'MENTION', itemId: 1, itemCode: 'SKY-1', actorId: 3, content: '苏晴 在 SKY-1 的评论中 @ 了你', readAt: '2026-11-16T18:20:00' as string|null, createdAt: '2026-11-15T10:12:00' },
+    { id: 9001, userId: 1, teamId: 1, type: 'ASSIGNMENT', category: 'ASSIGNMENT', itemId: 25, itemCode: 'SKY-25', refId: null, actorId: 2, content: '你被指派了 SKY-25 编辑器协同冲突方案分析', readAt: null as string|null, createdAt: '2026-11-17T08:32:00' },
+    { id: 9002, userId: 1, teamId: 1, type: 'REMINDER', category: 'REMINDER', itemId: 14, itemCode: 'SKY-14', refId: null, actorId: null, content: 'SKY-14 已阻塞：等设计稿确认', readAt: null as string|null, createdAt: '2026-11-17T09:05:00' },
+    { id: 9003, userId: 3, teamId: 1, type: 'NUDGE', category: 'NUDGE', itemId: 4, itemCode: 'SKY-4', refId: null, actorId: 1, content: '林小满 催了你一下：SKY-4 登录页视觉还原与切图', readAt: null as string|null, createdAt: '2026-11-17T09:12:00' },
+    { id: 9004, userId: 2, teamId: 1, type: 'MENTION', category: 'MENTION', itemId: 1, itemCode: 'SKY-1', refId: null, actorId: 3, content: '苏晴 在 SKY-1 的评论中 @ 了你', readAt: '2026-11-16T18:20:00' as string|null, createdAt: '2026-11-15T10:12:00' },
   ]
 }
 export function buildSeedReports() {

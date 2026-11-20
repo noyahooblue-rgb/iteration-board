@@ -21,7 +21,7 @@ export interface SavedFilter{id:number;name:string;criteria:Record<string,any>;c
 export interface PlanningGroup{task:Item|null;items:Item[]}
 export interface Planning{iteration:Iteration;groups:PlanningGroup[];loads:{userId:number;points:number;itemCount:number}[];capacities:{userId:number;availableDays:number;claimedPoints:number;remainingDays:number;capacityPoints:number;overCapacity:boolean}[]}
 // M3 协同类型（契约 0.3.0）
-export interface NotificationItem{id:number;teamId:number|null;type:string;category:string;itemId:number|null;itemCode:string|null;actorId:number|null;content:string;readAt:string|null;createdAt:string}
+export interface NotificationItem{id:number;teamId:number|null;type:string;category:string;itemId:number|null;itemCode:string|null;refId:number|null;actorId:number|null;content:string;readAt:string|null;createdAt:string}
 export interface NudgeResult{itemId:number;nudgedUserIds:number[];redirectedToLeader:boolean;nudgeCount:number}
 export interface KeyDate{id:number;iterationId:number;title:string;date:string;category:string}
 export interface BurndownPoint{date:string;remainingEstimate:number;remainingCount:number|null;doneCount:number|null;live?:boolean}

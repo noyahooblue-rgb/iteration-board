@@ -913,7 +913,7 @@ class V110IntegrationTest {
         String ib = info.getResponse().getContentAsString();
         assertThat((String) JsonPath.read(ib, "$.appVersion")).isEqualTo("1.1.0");
         assertThat((String) JsonPath.read(ib, "$.databaseVersion")).contains("PostgreSQL");
-        assertThat((String) JsonPath.read(ib, "$.flywayVersion")).isEqualTo("8");
+        assertThat((String) JsonPath.read(ib, "$.flywayVersion")).isEqualTo("9");
         assertThat((String) JsonPath.read(ib, "$.serviceStartType")).isEqualTo("未知");
         assertThat(ib).contains("\"lanAddresses\"");
         assertThat(ib).contains("\"installDir\"");

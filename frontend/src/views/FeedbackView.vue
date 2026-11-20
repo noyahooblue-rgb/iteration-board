@@ -13,7 +13,7 @@
   <p v-if="loading" class="small">加载中…</p>
   <p v-if="loadErr" class="errbar">{{loadErr}}</p>
   <div class="list">
-    <GlassPanel v-for="f in list" :key="f.id" class="fcard">
+    <GlassPanel v-for="f in list" :key="f.id" :id="'fb-' + f.id" class="fcard" :class="{flash: focusId === f.id}">
       <div class="frow1">
         <label v-if="isAdmin" class="ck"><input type="checkbox" :value="f.id" v-model="selectedIds"/></label>
         <span class="tpill" :class="f.type">{{FEEDBACK_TYPE_LABELS[f.type]}}</span>
@@ -57,14 +57,15 @@
 </AppShell>
 </template>
 <script setup lang="ts">
-import { ref, reactive, computed, onMounted } from 'vue'
+import { ref, reactive, computed, onMounted, nextTick } from 'vue'
+import { useRoute } from 'vue-router'
 import { Plus, ThumbsUp } from 'lucide-vue-next'
 import AppShell from '../components/AppShell.vue'; import GlassPanel from '../components/GlassPanel.vue'; import AppButton from '../components/AppButton.vue'; import AppInput from '../components/AppInput.vue'
 import { api, apiMode, ApiError } from '../api/http'
 import { FEEDBACK_TYPE_LABELS, FEEDBACK_STATUS_LABELS, type FeedbackItem, type FeedbackCommentItem } from '../api/types'
 import { fmtDateTime } from '../utils/datetime'
 import { useAuth } from '../stores/auth'; import { useUi } from '../stores/ui'; import { useToast } from '../stores/toast'
-const auth = useAuth(), ui = useUi(), toast = useToast()
+const auth = useAuth(), ui = useUi(), toast = useToast(), route = useRoute()
 const isAdmin = computed(() => !!auth.user?.platformAdmin)
 const list = ref<FeedbackItem[]>([]), loading = ref(false), loadErr = ref(''), exporting = ref(false)
 const filter = reactive({ status: '', type: '', sort: 'PLUS_ONES' })
@@ -84,7 +85,19 @@ async function load() {
     for (const f of list.value) statusDraft[f.id] ??= { status: f.status, plannedVersion: f.plannedVersion ?? '', rejectReason: f.rejectReason ?? '', releasedVersion: f.releasedVersion ?? '' }
   } catch (e) { loadErr.value = e instanceof ApiError ? e.message : '加载失败' } finally { loading.value = false }
 }
-onMounted(load)
+// 通知点击跳转定位（P2c 裁定规则 5）：/feedback?focus=<id> 清空筛选后滚动到该条并高亮
+const focusId = ref<number | null>(null)
+async function applyFocus() {
+  const fid = Number(route.query.focus ?? 0)
+  if (!fid) { await load(); return }
+  filter.status = ''; filter.type = ''
+  await load()
+  focusId.value = fid
+  await nextTick()
+  document.getElementById('fb-' + fid)?.scrollIntoView({ behavior: 'smooth', block: 'center' })
+  setTimeout(() => { if (focusId.value === fid) focusId.value = null }, 2800)
+}
+onMounted(applyFocus)
 async function toggleUp(f: FeedbackItem) { try { const r = f.myPlusOne ? await api.del(`/feedback/${f.id}/plus-one`) : await api.post(`/feedback/${f.id}/plus-one`); Object.assign(f, r) } catch (e) { toast.show(e instanceof ApiError ? e.message : '操作失败') } }
 async function addComment(f: FeedbackItem) { const c = (commentDraft[f.id] ?? '').trim(); if (!c) return
   try { const cm: FeedbackCommentItem = await api.post(`/feedback/${f.id}/comments`, { content: c }); commentDraft[f.id] = ''; (commentsMap[f.id] ??= []).push(cm); f.commentCount++; toast.show('评论已发表') } catch (e) { toast.show(e instanceof ApiError ? e.message : '发表失败') } }
@@ -120,6 +133,7 @@ async function exportSelected() {
 .errbar{color:var(--c-red);background:var(--danger-bg-soft);border-radius:12px;padding:10px 14px;margin-bottom:12px}
 .list{display:flex;flex-direction:column;gap:12px}
 .fcard{padding:14px 16px}
+.fcard.flash{outline:2px solid var(--theme);outline-offset:2px}
 .frow1{display:flex;gap:10px;align-items:center}.frow1 .grow{flex:1}
 .ck input{width:17px;height:17px}
 .tpill{font-size:11px;font-weight:700;border-radius:6px;padding:2px 7px;background:var(--sel);color:var(--primary-deep);flex:none}

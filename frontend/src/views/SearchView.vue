@@ -20,27 +20,38 @@
     <p class="small desc">{{it.description}}</p>
     <div class="krow foot"><AvatarStack v-if="it.ownerIds.length" :ids="it.ownerIds" :size="20"/><span class="tiny">{{fmt(it.updatedAt)}} 更新</span></div>
   </article>
-  <p v-if="searched && !shown.length" class="small">没有匹配的事项，换个关键词试试。</p>
+  <template v-if="searched && fbResults.length">
+    <p class="small" style="margin:16px 0 8px"><b>我的反馈</b>（仅本人提交）</p>
+    <article v-for="f in fbResults" :key="'fb' + f.id" class="kcard fbcard">
+      <div class="krow"><span class="small">意见反馈</span><span class="small">{{FEEDBACK_STATUS_LABELS[f.status] ?? f.status}}</span><span style="flex:1"/><span class="tiny">{{fmt(f.createdAt)}}</span></div>
+      <button class="ktitle press" @click="router.push(`/feedback?focus=${f.id}`)">{{f.title}}</button>
+      <p class="small desc">{{f.description}}</p>
+    </article>
+  </template>
+  <p v-if="searched && !shown.length && !fbResults.length" class="small">没有匹配的结果，换个关键词试试。</p>
+  <p v-else-if="searched && !shown.length" class="small">没有匹配的事项，换个关键词试试。</p>
   <p v-if="!searched" class="small">输入关键词后回车，或按 Ctrl+K 随时呼出命令面板搜索。</p>
   <ItemDrawer :open="drawerOpen" :item-id="openId" @close="drawerOpen=false" @changed="refreshResults" @open-item="(id:number)=>{openId=id}"/>
 </AppShell>
 </template>
 <script setup lang="ts">
 import { ref, computed, onMounted, watch } from 'vue'
-import { useRoute } from 'vue-router'
+import { useRoute, useRouter } from 'vue-router'
 import { Search, BookmarkPlus, X } from 'lucide-vue-next'
 import AppShell from '../components/AppShell.vue'; import AppButton from '../components/AppButton.vue'; import TypeBadge from '../components/TypeBadge.vue'; import StatusPill from '../components/StatusPill.vue'; import AvatarStack from '../components/AvatarStack.vue'; import ItemDrawer from '../components/ItemDrawer.vue'
-import { api, ApiError } from '../api/http'; import { TYPE_META, itemColor, type Item, type SavedFilter } from '../api/types'
+import { api, ApiError } from '../api/http'; import { TYPE_META, itemColor, FEEDBACK_STATUS_LABELS, type Item, type SavedFilter, type FeedbackItem } from '../api/types'
 import { useTeam } from '../stores/team'; import { useToast } from '../stores/toast'
 import { fmtDateTime } from '../utils/datetime'
-const route = useRoute(), team = useTeam(), toast = useToast()
-const q = ref(''), fType = ref(''), results = ref<Item[]>([]), filters = ref<SavedFilter[]>([]), searched = ref(false), searching = ref(false), loadErr = ref('')
+const route = useRoute(), router = useRouter(), team = useTeam(), toast = useToast()
+const q = ref(''), fType = ref(''), results = ref<Item[]>([]), fbResults = ref<FeedbackItem[]>([]), filters = ref<SavedFilter[]>([]), searched = ref(false), searching = ref(false), loadErr = ref('')
 const drawerOpen = ref(false), openId = ref<number|null>(null)
 const shown = computed(()=> fType.value ? results.value.filter(i=>i.type===fType.value) : results.value)
 const fmt = fmtDateTime
-async function run(){ const kw = q.value.trim(); if (!kw) { results.value = []; searched.value = false; return }
+async function run(){ const kw = q.value.trim(); if (!kw) { results.value = []; fbResults.value = []; searched.value = false; return }
   searching.value = true; loadErr.value = ''
-  try { results.value = await api.get(`/teams/${team.currentId}/search?q=${encodeURIComponent(kw)}`); searched.value = true } catch(e){ loadErr.value = e instanceof ApiError ? e.message : '搜索失败' } finally { searching.value = false } }
+  // 事项走团队搜索；反馈只搜本人提交（P2c 裁定举一反三项 2），两路并行、互不阻塞
+  try { results.value = await api.get(`/teams/${team.currentId}/search?q=${encodeURIComponent(kw)}`); searched.value = true } catch(e){ loadErr.value = e instanceof ApiError ? e.message : '搜索失败' } finally { searching.value = false }
+  try { fbResults.value = await api.get(`/feedback/search?q=${encodeURIComponent(kw)}`) } catch { fbResults.value = [] } }
 async function refreshResults(){ if (searched.value) run() }
 async function loadFilters(){ if (team.currentId) filters.value = await api.get(`/teams/${team.currentId}/saved-filters`).catch(()=>[]) }
 async function saveFilter(){ const name = prompt('给这个筛选起个名字'); if (!name?.trim()) return

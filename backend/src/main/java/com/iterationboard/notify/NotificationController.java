@@ -23,23 +23,33 @@ public class NotificationController {
     private final UserRepo userRepo;
     private final CurrentUser currentUser;
     private final SseRegistry sseRegistry;
+    private final NotificationQueryService queryService;
 
     public NotificationController(NotificationRepo notificationRepo, UserRepo userRepo,
-                                  CurrentUser currentUser, SseRegistry sseRegistry) {
+                                  CurrentUser currentUser, SseRegistry sseRegistry,
+                                  NotificationQueryService queryService) {
         this.notificationRepo = notificationRepo;
         this.userRepo = userRepo;
         this.currentUser = currentUser;
         this.sseRegistry = sseRegistry;
+        this.queryService = queryService;
     }
 
     // 读事务内映射：NotificationView.toMap 读 item/actor 等 LAZY 关联，无事务时生产路径 500（修订二端点探针发现，同 Team 口径）
+    // scope=current（P2c 裁定）：返回 { items, unreadCount }——当前团队通知 + 平台通知混排，
+    // 角标/面板/标题共用此口径；不带 scope 时保持旧列表形状（全部或单团队）。
     @Transactional(readOnly = true)
     @GetMapping("/notifications")
-    public List<Map<String, Object>> list(@RequestParam(required = false) Long teamId,
-                                          @RequestParam(required = false) Boolean unreadOnly,
-                                          @RequestParam(required = false) String category,
-                                          @RequestParam(required = false) Integer limit) {
+    public Object list(@RequestParam(required = false) Long teamId,
+                       @RequestParam(required = false) Boolean unreadOnly,
+                       @RequestParam(required = false) String category,
+                       @RequestParam(required = false) Integer limit,
+                       @RequestParam(required = false) String scope) {
         AppUser me = currentUser.require();
+        if ("current".equals(scope)) {
+            if (teamId == null) throw ApiException.validation("scope=current 需要 teamId（当前团队）");
+            return queryService.currentView(me, teamId, unreadOnly, category, limit);
+        }
         List<Notification> all = teamId == null
                 ? notificationRepo.findByRecipientIdOrderByCreatedAtDesc(me.getId())
                 : notificationRepo.findByRecipientIdAndTeamIdOrderByCreatedAtDesc(me.getId(), teamId);
@@ -51,13 +61,20 @@ public class NotificationController {
                 .toList();
     }
 
+    /** 带 teamId 时为「当前视图」口径（当前团队 + 平台，与铃铛面板同一谓词）；不带时为全部未读。 */
     @GetMapping("/notifications/unread-count")
     public Map<String, Object> unreadCount(@RequestParam(required = false) Long teamId) {
         AppUser me = currentUser.require();
         long count = teamId == null
                 ? notificationRepo.countByRecipientIdAndReadAtIsNull(me.getId())
-                : notificationRepo.countByRecipientIdAndTeamIdAndReadAtIsNull(me.getId(), teamId);
+                : queryService.unreadCountCurrent(me.getId(), teamId);
         return Map.of("unread", count);
+    }
+
+    /** 团队切换器口径：各团队各自未读数 + 平台未读数（裁定规则 3）。 */
+    @GetMapping("/notifications/unread-counts-by-team")
+    public Map<String, Object> unreadCountsByTeam() {
+        return queryService.unreadCountsByTeam(currentUser.require());
     }
 
     @PostMapping("/notifications/{notificationId}/read")
@@ -76,6 +93,7 @@ public class NotificationController {
 
     public record ReadAllRequest(Long teamId) { }
 
+    /** 带 teamId 时只作用于当前视图（当前团队 + 平台，裁定规则 6）；不带时作用于全部。 */
     @PostMapping("/notifications/read-all")
     @Transactional
     public Map<String, Object> markAllRead(@RequestBody(required = false) ReadAllRequest req) {
@@ -83,7 +101,7 @@ public class NotificationController {
         Long teamId = req == null ? null : req.teamId();
         List<Notification> all = teamId == null
                 ? notificationRepo.findByRecipientIdOrderByCreatedAtDesc(me.getId())
-                : notificationRepo.findByRecipientIdAndTeamIdOrderByCreatedAtDesc(me.getId(), teamId);
+                : notificationRepo.findCurrentView(me.getId(), teamId);
         Instant now = Instant.now();
         int marked = 0;
         for (Notification n : all) {
@@ -96,10 +114,11 @@ public class NotificationController {
         return Map.of("marked", marked);
     }
 
+    /** teamId = 订阅时的当前团队：SSE 增量按该视图口径带 unreadCount（裁定规则 2）。 */
     @GetMapping(value = "/notifications/stream", produces = MediaType.TEXT_EVENT_STREAM_VALUE)
-    public SseEmitter stream() {
+    public SseEmitter stream(@RequestParam(required = false) Long teamId) {
         AppUser me = currentUser.require();
-        return sseRegistry.subscribe(me.getId());
+        return sseRegistry.subscribe(me.getId(), teamId);
     }
 
     @GetMapping("/auth/notification-prefs")

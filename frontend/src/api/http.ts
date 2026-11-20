@@ -7,7 +7,10 @@ export { DEMO_ACCOUNTS, DEMO_SUBTITLE, DEMO_FILL_HINT, DEMO_REG_CLOSED_TEXT, DEM
 // 通知实时推送：real 走 EventSource(SSE)；mock 走适配器内的页面级事件总线。返回退订函数。
 export function subscribeEvents(cb: (n: any) => void): () => void {
   if (MODE === 'mock') return mockSubscribe(cb)
-  const es = new EventSource('/api/v1/notifications/stream')
+  // 订阅带上当前团队（P2c 裁定）：服务端按该视图口径在增量里给 unreadCount；
+  // 切换团队时外壳整页重载，会以新团队重新订阅。
+  const teamId = Number(localStorage.getItem('current-team') ?? 0)
+  const es = new EventSource('/api/v1/notifications/stream' + (teamId ? `?teamId=${teamId}` : ''))
   const handler = (e: MessageEvent) => { try { cb(JSON.parse(e.data)) } catch {} }
   es.addEventListener('notification', handler as EventListener)
   // 断线重连/休眠恢复：EventSource 自带自动重连；服务端每次订阅都先发 connected 事件，

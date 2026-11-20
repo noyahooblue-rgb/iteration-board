@@ -38,6 +38,12 @@ public class NotifyService {
      */
     public void notifyInTeam(AppUser recipient, String type, Item item, Team team, AppUser actor, String content,
                              boolean includeSelf) {
+        notifyInTeam(recipient, type, item, team, actor, content, includeSelf, null);
+    }
+
+    /** refId：平台级对象的引用 id（如反馈 id），供通知点击跳转定位；事项类通知传 null。 */
+    public void notifyInTeam(AppUser recipient, String type, Item item, Team team, AppUser actor, String content,
+                             boolean includeSelf, Long refId) {
         if (recipient == null) return;
         if (!includeSelf && actor != null && recipient.getId().equals(actor.getId())) return;
         if (!NotificationPrefs.enabled(recipient, NotificationView.categoryOf(type))) return;
@@ -52,14 +58,33 @@ public class NotifyService {
                 Notification existing = recent.get(recent.size() - 1);
                 existing.setContent(safeContent);
                 existing.setCreatedAt(java.time.Instant.now());
+                if (refId != null) existing.setRefId(refId);
                 notificationRepo.save(existing);
-                sseRegistry.push(recipient.getId(), "notification", NotificationView.toMap(existing));
+                pushNotification(existing);
                 return;
             }
         }
         Notification n = new Notification(recipient, type, item, actor, safeContent);
         n.setTeam(team);
+        n.setRefId(refId);
         notificationRepo.save(n);
-        sseRegistry.push(recipient.getId(), "notification", NotificationView.toMap(n));
+        pushNotification(n);
+    }
+
+    /**
+     * SSE 实时推送（走「用户频道」——按接收人推送，平台通知同样实时到达，排查项 1）。
+     * P2c 裁定：增量带 unreadCount，按每个连接订阅时的当前视图团队口径计算
+     * （当前团队未读 + 平台未读，与铃铛面板同一谓词）；未带团队的连接按全部未读口径。
+     */
+    private void pushNotification(Notification n) {
+        Long recipientId = n.getRecipient().getId();
+        sseRegistry.push(recipientId, "notification", viewTeamId -> {
+            java.util.Map<String, Object> payload = new java.util.LinkedHashMap<>(NotificationView.toMap(n));
+            long unread = viewTeamId != null
+                    ? notificationRepo.countCurrentUnread(recipientId, viewTeamId)
+                    : notificationRepo.countByRecipientIdAndReadAtIsNull(recipientId);
+            payload.put("unreadCount", unread);
+            return payload;
+        });
     }
 }
