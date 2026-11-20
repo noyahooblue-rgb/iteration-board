@@ -48,6 +48,26 @@ shift
 goto :parse_args
 :args_done
 if "%TARGET%"=="" set "TARGET=%ROOT%"
+rem --- 0. Install path must be ASCII printable (ruling A) -----
+rem PostgreSQL on Windows hands paths to its own helper
+rem processes through the system ANSI code page; a character
+rem outside the ASCII printable range can be replaced by "?"
+rem there, and initdb then cannot find its own binary
+rem (root-cause ledger #6). Block before changing anything.
+rem The character test itself runs in PowerShell on an
+rem environment variable - never judge characters inside cmd,
+rem where quoting and codepage rules corrupt the test itself.
+set "IB_ROOT=%TARGET%"
+powershell -NoProfile -Command "if ($env:IB_ROOT -match '[^\x20-\x7E]') { exit 1 } else { exit 0 }"
+set "IB_PATH_RC=%ERRORLEVEL%"
+if not "%IB_PATH_RC%"=="0" (
+  echo [ERROR] The install folder path contains non-English characters: %TARGET%.
+  echo [ERROR] PostgreSQL cannot run from such a path reliably. Move the whole
+  echo [ERROR] folder to a path with only English letters, digits and spaces,
+  echo [ERROR] for example D:\IterationBoard, then run migrate-import.bat again.
+  call :ib_pause
+  exit /b 1
+)
 if not exist "%TARGET%\tmp" mkdir "%TARGET%\tmp"
 net session >nul 2>&1
 if errorlevel 1 (

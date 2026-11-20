@@ -1,5 +1,7 @@
 # Windows 冒烟（CI 档 2，Claude 裁定 2026-11-20 诊断策略）：
-#   解包 → install（中文+空格路径、中文 TEMP、chcp 936）→ 健康检查
+#   S0 中文路径拦截断言（裁定 A，3wzzexbc：install 必须非 0 退出、
+#   输出路径提示、且未注册服务/未建数据目录）→ 解包到空格路径 →
+#   install（空格路径、中文 TEMP、chcp 936）→ 健康检查
 #   → 用密码文件登录 admin → 改密（应用应删除密码文件）→ stop → start
 #   → 用新密码登录 → uninstall。每步输出单独落证据目录，失败不中断
 #   证据收集。目标 ≤20 分钟；全量 E2E 在档 3（windows-verify.ps1），
@@ -13,10 +15,12 @@ param(
 $ErrorActionPreference = 'Continue'
 $script:Failures = @()
 $Evidence = Join-Path $WorkRoot 'evidence'
-$PkgParent = Join-Path $WorkRoot '迭代 平台'
+$BlockedParent = Join-Path $WorkRoot '迭代 平台'
+$BlockedRoot = Join-Path $BlockedParent 'iteration-board-offline-1.1.0'
+$PkgParent = Join-Path $WorkRoot 'install folder'
 $Root = Join-Path $PkgParent 'iteration-board-offline-1.1.0'
 $ChineseTemp = Join-Path $WorkRoot '临时目录'
-New-Item -ItemType Directory -Force -Path $Evidence, $PkgParent, $ChineseTemp | Out-Null
+New-Item -ItemType Directory -Force -Path $Evidence, $BlockedParent, $PkgParent, $ChineseTemp | Out-Null
 # 子进程的 TEMP/TMP 指向中文目录（模拟中文用户名环境）
 $env:TEMP = $ChineseTemp
 $env:TMP = $ChineseTemp
@@ -24,10 +28,10 @@ $env:TMP = $ChineseTemp
 function Check([string]$Name, [bool]$Ok) {
   if ($Ok) { Write-Host "PASS $Name" } else { Write-Host "::error::FAIL $Name"; $script:Failures += $Name }
 }
-function Run-Bat([string]$Bat, [string[]]$BatArgs, [string]$LogName, [switch]$Gbk) {
+function Run-Bat([string]$Bat, [string[]]$BatArgs, [string]$LogName, [switch]$Gbk, [string]$Cwd = $Root) {
   $log = Join-Path $Evidence $LogName
-  "`r`n===== $Bat $($BatArgs -join ' ')  (cwd: $Root) =====" | Out-File -Append -Encoding utf8 $log
-  Push-Location $Root
+  "`r`n===== $Bat $($BatArgs -join ' ')  (cwd: $Cwd) =====" | Out-File -Append -Encoding utf8 $log
+  Push-Location $Cwd
   try {
     if ($Gbk) { & cmd.exe /c "chcp 936 >nul && .\$Bat $($BatArgs -join ' ') >> `"$log`" 2>&1" }
     else { & cmd.exe /c ".\$Bat $($BatArgs -join ' ') >> `"$log`" 2>&1" }
@@ -76,11 +80,22 @@ function Api-Login([string]$User, [string]$Pass) {
 }
 
 try {
+  Write-Host 'PHASE S0 blocked-path assertion (Chinese install path, ruling A)'
+  Expand-Archive -Path $ZipPath -DestinationPath $BlockedParent -Force
+  Check 'S0 package unpacked to Chinese path (install.bat present)' (Test-Path (Join-Path $BlockedRoot 'install.bat'))
+  $code = Run-Bat 'install.bat' @('--no-pause') 'smoke-blocked.log' -Gbk -Cwd $BlockedRoot
+  Check 'S0 install.bat blocked: exit code non-zero' ($code -ne 0)
+  $blockedLog = Get-Content (Join-Path $Evidence 'smoke-blocked.log') -Raw -ErrorAction SilentlyContinue
+  Check 'S0 install.bat blocked: path message printed' ($blockedLog -match 'The install folder path contains non-English characters')
+  $svcCount = @(Get-Service -Name 'IterationBoardPG', 'IterationBoardApp' -ErrorAction SilentlyContinue).Count
+  Check 'S0 install.bat blocked: no services registered' ($svcCount -eq 0)
+  Check 'S0 install.bat blocked: no data directory created' (-not (Test-Path (Join-Path $BlockedRoot 'data')))
+
   Write-Host "PHASE S1 unpack -> $PkgParent"
   Expand-Archive -Path $ZipPath -DestinationPath $PkgParent -Force
   Check 'S1 package unpacked (install.bat present)' (Test-Path (Join-Path $Root 'install.bat'))
 
-  Write-Host 'PHASE S2 install (chcp 936, Chinese TEMP, Chinese+space path)'
+  Write-Host 'PHASE S2 install (chcp 936, Chinese TEMP, space-only path)'
   $code = Run-Bat 'install.bat' @('--no-pause') 'smoke-install.log' -Gbk
   Check 'S2 install.bat exit 0' ($code -eq 0)
   Check 'S2 app healthy after install' (Wait-Health)
@@ -152,7 +167,7 @@ try {
     Write-Host "SMOKE RESULT: $($script:Failures.Count) FAILURE(S)"
     $script:Failures | ForEach-Object { Write-Host "  - $_" }
     # 证据 artifact 无权限下载时，关键日志尾巴经 annotation 表面化（同 windows-verify.ps1 口径）
-    foreach ($ln in @('smoke-install.log', 'smoke-stop.log', 'smoke-start.log', 'smoke-uninstall.log')) {
+    foreach ($ln in @('smoke-blocked.log', 'smoke-install.log', 'smoke-stop.log', 'smoke-start.log', 'smoke-uninstall.log')) {
       $lf = Join-Path $Evidence $ln
       if (Test-Path $lf) {
         $tail = (Get-Content $lf -Tail 25 | ForEach-Object { $_.Trim() }) -join ' // '

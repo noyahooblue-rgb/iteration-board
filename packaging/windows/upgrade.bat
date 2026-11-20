@@ -42,6 +42,23 @@ shift
 goto :parse_args
 :args_done
 if "%TARGET%"=="" set "TARGET=%NEWROOT%"
+rem --- Install path character warning (ruling A) --------------
+rem PostgreSQL on Windows cannot run reliably from a path with
+rem non-English characters (root-cause ledger #6). An existing
+rem installation that already runs from such a path is NOT
+rem blocked here - blocking would strand the installation.
+rem Warn only, and recommend a future move to an English path.
+set "IB_ROOT=%TARGET%"
+powershell -NoProfile -Command "if ($env:IB_ROOT -match '[^\x20-\x7E]') { exit 1 } else { exit 0 }"
+set "IB_PATH_RC=%ERRORLEVEL%"
+if not "%IB_PATH_RC%"=="0" (
+  echo [WARN] The install folder path contains non-English characters: %TARGET%.
+  echo [WARN] PostgreSQL can fail on such a path on some systems. This operation
+  echo [WARN] continues because the existing installation already runs from this
+  echo [WARN] folder, but moving the installation to a path with only
+  echo [WARN] English letters, digits and spaces, for example
+  echo [WARN] D:\IterationBoard, is recommended for the future.
+)
 if not exist "%TARGET%\tmp" mkdir "%TARGET%\tmp"
 net session >nul 2>&1
 if errorlevel 1 (
