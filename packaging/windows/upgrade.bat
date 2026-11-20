@@ -19,10 +19,12 @@ rem       and the exact rollback command is shown. Nothing is
 rem       silently rolled back: run rollback.bat in the target
 rem       folder to restore program files AND the database
 rem       from the bundle recorded in step 2;
-rem    5. P01: if the database has no "admin" account yet, one
-rem       is created (random password, shown in this window and
-rem       written to config\admin-initial-password.txt on the
-rem       target). Existing platform admins are never touched.
+rem    5. the application itself creates the built-in "admin"
+rem       account on first start if none exists and writes the
+rem       initial password to config\admin-initial-password.txt
+rem       on the target; this script shows that file after the
+rem       health check when it exists. Existing platform admins
+rem       are never touched.
 rem  config\ and data\ of the target are NEVER overwritten.
 rem ============================================================
 set "NEWROOT=%~dp0"
@@ -40,6 +42,7 @@ shift
 goto :parse_args
 :args_done
 if "%TARGET%"=="" set "TARGET=%NEWROOT%"
+if not exist "%TARGET%\tmp" mkdir "%TARGET%\tmp"
 net session >nul 2>&1
 if errorlevel 1 (
   echo [ERROR] Please run as administrator.
@@ -158,8 +161,8 @@ if errorlevel 1 (
   goto :failed
 )
 
-rem --- step 5: P01 - create the admin account if none exists ------
-call :ensure_admin
+rem --- step 5: built-in admin account (created by the app) ------
+call :show_admin_pwfile
 echo [INFO] Upgrade complete. Rollback bundle: %BUNDLE%
 echo [INFO] To undo this upgrade completely, run rollback.bat in
 echo [INFO] the target folder - it restores program files and the
@@ -182,73 +185,37 @@ echo [ERROR] It uses the bundle recorded at %BUNDLE%
 call :ib_pause
 exit /b 1
 
-rem --- subroutine: P01 admin bootstrap on the target -------------
-rem Direct-DB pattern (same assumption as reset-admin.bat):
-rem pgcrypto crypt() with gen_salt('bf') produces the $2a$
-rem BCrypt hash the backend verifies. Runs only when no
-rem login_name 'admin' row exists; never touches existing
-rem platform administrators.
-:ensure_admin
-set "DBPWD="
-for /f "tokens=1,2" %%A in ('findstr /C:"password:" "%TARGET%\config\application.yml"') do set "DBPWD=%%B"
-if "%DBPWD%"=="" exit /b 0
-set "PGPASSWORD=%DBPWD%"
-set "EXISTS="
-"%TARGET%\runtime\pgsql\bin\psql.exe" -h 127.0.0.1 -p 15432 -U postgres -d iteration_board -t -A -c "SELECT count(*) FROM app_user WHERE login_name = 'admin'" > "%TEMP%\ib-q-exists.txt" 2>nul
-if exist "%TEMP%\ib-q-exists.txt" set /p EXISTS=<"%TEMP%\ib-q-exists.txt"
-if exist "%TEMP%\ib-q-exists.txt" del "%TEMP%\ib-q-exists.txt"
-if not "%EXISTS%"=="0" (
-  set "PGPASSWORD="
-  exit /b 0
-)
-call :gen_password
-if "%ADMIN_PW%"=="" (
-  set "PGPASSWORD="
-  echo [WARN] Could not generate the admin password - create the
-  echo [WARN] account later with reset-admin.bat after registering
-  echo [WARN] a normal account of that name, or contact support.
-  exit /b 0
-)
-set "IB_PW=%ADMIN_PW%"
-powershell -NoProfile -Command "$sql = 'BEGIN; CREATE EXTENSION IF NOT EXISTS pgcrypto; INSERT INTO app_user (login_name, display_name, password_hash, platform_admin, status, must_change_password) VALUES (''admin'', E''\u5e73\u53f0\u7ba1\u7406\u5458'', crypt(''__PW__'', gen_salt(''bf'', 10)), TRUE, ''ACTIVE'', TRUE); INSERT INTO audit_log (team_id, actor_id, action, target_type, target_id, detail) SELECT NULL, id, ''ADMIN_BOOTSTRAP_VIA_UPGRADE'', ''USER'', id, ''Built-in admin account created by upgrade.bat (P01): no admin account existed'' FROM app_user WHERE login_name = ''admin''; COMMIT;'; [IO.File]::WriteAllText($env:TEMP + '\ib-boot.sql', $sql.Replace('__PW__', $env:IB_PW.Replace([char]39, [char]39 + [char]39)), [Text.Encoding]::ASCII)"
-"%TARGET%\runtime\pgsql\bin\psql.exe" -h 127.0.0.1 -p 15432 -U postgres -d iteration_board -v ON_ERROR_STOP=1 -f "%TEMP%\ib-boot.sql" >nul 2>&1
-del "%TEMP%\ib-boot.sql" 2>nul
-set "IB_PW="
-set "IBRC=%ERRORLEVEL%"
-set "PGPASSWORD="
-if not "%IBRC%"=="0" (
-  echo [WARN] Creating the built-in admin account failed in the
-  echo [WARN] database. The upgrade itself is complete; see the
-  echo [WARN] header of reset-admin.bat for the manual remedy.
-  exit /b 0
-)
-powershell -NoProfile -Command "[IO.File]::WriteAllText('%TARGET%\config\admin-initial-password.txt', \"admin initial password: %ADMIN_PW%`r`nCreated by upgrade.bat. This file is deleted automatically after the admin password is changed.`r`n\", [Text.Encoding]::ASCII)"
-echo.
-echo ============================================================
-echo  A built-in platform administrator account was created:
-echo  Login name:        admin
-echo  Initial password:  %ADMIN_PW%
-echo  It is also written to config\admin-initial-password.txt
-echo  on the target. Log in as admin right away and change the
-echo  password - the file is deleted automatically afterwards.
-echo  Advice: after logging in as admin, also grant platform
-echo  administrator to your personal account and use that one
-echo  day to day. Keep at least TWO platform administrators.
-echo ============================================================
-exit /b 0
 
-rem --- subroutine: random password, 20 chars, upper+lower+digit --
-:gen_password
-rem Generate a 20-char password (upper+lower+digit guaranteed) via
-rem PowerShell, returned through a temp file. The previous in-place
-rem for /f backtick one-liner silently produced an empty password on
-rem real Windows cmd (quote mangling inside for /f), which is why the
-rem built-in admin account was never created. No for /f and no nested
-rem double quotes here any more.
-set "ADMIN_PW="
-powershell -NoProfile -Command "$rng = [Security.Cryptography.RNGCryptoServiceProvider]::Create(); $sets = @('ABCDEFGHJKLMNPQRSTUVWXYZ','abcdefghijkmnpqrstuvwxyz','23456789'); $all = $sets -join ''; $pw = ''; do { $b = New-Object byte[] 64; $rng.GetBytes($b); $pw = -join (0..19 | ForEach-Object { $all[$b[$_] %% $all.Length] }) } while (-not ($pw -cmatch '[A-Z]' -and $pw -cmatch '[a-z]' -and $pw -match '[0-9]')); [IO.File]::WriteAllText($env:TEMP + '\ib-genpw.txt', $pw)"
-if exist "%TEMP%\ib-genpw.txt" set /p ADMIN_PW=<"%TEMP%\ib-genpw.txt"
-if exist "%TEMP%\ib-genpw.txt" del "%TEMP%\ib-genpw.txt"
+rem --- subroutine: show the app-created admin password file ----
+rem Since 1.1.0 the application itself creates the built-in
+rem "admin" account on first start and writes the initial
+rem password to config\admin-initial-password.txt on the
+rem target. This script contains no business SQL: it only
+rem shows that file when it already exists. The file is
+rem written when the application starts, which has just
+rem happened by the time the health check above has passed;
+rem if it is not there yet, it appears in the target folder
+rem once startup has completed.
+:show_admin_pwfile
+if exist "%TARGET%\config\admin-initial-password.txt" (
+  echo.
+  echo ============================================================
+  echo  A built-in platform administrator account exists on the
+  echo  target and its initial password file is present:
+  type "%TARGET%\config\admin-initial-password.txt"
+  echo  Log in as admin and change the password right away -
+  echo  the first login forces a change, and the application
+  echo  deletes this file automatically once the password has
+  echo  been changed. Keep the file safe until then.
+  echo ============================================================
+) else (
+  echo [INFO] No config\admin-initial-password.txt on the target
+  echo [INFO] yet. If the application creates the built-in admin
+  echo [INFO] account on this start, the initial password will
+  echo [INFO] appear in config\admin-initial-password.txt in the
+  echo [INFO] target folder once startup has completed. Otherwise
+  echo [INFO] log in with the existing administrator account.
+)
 exit /b 0
 
 :ib_pause

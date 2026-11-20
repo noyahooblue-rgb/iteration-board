@@ -7,6 +7,7 @@ import com.iterationboard.repo.IterationRepo;
 import com.iterationboard.report.ReportService;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import org.springframework.context.annotation.Profile;
 import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.stereotype.Component;
 import org.springframework.transaction.annotation.Transactional;
@@ -20,6 +21,7 @@ import java.time.LocalDate;
  * 每日凌晨（默认 3:17，cron 可配 app.retention.purge-cron）留存物理清理（M5，Q4）。
  */
 @Component
+@Profile("!ops") // 运维命令模式（--ib.ops=...，profile=ops）下不装配定时任务，防 ops 进程发通知/跑批
 public class ScheduledJobs {
     private static final Logger log = LoggerFactory.getLogger(ScheduledJobs.class);
     private final ReminderService reminderService;

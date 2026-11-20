@@ -7,6 +7,8 @@ import com.iterationboard.repo.*;
 import jakarta.servlet.http.HttpServletRequest;
 import jakarta.servlet.http.HttpServletResponse;
 import jakarta.servlet.http.HttpSession;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.http.HttpStatus;
 import org.springframework.security.authentication.UsernamePasswordAuthenticationToken;
@@ -19,12 +21,15 @@ import org.springframework.security.web.context.SecurityContextRepository;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
+import java.nio.file.Files;
+import java.nio.file.Path;
 import java.time.Instant;
 import java.time.temporal.ChronoUnit;
 import java.util.Map;
 
 @Service
 public class AuthService {
+    private static final Logger log = LoggerFactory.getLogger(AuthService.class);
     private static final String[] AVATAR_COLORS = {"blue", "indigo", "violet", "pink", "orange", "green", "teal"};
 
     private final UserRepo userRepo;
@@ -33,16 +38,20 @@ public class AuthService {
     private final UserDetailsService userDetailsService;
     private final SecurityContextRepository contextRepository;
     private final boolean registrationOpen;
+    private final String bootstrapPasswordFile;
 
     public AuthService(UserRepo userRepo, PasswordEncoder encoder, CaptchaService captchaService,
                        UserDetailsService userDetailsService, SecurityContextRepository contextRepository,
-                       @Value("${app.registration-open:true}") boolean registrationOpen) {
+                       @Value("${app.registration-open:true}") boolean registrationOpen,
+                       @Value("${app.bootstrap-password-file:config/admin-initial-password.txt}")
+                       String bootstrapPasswordFile) {
         this.userRepo = userRepo;
         this.encoder = encoder;
         this.captchaService = captchaService;
         this.userDetailsService = userDetailsService;
         this.contextRepository = contextRepository;
         this.registrationOpen = registrationOpen;
+        this.bootstrapPasswordFile = bootstrapPasswordFile;
     }
 
     public static void validatePassword(String password) {
@@ -150,6 +159,8 @@ public class AuthService {
             throw new ApiException(HttpStatus.BAD_REQUEST, "INVALID_OLD_PASSWORD", "旧密码不正确");
         }
         validatePassword(newPassword);
+        // 改密前是否处于「强制改密」状态：是 → 本次是初始密码的首次改密，成功后删除初始密码文件
+        boolean wasMustChangePassword = u.isMustChangePassword();
         u.setPasswordHash(encoder.encode(newPassword));
         u.setMustChangePassword(false);
         u.setPasswordVersion(u.getPasswordVersion() + 1);
@@ -158,6 +169,20 @@ public class AuthService {
         HttpSession session = request.getSession(false);
         if (session != null) {
             session.setAttribute(PasswordVersionInterceptor.SESSION_ATTR, u.getPasswordVersion());
+        }
+        if (wasMustChangePassword) {
+            deleteBootstrapPasswordFileQuietly();
+        }
+    }
+
+    /** 删除初始密码文件（1.1.0 裁定第一步：不再靠 start.bat 删）。best effort：失败只记 WARN，不影响改密结果。 */
+    private void deleteBootstrapPasswordFileQuietly() {
+        try {
+            if (Files.deleteIfExists(Path.of(bootstrapPasswordFile))) {
+                log.info("初始密码文件已删除（首次改密完成）：{}", bootstrapPasswordFile);
+            }
+        } catch (Exception e) {
+            log.warn("删除初始密码文件失败（路径 {}），请手动删除：{}", bootstrapPasswordFile, e.toString());
         }
     }
 }

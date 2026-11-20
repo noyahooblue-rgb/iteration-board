@@ -13,6 +13,7 @@ rem    --no-pause   never wait for a key press (used by CI runs).
 rem ============================================================
 set "ROOT=%~dp0"
 if "%ROOT:~-1%"=="\" set "ROOT=%ROOT:~0,-1%"
+if not exist "%ROOT%\tmp" mkdir "%ROOT%\tmp"
 set "APP_PORT=18080"
 set "NOPAUSE=0"
 set "AUTOSTART=0"
@@ -145,10 +146,10 @@ if "%DBPWD%"=="" (
 echo [INFO] Initializing PostgreSQL data directory - UTF8, ICU locale zh-CN ...
 if not exist "%ROOT%\data\pgdata" mkdir "%ROOT%\data\pgdata"
 if not exist "%ROOT%\logs" mkdir "%ROOT%\logs"
-echo %DBPWD%> "%TEMP%\ib-pw.txt"
-"%ROOT%\runtime\pgsql\bin\initdb.exe" -D "%ROOT%\data\pgdata" -U postgres -E UTF8 --locale-provider=icu --icu-locale=zh-CN --auth=scram-sha-256 --pwfile="%TEMP%\ib-pw.txt"
+echo %DBPWD%> "%ROOT%\tmp\ib-pw.txt"
+"%ROOT%\runtime\pgsql\bin\initdb.exe" -D "%ROOT%\data\pgdata" -U postgres -E UTF8 --locale-provider=icu --icu-locale=zh-CN --auth=scram-sha-256 --pwfile="%ROOT%\tmp\ib-pw.txt"
 set "IBRC=%ERRORLEVEL%"
-del "%TEMP%\ib-pw.txt" >nul 2>&1
+del "%ROOT%\tmp\ib-pw.txt" >nul 2>&1
 if not "%IBRC%"=="0" (
   echo [ERROR] initdb failed with code %IBRC%. See the initdb output above.
   if "%IBRC%"=="-1073741515" (
@@ -326,71 +327,27 @@ if errorlevel 1 (
 )
 echo [INFO] Application verified: http://127.0.0.1:%APP_PORT%/ answers 200.
 
-rem --- 9. P01: create the built-in admin account (1.1.0) --------
-rem Revision 4 / P01 replaces the old "first registered account
-rem becomes administrator" rule: the installer creates a fixed
-rem login "admin" with a random password, shown at the end of
-rem this script and written to config\admin-initial-password.txt.
-rem HOW IT CONNECTS (assumption, same as reset-admin.bat): the
-rem backend has no local bootstrap endpoint yet, so this follows
-rem the established direct-PostgreSQL pattern of the backup
-rem scripts. The hash comes from pgcrypto crypt() with
-rem gen_salt('bf'), a $2a$ BCrypt hash the backend's Spring
-rem BCryptPasswordEncoder verifies. The account is created
-rem only when no login_name 'admin' row exists, so re-running
-rem install.bat never resets it. An audit_log row
-rem (ADMIN_BOOTSTRAP_VIA_INSTALL, actor = the new account) is
-rem written in the same transaction. must_change_password is
-rem set: the first login forces a password change, and once
-rem that flag is cleared start.bat deletes the password file.
-set "ADMIN_CREATED=0"
-set "ADMIN_PW="
-if "%DBPWD%"=="" (
-  for /f "tokens=1,2" %%A in ('findstr /C:"password:" "%CFG%"') do set "DBPWD=%%B"
-)
-set "PGPASSWORD=%DBPWD%"
-set "EXISTS="
-"%ROOT%\runtime\pgsql\bin\psql.exe" -h 127.0.0.1 -p 15432 -U postgres -d iteration_board -t -A -c "SELECT count(*) FROM app_user WHERE login_name = 'admin'" > "%TEMP%\ib-q-exists.txt" 2>nul
-if exist "%TEMP%\ib-q-exists.txt" set /p EXISTS=<"%TEMP%\ib-q-exists.txt"
-if exist "%TEMP%\ib-q-exists.txt" del "%TEMP%\ib-q-exists.txt"
-echo [INFO] Step 9: existing 'admin' account count = "%EXISTS%"
-rem The psql call below is intentionally NOT inside a
-rem parenthesized block: its SQL string contains parentheses,
-rem which cmd block parsing does not tolerate reliably.
-set "DO_BOOTSTRAP=0"
-rem The call and the %ADMIN_PW% read must NOT share a parenthesized
-rem block: %VAR% inside a block expands once at block parse time
-rem (before the call runs), so the check would always see "".
-if "%EXISTS%"=="0" call :gen_password
-if not "%ADMIN_PW%"=="" set "DO_BOOTSTRAP=1"
-if "%DO_BOOTSTRAP%"=="1" echo [INFO] Step 9: creating the built-in admin account ...
-if not "%DO_BOOTSTRAP%"=="1" goto :admin_sql_done
-set "IB_PW=%ADMIN_PW%"
-powershell -NoProfile -Command "$sql = 'BEGIN; CREATE EXTENSION IF NOT EXISTS pgcrypto; INSERT INTO app_user (login_name, display_name, password_hash, platform_admin, status, must_change_password) VALUES (''admin'', E''\u5e73\u53f0\u7ba1\u7406\u5458'', crypt(''__PW__'', gen_salt(''bf'', 10)), TRUE, ''ACTIVE'', TRUE); INSERT INTO audit_log (team_id, actor_id, action, target_type, target_id, detail) SELECT NULL, id, ''ADMIN_BOOTSTRAP_VIA_INSTALL'', ''USER'', id, ''Built-in admin account created by install.bat (P01)'' FROM app_user WHERE login_name = ''admin''; COMMIT;'; [IO.File]::WriteAllText($env:TEMP + '\ib-boot.sql', $sql.Replace('__PW__', $env:IB_PW.Replace([char]39, [char]39 + [char]39)), [Text.Encoding]::ASCII)"
-"%ROOT%\runtime\pgsql\bin\psql.exe" -h 127.0.0.1 -p 15432 -U postgres -d iteration_board -v ON_ERROR_STOP=1 -f "%TEMP%\ib-boot.sql"
-set "BOOT_RC=%ERRORLEVEL%"
-del "%TEMP%\ib-boot.sql" 2>nul
-set "IB_PW="
-echo [INFO] Step 9: bootstrap statement exit code = %BOOT_RC%
-if "%BOOT_RC%"=="0" set "ADMIN_CREATED=1"
-"%ROOT%\runtime\pgsql\bin\psql.exe" -h 127.0.0.1 -p 15432 -U postgres -d iteration_board -tA -c "SELECT count(*) FROM app_user WHERE login_name='admin'" > "%TEMP%\ib-q-after.txt" 2>nul
-set "AFTER=?"
-if exist "%TEMP%\ib-q-after.txt" set /p AFTER=<"%TEMP%\ib-q-after.txt"
-if exist "%TEMP%\ib-q-after.txt" del "%TEMP%\ib-q-after.txt"
-echo [INFO] Step 9: admin rows after bootstrap = "%AFTER%"
-:admin_sql_done
-set "PGPASSWORD="
-if "%ADMIN_CREATED%"=="1" (
-  > "%ROOT%\config\admin-initial-password.txt" echo admin initial password: %ADMIN_PW%
-  >> "%ROOT%\config\admin-initial-password.txt" echo Created by install.bat. This file is deleted automatically after the admin password is changed.
-  echo [INFO] Built-in administrator account created - details below.
+rem --- 9. Built-in admin account (1.1.0) -----------------------
+rem Since 1.1.0 the application itself creates the built-in
+rem "admin" account on first start, after the Flyway migration,
+rem and writes the initial password to
+rem config\admin-initial-password.txt. This script contains no
+rem business SQL any more: it only shows that file when the
+rem application has already created it.
+if exist "%ROOT%\config\admin-initial-password.txt" (
+  echo [INFO] A built-in administrator account was created by the
+  echo [INFO] application on first start. Its initial password:
+  type "%ROOT%\config\admin-initial-password.txt"
+  echo [INFO] Log in as admin and change the password right away -
+  echo [INFO] the first login forces a change, and the application
+  echo [INFO] deletes this file automatically once the password
+  echo [INFO] has been changed.
 ) else (
-  if "%EXISTS%"=="0" (
-    echo [WARN] The built-in admin account could not be created.
-    echo [WARN] Register a normal account, then see reset-admin.bat.
-  ) else (
-    echo [INFO] An admin account already exists - left unchanged.
-  )
+  echo [INFO] No initial-password file was found. If this is a
+  echo [INFO] first start, the application creates the built-in
+  echo [INFO] admin account and writes the initial password to
+  echo [INFO] config\admin-initial-password.txt - check there
+  echo [INFO] after the application has started.
 )
 
 echo.
@@ -398,23 +355,12 @@ echo ============================================================
 echo  Installation complete.
 echo  Open in a browser:  http://localhost:%APP_PORT%/
 echo  From other PCs on the LAN:  http://^<this-PC-IP^>:%APP_PORT%/
-if "%ADMIN_CREATED%"=="1" (
-  echo  Platform administrator account:  admin
-  echo  Initial password:  %ADMIN_PW%
-  echo  The same password is in config\admin-initial-password.txt
-  echo  Log in as admin NOW and change the password - the first
-  echo  login forces a change, and the password file is deleted
-  echo  automatically once the password has been changed.
-  echo  Advice: after logging in as admin, also grant platform
-  echo  administrator to your personal account and use that one
-  echo  day to day. Keep at least TWO platform administrators,
-  echo  so a forgotten password never locks everyone out.
-) else (
-  echo  Log in with the existing administrator account. New
-  echo  self-registered accounts are normal users; platform
-  echo  administrator rights are granted inside Platform Admin.
-  echo  Keep at least TWO platform administrators.
-)
+echo  Log in with the administrator account. If the application
+echo  created the built-in admin account on first start, its
+echo  initial password is in config\admin-initial-password.txt
+echo  - see step 9 above. Keep at least TWO platform
+echo  administrators, so a forgotten password never locks
+echo  everyone out.
 if "%AUTOSTART%"=="1" (
   echo  Both services start automatically at boot.
 ) else (
@@ -430,19 +376,6 @@ call :ib_pause
 exit /b 0
 
 rem --- subroutines ----------------------------------------------
-:gen_password
-rem Generate a 20-char password (upper+lower+digit guaranteed) via
-rem PowerShell, returned through a temp file. The previous in-place
-rem for /f backtick one-liner silently produced an empty password on
-rem real Windows cmd (quote mangling inside for /f), which is why the
-rem built-in admin account was never created. No for /f and no nested
-rem double quotes here any more.
-set "ADMIN_PW="
-powershell -NoProfile -Command "$rng = [Security.Cryptography.RNGCryptoServiceProvider]::Create(); $sets = @('ABCDEFGHJKLMNPQRSTUVWXYZ','abcdefghijkmnpqrstuvwxyz','23456789'); $all = $sets -join ''; $pw = ''; do { $b = New-Object byte[] 64; $rng.GetBytes($b); $pw = -join (0..19 | ForEach-Object { $all[$b[$_] %% $all.Length] }) } while (-not ($pw -cmatch '[A-Z]' -and $pw -cmatch '[a-z]' -and $pw -match '[0-9]')); [IO.File]::WriteAllText($env:TEMP + '\ib-genpw.txt', $pw)"
-if exist "%TEMP%\ib-genpw.txt" set /p ADMIN_PW=<"%TEMP%\ib-genpw.txt"
-if exist "%TEMP%\ib-genpw.txt" del "%TEMP%\ib-genpw.txt"
-exit /b 0
-
 :ib_pause
 if "%NOPAUSE%"=="0" pause
 exit /b 0

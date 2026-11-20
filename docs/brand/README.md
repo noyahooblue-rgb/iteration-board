@@ -18,10 +18,9 @@
 | `brand-small.svg` | ≤32px 专用简化版：去阴影、线条加粗、星芒放大 |
 | `brand-dark.svg` | 深色模式版（深海蓝底；与标准版仅底渐变不同） |
 | `brand-ai-spark.svg` | AI 星芒单独符号（24 画布）；前端内联组件为 `frontend/src/components/AiSpark.vue` |
-| `brand-mono-white.svg` / `brand-mono-black.svg` | 单色版线稿（纯白 / 纯深色），用于打印、水印等单色场景 |
-| `badge-unread-64.png` / `badge-unread-512.png` | 未读角标版（红点 `#FF3B30` + 白描边） |
-| `badge-count-64.png` / `badge-count-512.png` | 计数角标版（任务蓝圆 + 白边 + 数字，示例「3」） |
-| `badge-defect-64.png` / `badge-defect-512.png` | 缺陷角标版（缺陷红 `#FF2D55` + 白边） |
+| `brand-mono-white.svg` / `brand-mono-dark.svg` | 单色版（纯白 / 深藏青 `#0B1F4D`，第二轮由纯黑改色并改名），用于打印、水印等单色场景 |
+| `favicon-badge-64.png` / `favicon-badge-dark-64.png` | 未读版图标（浅/深，第二轮定稿图形：本体自带大红点 + 白圈、右上极角压星芒） |
+| `source-round2/` | 第二轮定稿源 SVG（未读浅/深、apple-touch、maskable）存档 |
 | `lockup-horizontal-light.png` / `lockup-horizontal-dark.png` | 横版组合标：图标 + 「迭代小组平台」字标（浅/深背景各一） |
 | `lockup-stacked-light.png` / `lockup-stacked-dark.png` | 竖版组合标（浅/深背景各一） |
 
@@ -39,8 +38,7 @@
 ## 运行时切换规则
 
 - 主题：`frontend/src/utils/favicon.ts` 的 `setAppIcon(theme, unreadCount)` 统一切换——`document.documentElement.dataset.theme` 为 `dark`/`graphite` 用深色版，`light` 或未设置用标准版。
-- 未读：未读数 > 0 时 favicon 换未读角标版（红点在右上角并覆盖星芒位置，定稿第 2 条），标题加 `(n) ` 前缀；归零恢复。计数角标图（badge-count）中的数字为示例定值，运行时标题前缀承载真实计数。
-- 角标颜色含义固定：蓝 = 计数，红点 = 未读，缺陷红 = 缺陷；不要挪作他用。
+- 未读：未读数 > 0 时 favicon 换第二轮定稿未读版图标（浅色 favicon-badge / 深色 favicon-badge-dark），标题加 `(n) ` 前缀承载真实计数；归零恢复。计数角标与缺陷角标已整类删除（第二轮裁定），界面不要再引用；第一轮叠加合成的 badge-unread 角标去留待确认，运行时不再使用。
 - 桌面通知（Notification API）的 `icon` 使用 `/icons/icon-192.png`。
 
 ## 最小尺寸与留白

@@ -39,11 +39,6 @@ if "%IB_BK_STALE%"=="yes" (
   call "%ROOT%\backup.bat" auto
   if errorlevel 1 echo [WARN] The pre-start backup failed. Starting anyway - run backup.bat manually later.
 )
-rem P01 (1.1.0): once the admin account has changed its initial
-rem password, the backend clears app_user.must_change_password;
-rem that flag is the ground truth, so when it is false and the
-rem initial-password file still exists, delete the file here.
-if exist "%ROOT%\config\admin-initial-password.txt" call :ib_pwfile_cleanup
 net start IterationBoardApp >nul 2>&1
 sc query IterationBoardApp | findstr /C:"RUNNING" >nul 2>&1
 if errorlevel 1 (
@@ -53,27 +48,6 @@ if errorlevel 1 (
 )
 echo [INFO] Services started.
 call :ib_pause
-exit /b 0
-
-:ib_pwfile_cleanup
-rem Runs as a subroutine on purpose: the probe result must be read
-rem with fresh % expansion - inside the caller's parenthesized block
-rem it would expand once at block parse time (always empty) and the
-rem password file would never be deleted.
-set "IB_ADMIN_CHANGED="
-set "DBPWD="
-for /f "tokens=1,2" %%A in ('findstr /C:"password:" "%ROOT%\config\application.yml"') do set "DBPWD=%%B"
-if not "%DBPWD%"=="" (
-  set "PGPASSWORD=%DBPWD%"
-  "%ROOT%\runtime\pgsql\bin\psql.exe" -h 127.0.0.1 -p 15432 -U postgres -d iteration_board -t -A -c "SELECT must_change_password FROM app_user WHERE login_name = 'admin'" > "%TEMP%\ib-q-changed.txt" 2>nul
-  if exist "%TEMP%\ib-q-changed.txt" set /p IB_ADMIN_CHANGED=<"%TEMP%\ib-q-changed.txt"
-  if exist "%TEMP%\ib-q-changed.txt" del "%TEMP%\ib-q-changed.txt"
-  set "PGPASSWORD="
-)
-if "%IB_ADMIN_CHANGED%"=="f" (
-  del /Q "%ROOT%\config\admin-initial-password.txt" >nul 2>&1
-  echo [INFO] Removed config\admin-initial-password.txt - the admin password has been changed.
-)
 exit /b 0
 
 :ib_pause

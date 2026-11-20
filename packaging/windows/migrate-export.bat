@@ -44,6 +44,7 @@ shift
 goto :parse_args
 :args_done
 if "%TARGET%"=="" set "TARGET=%ROOT%"
+if not exist "%TARGET%\tmp" mkdir "%TARGET%\tmp"
 net session >nul 2>&1
 if errorlevel 1 (
   echo [ERROR] Please run as administrator.
@@ -108,7 +109,7 @@ for /f "usebackq delims=" %%R in (`"%TARGET%\runtime\pgsql\bin\psql.exe" -h 127.
 rem --- staging ---------------------------------------------------------
 for /f "usebackq delims=" %%T in (`powershell -NoProfile -Command "Get-Date -Format yyyyMMdd-HHmmss"`) do set "TS=%%T"
 for /f "usebackq delims=" %%D in (`powershell -NoProfile -Command "Get-Date -Format yyyyMMdd"`) do set "DATES=%%D"
-set "WORK=%TEMP%\ib-migrate-%TS%"
+set "WORK=%TARGET%\tmp\ib-migrate-%TS%"
 mkdir "%WORK%\config" >nul 2>&1
 mkdir "%WORK%\data" >nul 2>&1
 

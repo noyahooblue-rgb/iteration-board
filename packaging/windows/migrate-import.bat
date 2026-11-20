@@ -48,6 +48,7 @@ shift
 goto :parse_args
 :args_done
 if "%TARGET%"=="" set "TARGET=%ROOT%"
+if not exist "%TARGET%\tmp" mkdir "%TARGET%\tmp"
 net session >nul 2>&1
 if errorlevel 1 (
   echo [ERROR] Please run as administrator.
@@ -91,7 +92,7 @@ if not exist "%ZIP%" (
 
 rem --- extract --------------------------------------------------------
 for /f "usebackq delims=" %%T in (`powershell -NoProfile -Command "Get-Date -Format yyyyMMdd-HHmmss"`) do set "TS=%%T"
-set "WORK=%TEMP%\ib-migrate-import-%TS%"
+set "WORK=%TARGET%\tmp\ib-migrate-import-%TS%"
 mkdir "%WORK%" >nul 2>&1
 echo [INFO] Extracting the migration package ...
 powershell -NoProfile -Command "Expand-Archive -Path '%ZIP%' -DestinationPath '%WORK%' -Force"
