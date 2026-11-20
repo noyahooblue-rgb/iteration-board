@@ -1,5 +1,5 @@
 <template>
-<AppShell :title="boardTitle" :unclaimed="colItems('UNCLAIMED').length" @refresh="load">
+<AppShell :title="boardTitle" @refresh="load">
   <div v-if="!team.iteration" class="noiter">
     <span class="grow"><b>当前没有进行中的迭代</b>，看板已自动切到「全部」范围。</span>
     <RouterLink to="/planning" class="nbtn press">去规划</RouterLink>
@@ -72,6 +72,7 @@ import AppShell from '../components/AppShell.vue'; import ItemDrawer from '../co
 import { useBusy } from '../utils/busy'
 import AvatarStack from '../components/AvatarStack.vue'; import ProgressBar from '../components/ProgressBar.vue'; import SegmentedControl from '../components/SegmentedControl.vue'
 import { api, ApiError } from '../api/http'; import { TYPE_META, STORY_CAT_META, itemColor, estimateUnitLabel, type Item, type ItemStatus } from '../api/types'
+import { localToday } from '../utils/datetime'
 import { useTeam } from '../stores/team'; import { useAuth } from '../stores/auth'; import { useToast } from '../stores/toast'
 const team = useTeam(), auth = useAuth(), toast = useToast(), busy = useBusy()
 const items = ref<Item[]>([]), tasks = ref<Item[]>([]), loading = ref(false), loadErr = ref('')
@@ -118,7 +119,7 @@ function fmtDue(d:string){ const m = d.match(/^(\d+)-(\d+)-(\d+)$/); return m ? 
 function dueSuffix(it:Item){ const c = dueClass(it); return c==='over' ? ' · 已逾期' : c==='today' ? ' · 今天' : '' }
 function showBar(it:Item){ return it.status==='IN_PROGRESS' || it.status==='IN_REVIEW' || it.status==='DONE' }
 function barPct(it:Item){ return it.progressPercent }
-function dueClass(it:Item){ if(!it.dueDate || it.status==='DONE') return ''; const today=new Date().toISOString().slice(0,10); return it.dueDate < today ? 'over' : it.dueDate === today ? 'today' : '' }
+function dueClass(it:Item){ if(!it.dueDate || it.status==='DONE') return ''; const today=localToday(); return it.dueDate < today ? 'over' : it.dueDate === today ? 'today' : '' }
 function canQuickNudge(it:Item){ if (it.allowedActions) return it.allowedActions.includes('NUDGE'); return !!auth.user && !it.ownerIds.includes(auth.user.id) && ['NOT_STARTED','IN_PROGRESS','IN_REVIEW'].includes(it.status) }
 function canQuickKeep(it:Item){ if (it.allowedActions) return it.allowedActions.includes('PROGRESS'); return !!auth.user && it.ownerIds.includes(auth.user.id) && it.status==='IN_PROGRESS' }
 async function quickNudge(it:Item){ await busy.wrap('nudge' + it.id, async () => { try { const r = await api.post(`/teams/${team.currentId}/items/${it.id}/nudge`); toast.show(r.redirectedToLeader ? '对方请假/出差，已改催组长' : `已催一下（本轮第 ${r.nudgeCount} 次）`); load() } catch(e){ toast.show(e instanceof ApiError ? e.message : '催办失败') } }) }

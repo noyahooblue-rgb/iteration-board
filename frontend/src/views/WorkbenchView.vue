@@ -80,6 +80,7 @@ import { Zap, OctagonAlert, BellRing, CalendarDays, MailPlus } from 'lucide-vue-
 import AppShell from '../components/AppShell.vue'; import GlassPanel from '../components/GlassPanel.vue'; import AppButton from '../components/AppButton.vue'; import ProgressBar from '../components/ProgressBar.vue'; import ProgressRing from '../components/ProgressRing.vue'; import ItemDrawer from '../components/ItemDrawer.vue'
 import QuickUpdateBox from '../components/QuickUpdateBox.vue'
 import { api, ApiError, apiMode } from '../api/http'; import { itemColor, type Item } from '../api/types'
+import { fmtDateTime, localToday } from '../utils/datetime'
 import { useTeam } from '../stores/team'; import { useAuth } from '../stores/auth'; import { useToast } from '../stores/toast'
 const team = useTeam(), auth = useAuth(), toast = useToast()
 const items = ref<Item[]>([]), quickText = ref(''), quickNote = ref('')
@@ -103,9 +104,9 @@ async function load(){ if(!team.currentId) return; loading.value = true; loadErr
   if (team.iteration) keyDates.value = await api.get(`/teams/${team.currentId}/iterations/${team.iteration.id}/key-dates`).catch(()=>[])
 } catch(e){ loadErr.value = e instanceof ApiError ? e.message : '加载失败' } finally { loading.value = false } }
 onMounted(load)
-const fmt = (s:string)=> s.slice(0,16).replace('T',' ')
+const fmt = fmtDateTime
 function fmtDue(d:string){ const m = d.match(/^(\d+)-(\d+)-(\d+)$/); return m ? `${Number(m[2])}月${Number(m[3])}日` : d }
-function isOver(it:Item){ return !!it.dueDate && it.dueDate < new Date().toISOString().slice(0,10) }
+function isOver(it:Item){ return !!it.dueDate && it.dueDate < localToday() }
 function canDecline(it:Item){ return it.assignedDirectly && it.status==='NOT_STARTED' }
 async function act(it:Item, action:string){ try { await api.post(`/teams/${team.currentId}/items/${it.id}/transitions`, { action, version: it.version }); toast.show('已更新'); load() } catch(e){ toast.show(e instanceof ApiError ? e.message : '操作失败'); load() } }
 async function keepGoing(it:Item){ try { await api.post(`/teams/${team.currentId}/items/${it.id}/progress`, { text: '无新情况，继续推进', kind: 'KEEP_GOING' }); toast.show('已登记照常推进'); load() } catch(e){ toast.show(e instanceof ApiError ? e.message : '登记失败') } }

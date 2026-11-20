@@ -22,6 +22,11 @@ public class ProgressUpdate {
     private String blockReason;
     @Column(name = "next_step", length = 500)
     private String nextStep;
+    /** 进展 @ 提及的用户 id 集合（1.0.4，与 comment_mention 同构）。 */
+    @ElementCollection(fetch = FetchType.EAGER)
+    @CollectionTable(name = "progress_mention", joinColumns = @JoinColumn(name = "progress_update_id"))
+    @Column(name = "user_id")
+    private java.util.Set<Long> mentionIds = new java.util.HashSet<>();
     @Column(nullable = false, length = 16)
     private String kind = "NORMAL";
     @Column(nullable = false, length = 16)
@@ -46,5 +51,7 @@ public class ProgressUpdate {
     public void setNextStep(String v) { nextStep = v; }
     public String getKind() { return kind; }
     public void setKind(String v) { kind = v; }
+    public java.util.Set<Long> getMentionIds() { return mentionIds; }
+    public void setMentionIds(java.util.Set<Long> v) { mentionIds = v; }
     public Instant getCreatedAt() { return createdAt; }
 }

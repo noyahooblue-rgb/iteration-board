@@ -2,15 +2,19 @@
 export class ApiError extends Error {
   constructor(public status:number, public code:string, message:string, public detail:any=null){ super(message) }
 }
-import { handleRequest as mockHandle, subscribeEvents as mockSubscribe, DEMO_ACCOUNTS, DEMO_SUBTITLE, DEMO_FILL_HINT, DEMO_REG_CLOSED_TEXT, DEMO_PASSWORD_FILL } from '@mock-adapter'
-export { DEMO_ACCOUNTS, DEMO_SUBTITLE, DEMO_FILL_HINT, DEMO_REG_CLOSED_TEXT, DEMO_PASSWORD_FILL }
-// 通知实时推送：real 走 EventSource(SSE)；mock 走适配器内的页面级事件总线。返回退订函数。
+import { handleRequest as mockHandle, subscribeEvents as mockSubscribe, DEMO_ACCOUNTS, DEMO_SUBTITLE, DEMO_FILL_HINT, DEMO_REG_CLOSED_TEXT } from '@mock-adapter'
+export { DEMO_ACCOUNTS, DEMO_SUBTITLE, DEMO_FILL_HINT, DEMO_REG_CLOSED_TEXT }
+// 通知实时推送（设计 §8.4）：real 走 EventSource(SSE)；mock 走适配器内的页面级事件总线。返回退订函数。
 export function subscribeEvents(cb: (n: any) => void): () => void {
   if (MODE === 'mock') return mockSubscribe(cb)
   const es = new EventSource('/api/v1/notifications/stream')
   const handler = (e: MessageEvent) => { try { cb(JSON.parse(e.data)) } catch {} }
   es.addEventListener('notification', handler as EventListener)
-  return () => { es.removeEventListener('notification', handler as EventListener); es.close() }
+  // 断线重连/休眠恢复：EventSource 自带自动重连；服务端每次订阅都先发 connected 事件，
+  // 订阅方据此全量对账一次，补上断线期间错过的通知（标记 __connected，不是新通知）。
+  const onConnected = () => cb({ __connected: true })
+  es.addEventListener('connected', onConnected as EventListener)
+  return () => { es.removeEventListener('notification', handler as EventListener); es.removeEventListener('connected', onConnected as EventListener); es.close() }
 }
 const MODE = import.meta.env.VITE_API_MODE === 'mock' ? 'mock' : 'real'
 export const apiMode = MODE
@@ -48,7 +52,7 @@ export async function requestForm<T=any>(method:string, path:string, form:FormDa
 }
 export const api = {
   get: <T=any>(p:string)=>request<T>('GET',p), post: <T=any>(p:string,b?:any)=>request<T>('POST',p,b), put: <T=any>(p:string,b?:any)=>request<T>('PUT',p,b), patch: <T=any>(p:string,b?:any)=>request<T>('PATCH',p,b), del: <T=any>(p:string)=>request<T>('DELETE',p),
-  // 幂等：创建类请求带 Idempotency-Key，同一用户意图（同键）重复提交只生效一次。
+  // §16.3 幂等：创建类请求带 Idempotency-Key，同一用户意图（同键）重复提交只生效一次。
   postKey: <T=any>(p:string,b:any,key:string)=>request<T>('POST',p,b,{ 'Idempotency-Key': key }),
   postForm: <T=any>(p:string,form:FormData)=>requestForm<T>('POST',p,form),
 }

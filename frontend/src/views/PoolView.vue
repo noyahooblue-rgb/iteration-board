@@ -1,5 +1,5 @@
 <template>
-<AppShell title="认领池" :unclaimed="items.length" @refresh="load">
+<AppShell title="认领池" @refresh="load">
   <div class="filters glass">
     <span class="small">待认领 {{items.length}} 项 · 默认按任务分组</span>
     <label class="fld-sm">排序<select v-model="sort" aria-label="排序"><option value="new">最新发布</option><option value="due">截止最近</option><option value="wait">等待最久</option></select></label>
@@ -15,7 +15,8 @@
     <h2 class="ghead"><template v-if="g.task"><span class="lcode">{{g.task.code}}</span> {{g.task.title}} <span class="small">PO：{{team.memberName(g.task.poId)}}</span> <RouterLink :to="`/task/${g.task.id}`" class="small link">任务详情 →</RouterLink></template><template v-else>独立事项</template></h2>
     <div class="grid">
       <article v-for="it in g.items" :key="it.id" class="kcard" :style="{borderLeftColor:itemColor(it)}">
-        <span v-if="invitedMe(it)" class="inv">邀请我认领</span>
+        <!-- 「邀请我认领」标签（1.0.4 D）：放进卡片正常流（标题上方独立一行），不再绝对定位，避免盖住右上角优先级 P2，任何宽度下不重叠 -->
+        <div v-if="invitedMe(it)" class="invrow"><span class="inv">邀请我认领</span></div>
         <div class="krow"><span class="small">{{it.code}}</span><span v-if="it.batchId" class="btag">批次</span><span style="flex:1"/><span class="prio">{{it.priority}}</span></div>
         <p class="ktitle">{{it.title}}</p>
         <p class="small desc">{{it.description}}</p>
@@ -48,7 +49,7 @@ const sort = ref('new'), fType = ref(''), loadErr = ref('')
 const importOpen = ref(false)
 const drawerOpen = ref(false), openId = ref<number|null>(null)
 const unit = computed(()=> estimateUnitLabel(team.current))
-// 导入仅 PO：导入向导入口只对 PO 显示，与后端 requirePo 口径一致
+// 导入仅 PO（§16.2）：导入向导入口只对 PO 显示，与后端 requirePo 口径一致（§16.4 无权限不显示，D-3）
 const isPo = computed(()=> team.current?.myRole === 'PO')
 const cap = computed(()=> planning.value?.capacities.find(c=>c.userId===auth.user?.id))
 const myPoints = computed(()=> planning.value?.loads.find(l=>l.userId===auth.user?.id)?.points ?? 0)
@@ -83,7 +84,8 @@ async function claim(it:Item){
 .ghead{font-size:16px;margin:16px 0 10px;display:flex;gap:9px;align-items:center}.lcode{color:var(--theme);font-weight:700}.ghead .link{color:var(--theme)}
 .grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(300px,1fr));gap:12px}
 .kcard{position:relative;background:var(--card);border:1px solid rgba(255,255,255,.65);border-left:4px solid var(--theme);border-radius:var(--r-card);box-shadow:0 4px 14px rgba(10,60,140,.08);padding:14px 14px 14px 18px;overflow:hidden}
-.inv{position:absolute;top:0;right:14px;background:var(--c-indigo);color:#fff;font-size:11px;font-weight:700;padding:3px 8px;border-radius:0 0 9px 9px}
+.invrow{margin-bottom:7px}
+.inv{display:inline-block;background:var(--c-indigo);color:#fff;font-size:11px;font-weight:700;padding:3px 8px;border-radius:99px}
 .krow{display:flex;align-items:center;gap:6px;flex-wrap:wrap}.krow.foot{margin-top:8px}
 .ktitle{font-size:15px;font-weight:600;line-height:1.4;margin:7px 0}
 .desc{display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden}

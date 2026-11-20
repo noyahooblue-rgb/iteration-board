@@ -10,11 +10,11 @@ server:
 spring:
   application:
     name: iteration-board
-  # 数据库口令等敏感值一律由环境变量注入，无默认值：启动前必须设置 DB_PASSWORD（见根 README「本地运行」）。
+  # 数据库口令等敏感值一律由环境变量注入；下面的默认值仅为本机开发值（见 docs/dev-env.md），不是生产密钥，不要带入生产配置。
   datasource:
-    url: ${DB_URL:jdbc:postgresql://localhost:5432/iteration_board}
+    url: ${DB_URL:jdbc:postgresql://localhost:15432/iteration_board}
     username: ${DB_USERNAME:postgres}
-    password: ${DB_PASSWORD:}
+    password: ${DB_PASSWORD:ib-dev-pwd}
   jpa:
     hibernate:
       ddl-auto: validate
@@ -22,22 +22,27 @@ spring:
     properties:
       hibernate:
         jdbc:
+          # 存储口径保持 UTC 不变（1.0.4 时区统一）：时间戳一律以 UTC Instant 落库、接口以 ISO 8601（带 Z）返回，
+          # 显示时区由前端按浏览器本地时区转换；「今天/本周」等日期口径走 app.timezone（见 PlatformTime），与此无关，不要改成平台时区。
           time_zone: UTC
   flyway:
     enabled: true
     locations: classpath:db/migration
 
 app:
+  # 平台时区（1.0.4）：所有「今天/昨天/本周/工作日/逾期/定时任务」等日期口径按此时区计算（PlatformTime 组件），
+  # 可经环境变量 APP_TIMEZONE 覆盖；与 Asia/Singapore 同为 UTC+8。数据库存储仍为 UTC（见上方 hibernate.jdbc.time_zone 注释）。
+  timezone: ${APP_TIMEZONE:Asia/Shanghai}
   registration-open: ${REGISTRATION_OPEN:true}
   demo-mode: ${DEMO_MODE:false}
-  # 数据留存：回收站物理清理 / 通知 / 审计日志保留期，均可经环境变量覆盖。
+  # 数据留存（M5，设计 §5.5/§11）：回收站物理清理 / 通知 / 审计日志保留期，均可经环境变量覆盖。
   retention:
     trash-days: ${RETENTION_TRASH_DAYS:30}
     notification-days: ${RETENTION_NOTIFICATION_DAYS:90}
     audit-days: ${RETENTION_AUDIT_DAYS:180}
     purge-cron: ${RETENTION_PURGE_CRON:0 17 3 * * *}
 
-# AI 服务层：密钥只由环境变量注入；mode=mock 时返回结构化样例结果。
+# AI 服务层（M4，设计 §7.1/§8.6）：密钥只由环境变量注入；mode=mock 时返回结构化样例结果。
 ai:
   base-url: ${AI_BASE_URL:}
   api-key: ${AI_API_KEY:}

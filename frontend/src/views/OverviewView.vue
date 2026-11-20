@@ -11,9 +11,9 @@
       <span>进度 <b :class="{bad: health.behind}">{{health.behind ? '落后于理想线' : '正常'}}</b></span>
       <span>阻塞 <b class="bad">{{health.blockedCount}}</b></span>
       <span>长期未更新 <b>{{health.staleCount}}</b></span>
-      <span>完成率 <b>{{health.completionRate}}%</b></span>
+      <span>完成率 <b>{{clampPct(health.completionRate)}}%</b></span>
     </div>
-    <p class="tiny">健康度：剩余估算与理想线对比、阻塞数、长期未更新数与完成率。</p>
+    <p class="tiny">健康度（§7.5）：剩余估算与理想线对比、阻塞数、长期未更新数与完成率。</p>
   </GlassPanel>
 
   <GlassPanel class="panel">
@@ -62,6 +62,7 @@ import AppShell from '../components/AppShell.vue'; import GlassPanel from '../co
 import AiBadge from '../components/AiBadge.vue'
 import { api, ApiError } from '../api/http'; import { MEMBER_STATUS_META, type OverviewData, type RiskSignal } from '../api/types'
 import { useTeam } from '../stores/team'; import { useToast } from '../stores/toast'
+import { clampPct } from '../utils/progress'
 const team = useTeam(), toast = useToast()
 const data = ref<OverviewData|null>(null), loading = ref(false), loadErr = ref('')
 const drawerOpen = ref(false), openId = ref<number|null>(null)

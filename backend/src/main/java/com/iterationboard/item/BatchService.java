@@ -1,6 +1,7 @@
 package com.iterationboard.item;
 
 import com.iterationboard.common.ApiException;
+import com.iterationboard.common.PlatformTime;
 import com.iterationboard.config.Dtos;
 import com.iterationboard.domain.*;
 import com.iterationboard.domain.Enums.*;
@@ -12,7 +13,6 @@ import org.springframework.transaction.annotation.Transactional;
 import java.math.BigDecimal;
 import java.time.Instant;
 import java.time.LocalDate;
-import java.time.ZoneOffset;
 import java.util.ArrayList;
 import java.util.List;
 
@@ -32,15 +32,16 @@ public class BatchService {
     private final NotifyService notifyService;
     private final ItemOwnerRepo ownerRepo;
     private final TaskDerivationService derivationService;
+    private final PlatformTime platformTime;
 
     public BatchService(DispatchBatchRepo batchRepo, ItemRepo itemRepo, TeamMemberRepo memberRepo,
                         NudgeRepo nudgeRepo, ActivityRepo activityRepo, TeamService teamService,
                         ItemService itemService, NotifyService notifyService,
-                        ItemOwnerRepo ownerRepo, TaskDerivationService derivationService) {
+                        ItemOwnerRepo ownerRepo, TaskDerivationService derivationService, PlatformTime platformTime) {
         this.batchRepo = batchRepo; this.itemRepo = itemRepo; this.memberRepo = memberRepo;
         this.nudgeRepo = nudgeRepo; this.activityRepo = activityRepo; this.teamService = teamService;
         this.itemService = itemService; this.notifyService = notifyService;
-        this.ownerRepo = ownerRepo; this.derivationService = derivationService;
+        this.ownerRepo = ownerRepo; this.derivationService = derivationService; this.platformTime = platformTime;
     }
 
     public record BatchCmd(ItemType type, String title, String description, Priority priority,
@@ -103,12 +104,12 @@ public class BatchService {
                 .filter(i -> i.getDeletedAt() == null
                         && i.getStatus() != ItemStatus.DONE && i.getStatus() != ItemStatus.CANCELLED)
                 .toList();
-        Instant startOfToday = LocalDate.now(ZoneOffset.UTC).atStartOfDay(ZoneOffset.UTC).toInstant();
+        Instant startOfToday = platformTime.startOfTodayInstant();
         // 组长（请假成员改记对象）：取组内第一名 LEADER
         AppUser leader = memberRepo.findByTeamId(teamId).stream()
                 .filter(m -> m.getRole() == Role.LEADER).map(TeamMember::getUser).findFirst().orElse(null);
         List<Long> nudged = new ArrayList<>(), skipped = new ArrayList<>(), redirected = new ArrayList<>();
-        LocalDate today = LocalDate.now();
+        LocalDate today = platformTime.today();
         for (Item item : items) {
             // 同一人对同一事项每天一次
             if (nudgeRepo.existsByItemIdAndNudgerIdAndCreatedAtGreaterThanEqual(item.getId(), actor.getId(), startOfToday)) {

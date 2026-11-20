@@ -40,6 +40,7 @@ public class SpaController {
             "/trash",
             "/settings",
             "/me/settings",
+            "/admin",
             "/teams/new",
             "/teams/pending",
             "/task/{id}",

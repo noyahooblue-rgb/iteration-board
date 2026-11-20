@@ -144,7 +144,7 @@ const W = 720, H = 260, PAD = 44
 const allDates = computed(()=> { const ds = new Set<string>(); burndown.value?.points.forEach(p=>ds.add(p.date)); burndown.value?.ideal.forEach(p=>ds.add(p.date)); if (selected.value?.endDate) ds.add(selected.value.endDate); return [...ds].sort() })
 const maxY = computed(()=> Math.max(1, burndown.value?.totalEstimate ?? 0, ...((burndown.value?.points ?? []).map(p=>p.remainingEstimate))))
 function xOf(date:string){ const ds = allDates.value; const i = Math.max(0, ds.indexOf(date)); return PAD + (ds.length<=1 ? 0 : i/(ds.length-1)) * (W - PAD - PAD/2) }
-function yOf(v:number){ return (H-PAD) - (v / maxY.value) * (H - PAD - PAD/2) }
+function yOf(v:number){ return (H-PAD) - (Math.max(0, v) / maxY.value) * (H - PAD - PAD/2) } // 剩余估算为负时钳到 0，不画到轴下（1.0.4 F）
 const actualPath = computed(()=> (burndown.value?.points ?? []).map(p=>`${xOf(p.date)},${yOf(p.remainingEstimate)}`).join(' '))
 const idealPath = computed(()=> (burndown.value?.ideal ?? []).map(p=>`${xOf(p.date)},${yOf(p.remainingEstimate)}`).join(' '))
 async function load(){ if(!team.currentId) return; loading.value = true; loadErr.value = ''

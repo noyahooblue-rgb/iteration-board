@@ -2,7 +2,7 @@
 <AppShell title="个人设置">
   <GlassPanel class="body">
     <h2>账号</h2>
-    <div class="mrow"><Avatar v-if="auth.user" :name="auth.user.displayName" :color="auth.user.avatarColor" :size="38"/><span class="grow"><b>{{auth.user?.displayName}}</b><br/><span class="small">登录名 @{{auth.user?.loginName}}（注册后不可修改）· 当前小组角色：{{roleName}}</span></span></div>
+    <div class="mrow"><Avatar v-if="auth.user" :name="auth.user.displayName" :color="auth.user.avatarColor" :size="38"/><span class="grow"><b>{{auth.user?.displayName}}</b><br/><span class="small">登录名 @{{auth.user?.loginName}}（注册后不可修改）· 当前小组角色：{{roleName}} · 平台角色：{{ auth.user?.platformAdmin ? '平台管理员' : '普通用户' }}</span></span></div>
     <h2 style="margin-top:22px">修改密码</h2>
     <p class="small">新密码至少 8 位且同时含字母和数字。修改成功后，其他设备的登录会话会失效。</p>
     <form @submit.prevent="submit" style="max-width:420px;margin-top:12px">

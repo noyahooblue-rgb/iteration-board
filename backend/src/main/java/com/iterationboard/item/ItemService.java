@@ -32,6 +32,7 @@ public class ItemService {
     private final IterationRepo iterationRepo;
     private final ChecklistRepo checklistRepo;
     private final ItemOwnerRepo ownerRepo;
+    private final WatcherRepo watcherRepo;
     private final TeamService teamService;
     private final ItemTransitionService transitionService;
     private final TaskDerivationService derivationService;
@@ -44,7 +45,7 @@ public class ItemService {
                        LabelRepo labelRepo, ItemLabelRepo itemLabelRepo,
                        ProgressRepo progressRepo, CommentRepo commentRepo,
                        ActivityRepo activityRepo, IterationRepo iterationRepo,
-                       ChecklistRepo checklistRepo, ItemOwnerRepo ownerRepo,
+                       ChecklistRepo checklistRepo, ItemOwnerRepo ownerRepo, WatcherRepo watcherRepo,
                        TeamService teamService, ItemTransitionService transitionService,
                        TaskDerivationService derivationService, NotifyService notifyService,
                        com.iterationboard.common.AuditService auditService) {
@@ -53,7 +54,7 @@ public class ItemService {
         this.collaboratorRepo = collaboratorRepo; this.inviteeRepo = inviteeRepo; this.labelRepo = labelRepo;
         this.itemLabelRepo = itemLabelRepo; this.progressRepo = progressRepo; this.commentRepo = commentRepo;
         this.activityRepo = activityRepo; this.iterationRepo = iterationRepo; this.checklistRepo = checklistRepo;
-        this.ownerRepo = ownerRepo;
+        this.ownerRepo = ownerRepo; this.watcherRepo = watcherRepo;
         this.teamService = teamService; this.transitionService = transitionService;
         this.derivationService = derivationService; this.notifyService = notifyService;
     }
@@ -167,15 +168,27 @@ public class ItemService {
         if (cmd.type() != ItemType.TASK && "ASSIGN".equals(dest)) {
             List<Long> owners = cmd.ownerIds() == null ? List.of() : cmd.ownerIds();
             if (owners.isEmpty()) throw ApiException.validation("直接指派时 ownerIds 必填");
-            transitionService.setOwners(item, owners.stream()
-                    .map(uid -> requireTeamUser(teamId, uid, "负责人")).toList());
+            List<AppUser> assigned = owners.stream()
+                    .map(uid -> requireTeamUser(teamId, uid, "负责人")).toList();
+            transitionService.setOwners(item, assigned);
+            for (AppUser o : assigned) {
+                notifyService.notify(o, "ASSIGN", item, creator, "你被设为事项负责人");
+            }
             item.setAssignedDirectly(true);
             itemRepo.save(item);
         }
         if ("INVITE".equals(dest) && cmd.inviteeIds() != null) {
             for (Long uid : cmd.inviteeIds()) {
-                inviteeRepo.save(new ItemInvitee(item, requireTeamUser(teamId, uid, "被邀请人")));
+                AppUser invitee = requireTeamUser(teamId, uid, "被邀请人");
+                inviteeRepo.save(new ItemInvitee(item, invitee));
+                // 1.0.4 修复：邀请认领必须发通知（此前只落 invitee 记录，被邀请人铃铛无任何提示）
+                notifyService.notify(invitee, "INVITE", item, creator,
+                        "你被邀请认领事项「" + item.getTitle() + "」，请到认领池处理");
             }
+        }
+        // 创建时设定的验收人通知（默认验收人=创建人本人时，由 NotifyService「不给自己发」规则自动跳过）
+        if (cmd.type() != ItemType.TASK && item.getAcceptor() != null) {
+            notifyService.notify(item.getAcceptor(), "ACCEPTOR", item, creator, "你被设为事项验收人");
         }
         if (cmd.labelNames() != null) {
             for (String name : cmd.labelNames()) {
@@ -232,7 +245,7 @@ public class ItemService {
         TeamMember member = teamService.requireMember(teamId, user);
         Item item = requireItem(teamId, itemId);
         if (!canEdit(member, item, user)) throw ApiException.forbidden("仅创建人、负责人、PO 或组长可编辑事项");
-        // ：故事 PATCH——PO/组长可全改；负责人（非 PO/组长）只能改 description，其余字段 403。
+        // 修订二 §16.2：故事 PATCH——PO/组长可全改；负责人（非 PO/组长）只能改 description，其余字段 403。
         if (item.getType() == ItemType.STORY && member.getRole() != Role.LEADER && member.getRole() != Role.PO) {
             if (!transitionService.isOwner(item, user)) {
                 throw ApiException.forbidden("故事仅 PO、组长或负责人可编辑");
@@ -256,7 +269,15 @@ public class ItemService {
         if (cmd.title() != null) item.setTitle(cmd.title());
         if (cmd.description() != null) item.setDescription(cmd.description());
         if (cmd.priority() != null) item.setPriority(cmd.priority());
-        if (cmd.acceptorPresent()) item.setAcceptor(cmd.acceptorId() == null ? null : requireTeamUser(teamId, cmd.acceptorId(), "验收人"));
+        if (cmd.acceptorPresent()) {
+            AppUser newAcceptor = cmd.acceptorId() == null ? null : requireTeamUser(teamId, cmd.acceptorId(), "验收人");
+            boolean acceptorChanged = newAcceptor != null
+                    && (item.getAcceptor() == null || !item.getAcceptor().getId().equals(newAcceptor.getId()));
+            item.setAcceptor(newAcceptor);
+            if (acceptorChanged) {
+                notifyService.notify(newAcceptor, "ACCEPTOR", item, user, "你被设为事项验收人");
+            }
+        }
         if (cmd.dueDatePresent()) item.setDueDate(cmd.dueDate());
         if (cmd.estimatePresent()) item.setEstimate(cmd.estimate());
         if (cmd.iterationPresent()) item.setIteration(cmd.iterationId() == null ? null
@@ -343,7 +364,7 @@ public class ItemService {
     }
 
     /**
-     * 软删除进回收站。：
+     * 软删除进回收站。修订二 §16.2：
      * 任务仅 PO/组长，且其下故事全部未开始（UNCLAIMED/NOT_STARTED 且无进展）才可删；
      * 故事仅 PO/组长且未开始时；独立事项（DEFECT/ANALYSIS/ADHOC）维持既有口径
      * （创建人未开始时或 PO/组长）。
@@ -484,6 +505,14 @@ public class ItemService {
     @Transactional
     public ProgressUpdate addProgress(Long teamId, Long itemId, AppUser user, String text, Integer percent,
                                       Boolean blocked, String blockReason, String nextStep, String kind) {
+        return addProgress(teamId, itemId, user, text, percent, blocked, blockReason, nextStep, kind, null);
+    }
+
+    /** 进展 @ 提及版（1.0.4）：mentionIds 落 progress_mention 并给被 @ 者发 MENTION 通知，口径与评论一致。 */
+    @Transactional
+    public ProgressUpdate addProgress(Long teamId, Long itemId, AppUser user, String text, Integer percent,
+                                      Boolean blocked, String blockReason, String nextStep, String kind,
+                                      List<Long> mentionIds) {
         TeamMember member = teamService.requireMember(teamId, user);
         Item item = requireItem(teamId, itemId);
         boolean allowed = member.getRole() == Role.LEADER || transitionService.isOwner(item, user);
@@ -509,7 +538,15 @@ public class ItemService {
         boolean nowBlocked = blocked != null ? blocked : item.isBlocked();
         p.setBlocked(nowBlocked);
         p.setBlockReason(Boolean.TRUE.equals(blocked) ? blockReason : (nowBlocked ? item.getBlockReason() : null));
+        if (mentionIds != null) p.setMentionIds(new java.util.HashSet<>(mentionIds));
         progressRepo.save(p);
+        if (mentionIds != null) {
+            for (Long uid : mentionIds) {
+                userRepo.findById(uid)
+                        .filter(x -> memberRepo.findByTeamIdAndUserId(teamId, x.getId()).isPresent())
+                        .ifPresent(x -> notifyService.notify(x, "MENTION", item, user, "有人在进展里 @ 了你"));
+            }
+        }
         if (percent != null) item.setProgressPercent(percent);
         if (blocked != null) {
             boolean was = item.isBlocked();
@@ -518,7 +555,7 @@ public class ItemService {
             item.setBlockedAt(blocked ? Instant.now() : null);
             if (blocked && !was) {
                 activityRepo.save(new Activity(item, user, "BLOCK", item.getStatus().name(), item.getStatus().name(), blockReason));
-                // 新阻塞通知组长
+                // 新阻塞通知组长（设计 §3.5：标记阻塞自动通知组长）
                 memberRepo.findByTeamId(teamId).stream()
                         .filter(m -> m.getRole() == Role.LEADER)
                         .forEach(m -> notifyService.notify(m.getUser(), "BLOCK", item, user,
@@ -550,11 +587,23 @@ public class ItemService {
         c.setContent(content);
         if (mentionIds != null) c.setMentionIds(new java.util.HashSet<>(mentionIds));
         commentRepo.save(c);
+        java.util.Set<Long> mentioned = mentionIds == null ? java.util.Set.of() : new java.util.HashSet<>(mentionIds);
         if (mentionIds != null) {
             for (Long uid : mentionIds) {
                 userRepo.findById(uid)
                         .filter(x -> memberRepo.findByTeamIdAndUserId(teamId, x.getId()).isPresent())
                         .ifPresent(x -> notifyService.notify(x, "MENTION", item, user, "有人在评论里 @ 了你"));
+            }
+        }
+        // 关注或负责事项有新评论 → 通知负责人与关注者（设计 §3.7，此前缺失）；
+        // 被 @ 者已单独收到 MENTION 不重复发；评论作者本人由 NotifyService 自动跳过。
+        java.util.Set<Long> commentNotified = new java.util.HashSet<>(mentioned);
+        List<AppUser> audience = new ArrayList<>();
+        ownerRepo.findByItemId(itemId).forEach(o -> audience.add(o.getUser()));
+        watcherRepo.findByItemId(itemId).forEach(w -> audience.add(w.getUser()));
+        for (AppUser target : audience) {
+            if (commentNotified.add(target.getId())) {
+                notifyService.notify(target, "COMMENT", item, user, "你关注或负责的事项有新评论");
             }
         }
         return c;
@@ -568,7 +617,7 @@ public class ItemService {
                 .filter(c -> c.getDeletedAt() == null).toList();
     }
 
-    /** 评论修改（）：仅作者，且发出后 15 分钟内，超时 403。 */
+    /** 评论修改（修订二 §16.2）：仅作者，且发出后 15 分钟内，超时 403。 */
     @Transactional
     public Comment patchComment(Long teamId, Long itemId, Long commentId, AppUser user, String content) {
         teamService.requireMember(teamId, user);
@@ -586,7 +635,7 @@ public class ItemService {
         return commentRepo.save(c);
     }
 
-    /** 评论删除（）：作者或组长可删（软删除）。 */
+    /** 评论删除（修订二 §16.2）：作者或组长可删（软删除）。 */
     @Transactional
     public void deleteComment(Long teamId, Long itemId, Long commentId, AppUser user) {
         TeamMember member = teamService.requireMember(teamId, user);
@@ -614,7 +663,7 @@ public class ItemService {
                 || transitionService.isOwner(item, user);
     }
 
-    // ---------- 检查清单 ----------
+    // ---------- 检查清单（设计 §5.2 checklist_entry：真实持久化，M1 收尾接入） ----------
 
     @Transactional(readOnly = true)
     public List<ChecklistEntry> checklist(Long teamId, Long itemId, AppUser user) {

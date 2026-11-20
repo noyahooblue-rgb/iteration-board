@@ -50,12 +50,13 @@ import AppButton from '../AppButton.vue'
 import { api, ApiError } from '../../api/http'; import type { AdapterItem, SyncLog } from '../../api/types'
 import { useTeam } from '../../stores/team'; import { useToast } from '../../stores/toast'
 import { useBusy } from '../../utils/busy'
+import { fmtDateTime } from '../../utils/datetime'
 const team = useTeam(), toast = useToast(), busy = useBusy()
 const adapters = ref<AdapterItem[]>([]), logs = ref<SyncLog[]>([]), editingId = ref<number | null>(null)
 const form = reactive({ name: '', type: 'MOCK', systemName: '', url: '', method: 'GET', enabled: true, authType: 'NONE', authToken: '', authUser: '', authPassword: '', fields: { title: '', status: '', owner: '' } })
 function hasSecret(a: AdapterItem){ const c = a.config ?? {}; return c.authToken === '***' || c.authPassword === '***' || !!c.authToken || !!c.authPassword }
 const isLeader = computed(() => team.current?.myRole === 'LEADER')
-const fmt = (s: string) => s ? s.slice(0, 16).replace('T', ' ') : ''
+const fmt = fmtDateTime
 async function load(){ adapters.value = await api.get(`/teams/${team.currentId}/integrations/adapters`).catch(() => []); logs.value = await api.get(`/teams/${team.currentId}/integrations/sync-logs`).catch(() => []) }
 onMounted(load)
 function resetForm(){ editingId.value = null; Object.assign(form, { name: '', type: 'MOCK', systemName: '', url: '', method: 'GET', enabled: true, authType: 'NONE', authToken: '', authUser: '', authPassword: '', fields: { title: '', status: '', owner: '' } }) }

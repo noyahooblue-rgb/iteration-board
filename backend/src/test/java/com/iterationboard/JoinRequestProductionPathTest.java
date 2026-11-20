@@ -36,6 +36,9 @@ class JoinRequestProductionPathTest {
     @AfterEach
     void cleanup() {
         jdbc.update("DELETE FROM join_request WHERE user_id IN (SELECT id FROM app_user WHERE login_name LIKE 'jr_%')");
+        // 1.0.4 起加入申请/审批会生成带 team_id 的通知，必须先于 team/app_user 删除，否则 FK 违例导致清理中断、残留数据污染后续用例
+        jdbc.update("DELETE FROM notification WHERE team_id IN (SELECT id FROM team WHERE code = 'JRT')");
+        jdbc.update("DELETE FROM notification WHERE recipient_id IN (SELECT id FROM app_user WHERE login_name LIKE 'jr_%') OR actor_id IN (SELECT id FROM app_user WHERE login_name LIKE 'jr_%')");
         jdbc.update("DELETE FROM audit_log WHERE team_id IN (SELECT id FROM team WHERE code = 'JRT')");
         jdbc.update("DELETE FROM team_member WHERE user_id IN (SELECT id FROM app_user WHERE login_name LIKE 'jr_%')");
         jdbc.update("DELETE FROM team_member WHERE team_id IN (SELECT id FROM team WHERE code = 'JRT')");

@@ -12,7 +12,7 @@ import static org.springframework.test.web.servlet.request.MockMvcRequestBuilder
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.*;
 
 /**
- * 1.0.3（实测第四轮）回归测试：
+ * 1.0.3（实测第四轮 8eyn4mwp）回归测试：
  * - 未登录 GET / 返回 200 HTML（前端入口，不再是 401 JSON）；
  * - 未登录 GET /board（前端路由）经 SPA 回退返回 index.html；
  * - 未登录 GET /api/v1/teams 返回 401 JSON 且中文不乱码（UTF-8）；
@@ -42,6 +42,11 @@ class SpaFallbackSecurityTest {
                 .andExpect(content().contentTypeCompatibleWith("text/html"))
                 .andExpect(content().string(containsString("TEST-INDEX-MARKER")));
         mvc.perform(get("/workbench"))
+                .andExpect(status().isOk())
+                .andExpect(content().string(containsString("TEST-INDEX-MARKER")));
+        // 1.0.4 新增前端路由 /admin（平台管理）也必须在回退清单内，
+        // 否则书签直开/刷新会拿到 JSON 404（真机实测抓到）。
+        mvc.perform(get("/admin"))
                 .andExpect(status().isOk())
                 .andExpect(content().string(containsString("TEST-INDEX-MARKER")));
     }

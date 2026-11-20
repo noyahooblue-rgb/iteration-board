@@ -1,6 +1,7 @@
 package com.iterationboard.iteration;
 
 import com.iterationboard.common.ApiException;
+import com.iterationboard.common.PlatformTime;
 import com.iterationboard.common.Workdays;
 import com.iterationboard.config.Dtos;
 import com.iterationboard.domain.*;
@@ -23,7 +24,7 @@ import java.util.List;
 import java.util.Map;
 
 /**
- * 迭代全生命周期：创建/列表/修改/开始/结束与结转、
+ * 迭代全生命周期（M3，设计 §7.5 / §12.4）：创建/列表/修改/开始/结束与结转、
  * 燃尽快照与燃尽图数据、关键日期。已结束迭代状态值 FINISHED（契约 Iteration.status 枚举）。
  */
 @Service
@@ -36,11 +37,12 @@ public class IterationService {
     private final TeamService teamService;
     private final NotifyService notifyService;
     private final ItemService itemService;
+    private final PlatformTime platformTime;
     private final ReportRepo reportRepo;
 
     public IterationService(IterationRepo iterationRepo, ItemRepo itemRepo, IterationSnapshotRepo snapshotRepo,
                             KeyDateRepo keyDateRepo, TeamMemberRepo memberRepo, TeamService teamService,
-                            NotifyService notifyService, ItemService itemService, ReportRepo reportRepo) {
+                            NotifyService notifyService, ItemService itemService, ReportRepo reportRepo, PlatformTime platformTime) {
         this.iterationRepo = iterationRepo;
         this.itemRepo = itemRepo;
         this.snapshotRepo = snapshotRepo;
@@ -50,6 +52,7 @@ public class IterationService {
         this.notifyService = notifyService;
         this.itemService = itemService;
         this.reportRepo = reportRepo;
+        this.platformTime = platformTime;
     }
 
     private void requireLeaderOrPo(Long teamId, AppUser user) {
@@ -67,7 +70,7 @@ public class IterationService {
         }
     }
 
-    /** 删除迭代（Q3 仅组长；：仅规划中且未放入事项时）。 */
+    /** 删除迭代（Q3 仅组长；§16.2：仅规划中且未放入事项时）。 */
     @Transactional
     public void delete(Long teamId, Long iterationId, AppUser user) {
         requireLeader(teamId, user);
@@ -97,7 +100,7 @@ public class IterationService {
 
     @Transactional
     public Iteration create(Long teamId, AppUser user, String name, String goal, LocalDate start, LocalDate end) {
-        //：迭代创建仅组长
+        // 修订二 §16.2：迭代创建仅组长
         TeamMember creator = teamService.requireMember(teamId, user);
         if (creator.getRole() != Role.LEADER) throw ApiException.forbidden("仅组长可创建迭代");
         return doCreate(teamId, name, goal, start, end);
@@ -106,7 +109,7 @@ public class IterationService {
     private Iteration doCreate(Long teamId, String name, String goal, LocalDate start, LocalDate end) {
         if (name == null || name.isBlank() || name.length() > 100) throw ApiException.validation("迭代名称不能为空且不超过 100 字");
         if (start != null && end != null && end.isBefore(start)) throw ApiException.validation("结束日期不能早于开始日期");
-        //：同时最多一个 PLANNING（新建即 PLANNING）
+        // 修订二 §16.2：同时最多一个 PLANNING（新建即 PLANNING）
         if (iterationRepo.findFirstByTeamIdAndStatus(teamId, "PLANNING").isPresent()) {
             throw new ApiException(HttpStatus.CONFLICT, "PLANNING_ITERATION_EXISTS", "已有规划中的迭代，同时最多一个");
         }
@@ -159,7 +162,7 @@ public class IterationService {
         }
         it.setStatus("ACTIVE");
         iterationRepo.save(it);
-        takeSnapshot(it, LocalDate.now());
+        takeSnapshot(it, platformTime.today());
         for (TeamMember m : memberRepo.findByTeamId(teamId)) {
             notifyService.notifyInTeam(m.getUser(), "ITERATION_STARTED", null, it.getTeam(), user,
                     "迭代「" + it.getName() + "」已开始");
@@ -178,7 +181,7 @@ public class IterationService {
         requireLeader(teamId, user);
         Iteration it = requireIteration(teamId, iterationId);
         if ("FINISHED".equals(it.getStatus())) {
-            //：结束迭代只能生效一次——重复 close 返回已生成结果，不再重复生成改进项/总结
+            // 修订二 §16.3：结束迭代只能生效一次——重复 close 返回已生成结果，不再重复生成改进项/总结
             Long existingReportId = reportRepo.findFirstByTeamIdAndKindAndIterationIdOrderByIdAsc(
                     teamId, "ITERATION_SUMMARY", iterationId).map(com.iterationboard.domain.Report::getId).orElse(null);
             return new CloseResult(Dtos.IterationDto.of(it), existingReportId, null, 0, 0, 0, true);
@@ -212,13 +215,13 @@ public class IterationService {
                     throw new ApiException(HttpStatus.UNPROCESSABLE_ENTITY, "NEXT_ITERATION_REQUIRED",
                             "存在结转到下一迭代的事项，但没有未开始的迭代；请先创建，或传 createNextIteration=true");
                 }
-                LocalDate ns = it.getEndDate() == null ? LocalDate.now() : it.getEndDate().plusDays(1);
+                LocalDate ns = it.getEndDate() == null ? platformTime.today() : it.getEndDate().plusDays(1);
                 int weeks = Math.max(1, team.getIterationWeeks());
                 next = doCreate(teamId, it.getName() + "（续）", it.getGoal(), ns, ns.plusWeeks(weeks).minusDays(1));
             }
         }
         // 先拍关闭快照（反映结转前的燃尽终点），再执行结转
-        takeSnapshot(it, LocalDate.now());
+        takeSnapshot(it, platformTime.today());
         int toNext = 0, toBacklog = 0;
         for (Item item : unfinished) {
             String action = decisionMap.getOrDefault(item.getId(), "NEXT");
@@ -296,7 +299,7 @@ public class IterationService {
         List<IterationSnapshot> snaps = snapshotRepo.findByIterationIdOrderBySnapshotDateAsc(iterationId);
         List<Map<String, Object>> points = new ArrayList<>();
         for (IterationSnapshot s : snaps) points.add(pointMap(s.getSnapshotDate(), s.getRemainingEstimate(), s.getRemainingCount(), s.getDoneCount(), false));
-        LocalDate today = LocalDate.now();
+        LocalDate today = platformTime.today();
         if ("ACTIVE".equals(it.getStatus())) {
             // 当天实时点（不落库）：快照里还没有今天时补上
             boolean hasToday = snaps.stream().anyMatch(s -> s.getSnapshotDate().equals(today));
@@ -372,7 +375,7 @@ public class IterationService {
         return keyDateRepo.save(kd);
     }
 
-    /** 关键日期修改。 */
+    /** 关键日期修改（修订二 §16.2：增删改仅组长/PO）。 */
     @Transactional
     public KeyDate patchKeyDate(Long teamId, Long keyDateId, AppUser user, String title, LocalDate date, String category) {
         requireLeaderOrPo(teamId, user);

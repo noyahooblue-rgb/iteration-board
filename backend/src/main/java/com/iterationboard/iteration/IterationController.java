@@ -1,6 +1,7 @@
 package com.iterationboard.iteration;
 
 import com.iterationboard.common.ApiException;
+import com.iterationboard.common.PlatformTime;
 import com.iterationboard.config.CurrentUser;
 import com.iterationboard.config.Dtos;
 import com.iterationboard.domain.AppUser;
@@ -29,11 +30,12 @@ public class IterationController {
     private final PlanningService planningService;
     private final ReportService reportService;
     private final com.iterationboard.common.IdempotencyHelper idempotency;
+    private final PlatformTime platformTime;
 
     public IterationController(IterationRepo iterationRepo, IterationService iterationService,
                                TeamService teamService, CurrentUser currentUser,
                                PlanningService planningService, ReportService reportService,
-                               com.iterationboard.common.IdempotencyHelper idempotency) {
+                               com.iterationboard.common.IdempotencyHelper idempotency, PlatformTime platformTime) {
         this.iterationRepo = iterationRepo;
         this.iterationService = iterationService;
         this.teamService = teamService;
@@ -41,6 +43,7 @@ public class IterationController {
         this.planningService = planningService;
         this.reportService = reportService;
         this.idempotency = idempotency;
+        this.platformTime = platformTime;
     }
 
     public record CreateIterationRequest(String name, String goal, LocalDate startDate, LocalDate endDate) {}
@@ -148,7 +151,7 @@ public class IterationController {
         AppUser u = currentUser.require();
         teamService.requireMember(teamId, u);
         var it = iterationService.requireIteration(teamId, iterationId);
-        var snap = iterationService.takeSnapshot(it, LocalDate.now());
+        var snap = iterationService.takeSnapshot(it, platformTime.today());
         Map<String, Object> m = new LinkedHashMap<>();
         m.put("iterationId", iterationId);
         m.put("date", snap.getSnapshotDate());

@@ -81,7 +81,7 @@ public final class Dtos {
     public record PlanningDto(IterationDto iteration, List<PlanningGroupDto> groups,
                               List<PlanningLoadDto> loads, List<PlanningCapacityDto> capacities) {}
 
-    /** 检查清单条目。 */
+    /** 检查清单条目（设计 §5.2 checklist_entry：事项、文字、是否完成、排序）。 */
     public record ChecklistDto(Long id, Long itemId, String text, boolean done, int sortOrder) {
         public static ChecklistDto of(ChecklistEntry e) {
             return new ChecklistDto(e.getId(), e.getItem().getId(), e.getText(), e.isDone(), e.getSortOrder());
@@ -89,10 +89,11 @@ public final class Dtos {
     }
 
     public record ProgressDto(Long id, Long itemId, Long authorId, String text, Integer percent, boolean blocked,
-                              String blockReason, String nextStep, String kind, Instant createdAt) {
+                              String blockReason, String nextStep, String kind, List<Long> mentionIds, Instant createdAt) {
         public static ProgressDto of(ProgressUpdate p) {
             return new ProgressDto(p.getId(), p.getItem().getId(), p.getAuthor().getId(), p.getText(), p.getPercent(),
-                    p.isBlocked(), p.getBlockReason(), p.getNextStep(), p.getKind(), p.getCreatedAt());
+                    p.isBlocked(), p.getBlockReason(), p.getNextStep(), p.getKind(),
+                    p.getMentionIds() == null ? List.of() : List.copyOf(p.getMentionIds()), p.getCreatedAt());
         }
     }
 

@@ -1,6 +1,7 @@
 package com.iterationboard.item;
 
 import com.iterationboard.common.ApiException;
+import com.iterationboard.common.PlatformTime;
 import com.iterationboard.domain.*;
 import com.iterationboard.domain.Enums.*;
 import com.iterationboard.repo.*;
@@ -11,14 +12,13 @@ import org.springframework.transaction.annotation.Transactional;
 
 import java.time.Instant;
 import java.time.LocalDate;
-import java.time.ZoneOffset;
 import java.util.ArrayList;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 
 /**
- * 单事项催一下与快捷回应。
+ * 单事项催一下与快捷回应（M3，设计 §3.6 / 契约 0.3.0）。
  * 口径与批量下发一致：同一发起人对同一事项每天一次；请假/出差者不提醒本人，
  * 改记给组长且不计入事项被催次数；轮到谁催谁（进行中催负责人、待验收催验收人）。
  */
@@ -31,10 +31,11 @@ public class NudgeService {
     private final ActivityRepo activityRepo;
     private final TeamService teamService;
     private final NotifyService notifyService;
+    private final PlatformTime platformTime;
 
     public NudgeService(ItemRepo itemRepo, ItemOwnerRepo ownerRepo, NudgeRepo nudgeRepo,
                         TeamMemberRepo memberRepo, ActivityRepo activityRepo,
-                        TeamService teamService, NotifyService notifyService) {
+                        TeamService teamService, NotifyService notifyService, PlatformTime platformTime) {
         this.itemRepo = itemRepo;
         this.ownerRepo = ownerRepo;
         this.nudgeRepo = nudgeRepo;
@@ -42,6 +43,7 @@ public class NudgeService {
         this.activityRepo = activityRepo;
         this.teamService = teamService;
         this.notifyService = notifyService;
+        this.platformTime = platformTime;
     }
 
     private Item requireItem(Long teamId, Long itemId) {
@@ -72,7 +74,7 @@ public class NudgeService {
         if (owners.stream().anyMatch(o -> o.getId().equals(actor.getId()))) {
             throw new ApiException(HttpStatus.BAD_REQUEST, "CANNOT_NUDGE_OWN", "不能催自己负责的事项");
         }
-        Instant startOfToday = LocalDate.now(ZoneOffset.UTC).atStartOfDay(ZoneOffset.UTC).toInstant();
+        Instant startOfToday = platformTime.startOfTodayInstant();
         if (nudgeRepo.existsByItemIdAndNudgerIdAndCreatedAtGreaterThanEqual(itemId, actor.getId(), startOfToday)) {
             throw new ApiException(HttpStatus.CONFLICT, "NUDGE_DAILY_LIMIT", "今天已经催过这个事项了");
         }
@@ -90,7 +92,7 @@ public class NudgeService {
         }
         AppUser leader = memberRepo.findByTeamId(teamId).stream()
                 .filter(m -> m.getRole() == Role.LEADER).map(TeamMember::getUser).findFirst().orElse(null);
-        LocalDate today = LocalDate.now();
+        LocalDate today = platformTime.today();
         List<Long> nudgedIds = new ArrayList<>();
         boolean redirected = false;
         for (AppUser target : targets) {
@@ -151,7 +153,7 @@ public class NudgeService {
         notifyService.notify(nudge.getNudger(), "NUDGE_RESPONSE", item, user,
                 "对催一下的回应：" + label);
         if ("BLOCKED".equals(response) && !item.isBlocked()) {
-            // 快捷回应「卡住了」同步标记阻塞并通知组长
+            // 快捷回应「卡住了」同步标记阻塞并通知组长（设计 §3.5）
             item.setBlocked(true);
             item.setBlockReason("快捷回应：卡住了");
             item.setBlockedAt(Instant.now());

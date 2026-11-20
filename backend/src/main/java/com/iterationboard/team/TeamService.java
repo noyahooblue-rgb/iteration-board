@@ -20,19 +20,22 @@ public class TeamService {
     private final JoinRequestRepo joinRequestRepo;
     private final UserRepo userRepo;
     private final com.iterationboard.common.AuditService auditService;
+    private final com.iterationboard.item.NotifyService notifyService;
     private final SecureRandom random = new SecureRandom();
 
     public TeamService(TeamRepo teamRepo, TeamMemberRepo memberRepo,
                        JoinRequestRepo joinRequestRepo, UserRepo userRepo,
-                       com.iterationboard.common.AuditService auditService) {
+                       com.iterationboard.common.AuditService auditService,
+                       com.iterationboard.item.NotifyService notifyService) {
         this.teamRepo = teamRepo;
         this.memberRepo = memberRepo;
         this.joinRequestRepo = joinRequestRepo;
         this.userRepo = userRepo;
         this.auditService = auditService;
+        this.notifyService = notifyService;
     }
 
-    /** 成员身份校验：非成员一律 404，不泄露小组存在性。 */
+    /** 成员身份校验：非成员一律 404，不泄露小组存在性（设计 §11 / 契约）。 */
     public TeamMember requireMember(Long teamId, AppUser user) {
         return memberRepo.findByTeamIdAndUserId(teamId, user.getId())
                 .orElseThrow(() -> ApiException.notFound("小组不存在或无权访问"));
@@ -142,6 +145,11 @@ public class TeamService {
         r.setTeam(team);
         r.setUser(user);
         joinRequestRepo.save(r);
+        // 加入申请提交 → 通知本组全部组长（设计 §3.7，此前缺失，组长只能靠主动打开待审批列表发现）
+        memberRepo.findByTeamId(team.getId()).stream()
+                .filter(m -> m.getRole() == Role.LEADER)
+                .forEach(m -> notifyService.notifyInTeam(m.getUser(), "JOIN_REQUEST", null, team, user,
+                        user.getDisplayName() + " 申请加入小组「" + team.getName() + "」，请审批"));
         return new JoinOutcome(false, team, r);
     }
 
@@ -175,6 +183,9 @@ public class TeamService {
         r.setApprover(leader);
         r.setDecidedAt(Instant.now());
         joinRequestRepo.save(r);
+        // 审批结果 → 通知申请人（设计 §3.7，此前缺失）
+        notifyService.notifyInTeam(r.getUser(), "JOIN_APPROVED", null, team, leader,
+                "你加入小组「" + team.getName() + "」的申请已通过");
     }
 
     @Transactional
@@ -187,6 +198,9 @@ public class TeamService {
         r.setApprover(leader);
         r.setDecidedAt(Instant.now());
         joinRequestRepo.save(r);
+        // 审批结果 → 通知申请人（设计 §3.7，此前缺失）
+        notifyService.notifyInTeam(r.getUser(), "JOIN_REJECTED", null, requireTeam(teamId), leader,
+                "你加入小组的申请未通过");
     }
 
     @Transactional(readOnly = true)

@@ -15,12 +15,17 @@
     <nav>
       <RouterLink v-for="n in nav" :key="n.path" :to="n.path" class="nitem press" :class="{on:route.path===n.path}" :title="n.label">
         <component :is="n.icon" :size="19"/><span v-if="!ui.collapsed">{{n.label}}</span>
-        <span v-if="n.path==='/pool' && unclaimed && !ui.collapsed" class="badge-n">{{unclaimed}}</span>
+        <!-- 角标（1.0.4 A）：数据全部来自 shell 全局计数 store，任何页面都在；收起（mini）状态同样显示（绝对定位小徽章，不被 collapsed 隐藏） -->
+        <span v-if="n.badge && n.badge() > 0" class="badge-n" :class="{ mini: ui.collapsed }">{{ n.badge() > 99 ? '99+' : n.badge() }}</span>
       </RouterLink>
     </nav>
     <div class="sidefoot">
-      <RouterLink to="/settings" class="nitem press" :class="{on:route.path==='/settings'}" title="小组设置"><Settings :size="19"/><span v-if="!ui.collapsed">小组设置</span></RouterLink>
-      <button class="nitem press collapse" @click="ui.collapsed=!ui.collapsed"><PanelLeft :size="19"/><span v-if="!ui.collapsed">{{ ui.collapsed ? '展开侧栏' : '收起侧栏' }}</span></button>
+      <RouterLink to="/settings" class="nitem press" :class="{on:route.path==='/settings'}" title="小组设置"><Settings :size="19"/><span v-if="!ui.collapsed">小组设置</span>
+        <!-- 组长待审批加入申请数（1.0.4 A）：审批 UI 在小组设置「加入申请」页签，故角标挂在小组设置入口；数据源 GET /teams/{id}/join-requests -->
+        <span v-if="shell.pendingJoins > 0" class="badge-n" :class="{ mini: ui.collapsed }">{{ shell.pendingJoins > 99 ? '99+' : shell.pendingJoins }}</span></RouterLink>
+      <!-- 平台管理入口（1.0.4 I）：仅 platformAdmin 显示 -->
+      <RouterLink v-if="auth.user?.platformAdmin" to="/admin" class="nitem press" :class="{on:route.path==='/admin'}" title="平台管理"><ShieldCheck :size="19"/><span v-if="!ui.collapsed">平台管理</span></RouterLink>
+      <button class="nitem press collapse" title="收起/展开侧栏（Ctrl+B）" @click="ui.toggleCollapsed()"><PanelLeft :size="19"/><span v-if="!ui.collapsed">{{ ui.collapsed ? '展开侧栏' : '收起侧栏' }}</span></button>
       <div class="me" v-if="auth.user"><Avatar :name="auth.user.displayName" :color="auth.user.avatarColor" :size="34"/>
         <span v-if="!ui.collapsed" class="me-txt"><b>{{auth.user.displayName}}</b><small>{{ roleLabel }} · {{ team.current?.name ?? '' }}</small></span>
         <span v-if="!ui.collapsed" class="me-menu-wrap"><button class="icon press" aria-label="用户菜单" @click="meMenu=!meMenu"><ChevronDown :size="17"/></button>
@@ -33,16 +38,16 @@
       <button class="search press" @click="ui.searchOpen=true" aria-label="搜索（Ctrl+K）"><Search :size="16"/><span class="sph">搜索事项编号或标题</span><kbd>Ctrl K</kbd></button>
       <span v-if="auth.meta.demoMode" class="demo"><i/>演示环境 · 数据为模拟</span>
       <span class="bellwrap">
-        <button class="icon press bell" aria-label="通知中心" @click="toggleBell"><Bell :size="19"/><span v-if="unread>0" class="badge">{{unread>99?'99+':unread}}</span></button>
+        <button class="icon press bell" aria-label="通知中心" @click="toggleBell"><Bell :size="19"/><span v-if="shell.unread>0" class="badge">{{shell.unread>99?'99+':shell.unread}}</span></button>
         <div v-if="bellOpen" class="bellpanel glass">
-          <div class="bp-head"><b>通知中心</b><span class="small">{{unread}} 条未读</span><span style="flex:1"/><button class="bp-link" @click="markAllRead">全部已读</button></div>
+          <div class="bp-head"><b>通知中心</b><span class="small">{{shell.unread}} 条未读</span><span style="flex:1"/><button class="bp-link" @click="markAllRead">全部已读</button></div>
           <div class="bp-list">
-            <button v-for="n in notifs" :key="n.id" class="bp-item" :class="{un:n.readAt===null}" @click="openNotif(n)">
+            <button v-for="n in shell.notifs" :key="n.id" class="bp-item" :class="{un:n.readAt===null}" @click="openNotif(n)">
               <span class="bp-cat">{{NOTIFICATION_CATEGORY_META[n.category] ?? n.category}}</span>
-              <span class="bp-body"><span class="bp-content">{{n.content}}</span><span class="bp-time">{{n.itemCode ? n.itemCode+' · ' : ''}}{{fmtTime(n.createdAt)}}</span></span>
+              <span class="bp-body"><span class="bp-content">{{n.content}}</span><span class="bp-time">{{n.itemCode ? n.itemCode+' · ' : ''}}{{fmtDateTime(n.createdAt)}}</span></span>
               <span v-if="n.readAt===null" class="bp-dot"/>
             </button>
-            <p v-if="!notifs.length" class="small" style="padding:12px">暂无通知</p>
+            <p v-if="!shell.notifs.length" class="small" style="padding:12px">暂无通知</p>
           </div>
         </div>
       </span>
@@ -55,44 +60,65 @@
 </div>
 </template>
 <script setup lang="ts">
-import { computed, ref } from 'vue'
+import { computed, ref, watch } from 'vue'
 import { RouterLink, useRoute, useRouter } from 'vue-router'
-import { LayoutDashboard, KanbanSquare, Inbox, IterationCw, Layers, MessagesSquare, Gauge, FileText, Search, Plus, Bell, PanelLeft, ChevronDown, LogOut, Shapes, Settings, CalendarRange, Sparkles } from 'lucide-vue-next'
-import { api, subscribeEvents } from '../api/http'; import { NOTIFICATION_CATEGORY_META, type NotificationItem } from '../api/types'
+import { LayoutDashboard, KanbanSquare, Inbox, IterationCw, Layers, MessagesSquare, Gauge, FileText, Search, Plus, Bell, PanelLeft, ChevronDown, Shapes, Settings, CalendarRange, Sparkles, ShieldCheck } from 'lucide-vue-next'
+import { NOTIFICATION_CATEGORY_META, type NotificationItem } from '../api/types'
+import { fmtDateTime } from '../utils/datetime'
 import Avatar from './Avatar.vue'; import AppButton from './AppButton.vue'; import CreateItemModal from './CreateItemModal.vue'; import CommandPalette from './CommandPalette.vue'
 import { onMounted, onUnmounted } from 'vue'
-import { useAi } from '../stores/ai'; import { useTeam } from '../stores/team'; import { useAuth } from '../stores/auth'; import { useUi } from '../stores/ui'; import { useToast } from '../stores/toast'
+import { useAi } from '../stores/ai'; import { useTeam } from '../stores/team'; import { useAuth } from '../stores/auth'; import { useUi } from '../stores/ui'; import { useToast } from '../stores/toast'; import { useShell } from '../stores/shell'
 defineEmits(['refresh'])
-const team = useTeam(), auth = useAuth(), ui = useUi(), toast = useToast(), route = useRoute(), router = useRouter(), aiStore = useAi()
-const props = defineProps<{title:string; unclaimed?:number}>()
+const team = useTeam(), auth = useAuth(), ui = useUi(), toast = useToast(), route = useRoute(), router = useRouter(), aiStore = useAi(), shell = useShell()
+const props = defineProps<{title:string}>()
 const title = computed(()=>props.title)
 const teamMenu = ref(false); const meMenu = ref(false)
 const THEME_NAMES: Record<string,string> = { blue:'主题蓝', indigo:'主题靛', violet:'主题紫', pink:'主题粉', orange:'主题橙', green:'主题绿', teal:'主题青' }
 const themeName = computed(()=> THEME_NAMES[team.current?.themeColor ?? 'blue'] ?? '主题蓝')
 const roleLabel = computed(()=> { const r = team.current?.myRole; return r==='LEADER' ? '组长' : r==='PO' ? 'PO' : r==='MEMBER' ? '成员' : '' })
-const nav = [
-  { path:'/workbench', label:'工作台', icon:LayoutDashboard }, { path:'/board', label:'看板', icon:KanbanSquare },
-  { path:'/pool', label:'认领池', icon:Inbox }, { path:'/planning', label:'迭代规划', icon:IterationCw },
-  { path:'/backlog', label:'待办池', icon:Layers }, { path:'/iterations', label:'迭代', icon:CalendarRange },
+// 导航角标（1.0.4 A，数据来源见 stores/shell.ts 注释）：
+// - 工作台：shell.workbenchBadge = 待我验收（acceptorId=我 且 IN_REVIEW）+ 被催待回应（我负责且 nudgeCount>0）
+// - 认领池：shell.unclaimed = status=UNCLAIMED 的事项数（原 prop 传法已废弃，全局 store 维护，任何页面可见）
+const nav = computed(() => [
+  { path:'/workbench', label:'工作台', icon:LayoutDashboard, badge: () => shell.workbenchBadge },
+  { path:'/board', label:'看板', icon:KanbanSquare },
+  { path:'/pool', label:'认领池', icon:Inbox, badge: () => shell.unclaimed },
+  { path:'/planning', label:'迭代规划', icon:IterationCw },
+  { path:'/backlog', label:'待办池', icon:Layers },
+  { path:'/iterations', label:'迭代', icon:CalendarRange },
   { path:'/standup', label:'站会', icon:MessagesSquare },
-  { path:'/overview', label:'总览', icon:Gauge }, { path:'/reports', label:'报告', icon:FileText },
-  { path:'/search', label:'搜索', icon:Search }, { path:'/qa', label:'智能问答', icon:Sparkles },
-  { path:'/showcase', label:'组件展示', icon:Shapes },
-]
-function onKey(e: KeyboardEvent){ if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'k') { e.preventDefault(); ui.searchOpen = true } if (e.key === 'c' && !ui.createOpen && !/INPUT|TEXTAREA|SELECT/.test((e.target as HTMLElement)?.tagName ?? '')) { /* C 新建由各页自行处理，避免误触 */ } }
-// ---------- 通知中心（M3）：未读数 + 列表 + 已读 + SSE 实时推送 ----------
-const bellOpen = ref(false), unread = ref(0), notifs = ref<NotificationItem[]>([])
-let unsub: (() => void) | null = null
-const fmtTime = (s:string)=> s ? s.slice(0,16).replace('T',' ') : ''
-async function loadUnread(){ if (!team.currentId) return; try { const r = await api.get(`/notifications/unread-count?teamId=${team.currentId}`); unread.value = r.unread ?? 0 } catch {} }
-async function loadNotifs(){ if (!team.currentId) return; try { notifs.value = await api.get(`/notifications?teamId=${team.currentId}&limit=30`) } catch {} }
-function toggleBell(){ bellOpen.value = !bellOpen.value; if (bellOpen.value) { loadNotifs(); loadUnread() } }
-async function openNotif(n: NotificationItem){ if (n.readAt === null) { try { await api.post(`/notifications/${n.id}/read`); n.readAt = new Date().toISOString(); unread.value = Math.max(0, unread.value - 1) } catch {} } }
-async function markAllRead(){ try { await api.post('/notifications/read-all', { teamId: team.currentId }); notifs.value.forEach(n => n.readAt = n.readAt ?? new Date().toISOString()); unread.value = 0; toast.show('已全部标为已读') } catch { toast.show('操作失败') } }
-onMounted(()=> { window.addEventListener('keydown', onKey); loadUnread(); if (team.currentId) aiStore.load(team.currentId)
-  unsub = subscribeEvents((n:any) => { unread.value += 1; if (bellOpen.value) loadNotifs(); if (n?.content) toast.show('新通知：' + n.content) })
+  { path:'/overview', label:'总览', icon:Gauge },
+  { path:'/reports', label:'报告', icon:FileText },
+  { path:'/search', label:'搜索', icon:Search },
+  { path:'/qa', label:'智能问答', icon:Sparkles },
+  // 组件展示（1.0.4 C）：构建期 __IB_SHOWCASE__ 为 false 时本项与字符串被静态消除，不进正式 dist；
+  // 构建包含时再叠运行时条件——仅演示模式（auth.meta.demoMode）或 DEV 显示。
+  ...(__IB_SHOWCASE__ && (auth.meta.demoMode || import.meta.env.DEV) ? [{ path:'/showcase', label:'组件展示', icon:Shapes }] : []),
+] as { path: string; label: string; icon: any; badge?: () => number }[])
+function isTypingTarget(e: KeyboardEvent){ const t = e.target as HTMLElement | null; return !!t && (/INPUT|TEXTAREA|SELECT/.test(t.tagName) || t.isContentEditable) }
+function onKey(e: KeyboardEvent){
+  if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'k') { e.preventDefault(); ui.searchOpen = true }
+  // Ctrl+B 切换侧栏（1.0.4 E）：输入框/文本域聚焦时不触发，避免与编辑快捷键冲突。
+  if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'b' && !isTypingTarget(e)) { e.preventDefault(); ui.toggleCollapsed() }
+}
+// ---------- 通知中心（M3）：未读数/列表/已读在 shell store（1.0.4 并入全局计数），SSE 实时推送也在 store ----------
+const bellOpen = ref(false)
+function toggleBell(){ bellOpen.value = !bellOpen.value; if (bellOpen.value) { shell.loadNotifs(); shell.loadUnread() } }
+async function openNotif(n: NotificationItem){ await shell.markRead(n) }
+async function markAllRead(){ const ok = await shell.markAllRead(); toast.show(ok ? '已全部标为已读' : '操作失败') }
+// 路由变化刷新一次计数（1.0.4 A）：进入相应页面/处理后角标随之减少。
+watch(() => route.path, () => { shell.refresh() })
+watch(() => team.currentId, () => { shell.refresh() })
+onMounted(async () => {
+  window.addEventListener('keydown', onKey)
+  ui.hydrate(auth.user?.id ?? null)
+  // 全局元素兜底（1.0.4 B）：路由守卫已为 team 路由统一 loadTeams；这里再确保一次，刷新/书签直开任意页都正确。
+  if (auth.user && !team.teams.length) { try { await team.loadTeams() } catch {} }
+  shell.refresh()
+  shell.start((n: any) => { if (bellOpen.value) shell.loadNotifs(); if (n?.content) toast.show('新通知：' + n.content) })
+  if (team.currentId) aiStore.load(team.currentId)
 })
-onUnmounted(()=> { window.removeEventListener('keydown', onKey); if (unsub) unsub() })
+onUnmounted(()=> { window.removeEventListener('keydown', onKey) })
 async function onSwitch(id:number){ teamMenu.value=false; if(id!==team.currentId){ await team.switchTeam(id); router.go(0) } }
 async function logout(){ await auth.logout(); router.push('/login') }
 </script>
@@ -118,6 +144,8 @@ nav{display:flex;flex-direction:column;gap:2px;margin-top:8px}
 .nitem.on{background:var(--theme);color:#fff;box-shadow:0 6px 14px rgba(0,122,255,.3)}
 .nitem.on:hover{background:var(--theme);color:#fff}
 .badge-n{margin-left:auto;background:var(--c-adhoc);color:#fff;font-size:11px;border-radius:99px;padding:0 7px}
+/* mini（收起）状态角标（1.0.4 A/E）：绝对定位到图标右上角，小圆徽章，收起时依然可见 */
+.badge-n.mini{position:absolute;top:2px;right:2px;margin-left:0;min-width:17px;height:17px;display:grid;place-items:center;padding:0 4px;font-size:10px;font-weight:700;box-shadow:0 0 0 2px var(--glass)}
 .sidefoot{margin-top:auto;padding-top:10px;border-top:1px solid var(--field-brd);display:flex;flex-direction:column;gap:4px}
 .me{display:flex;align-items:center;gap:9px;padding:6px 4px;position:relative}
 .me-menu-wrap{position:relative}.me-menu{position:absolute;bottom:44px;right:0;z-index:40;border-radius:13px;padding:6px;display:flex;flex-direction:column;min-width:132px}
@@ -153,7 +181,7 @@ nav{display:flex;flex-direction:column;gap:2px;margin-top:8px}
   .sidebar{flex-direction:row;align-items:center;width:100%;height:auto;position:static;padding:8px 10px;gap:6px;overflow-x:auto}
   .team-switch{min-height:0;padding:4px}.team-txt{display:none}.chev{display:none}
   nav{flex-direction:row;margin:0;gap:2px}
-  .nitem span{display:none}
+  .nitem span:not(.badge-n){display:none}
   .sidefoot{margin:0 0 0 auto;padding:0;border:0;flex-direction:row;align-items:center}
   .sidefoot .collapse{display:none}.me-txt{display:none}.me{padding:2px}
   .topbar{position:static;top:auto}

@@ -4,7 +4,7 @@
 #
 # Usage:  bash packaging/build-package.sh [--skip-downloads]
 #
-# Output: packaging/dist/iteration-board-offline-1.0.3.zip
+# Output: packaging/dist/iteration-board-offline-1.0.4.zip
 #
 # What it does:
 #   1. Builds the backend jar (offline Maven wrapper).
@@ -25,7 +25,7 @@
 # ============================================================
 set -euo pipefail
 
-VERSION="1.0.3"
+VERSION="1.0.4"
 PKG_NAME="iteration-board-offline-${VERSION}"
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_ROOT="$(cd "${SCRIPT_DIR}/.." && pwd)"
@@ -180,7 +180,7 @@ cp "${SCRIPT_DIR}/windows/IterationBoardApp.xml" "${STAGING_DIR}/service/"
 python3 -c "import xml.etree.ElementTree, sys; xml.etree.ElementTree.parse(sys.argv[1])" "${STAGING_DIR}/service/IterationBoardApp.xml" || { echo "[error] IterationBoardApp.xml is not well-formed XML. Build aborted."; exit 1; }
 echo "[ok] IterationBoardApp.xml is well-formed"
 # No IterationBoardPG.xml since 1.0.3: PostgreSQL is registered
-# with pg_ctl register, not wrapped by WinSW.
+# with pg_ctl register, not wrapped by WinSW (pf79946u).
 cp "${REPO_ROOT}/docs/部署手册.md" "${STAGING_DIR}/docs/" 2>/dev/null || echo "[warn] docs/部署手册.md not found, skipped"
 cp "${REPO_ROOT}/docs/用户手册.md" "${STAGING_DIR}/docs/" 2>/dev/null || echo "[warn] docs/用户手册.md not found, skipped"
 touch "${STAGING_DIR}/data/.keep" "${STAGING_DIR}/backup/.keep" "${STAGING_DIR}/logs/.keep"

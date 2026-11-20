@@ -70,6 +70,7 @@ import AiBadge from '../components/AiBadge.vue'; import { useAi } from '../store
 import AppShell from '../components/AppShell.vue'; import GlassPanel from '../components/GlassPanel.vue'; import AppButton from '../components/AppButton.vue'
 import { api, ApiError, newIdempotencyKey } from '../api/http'; import type { ReportItem, ReportVersion, Iteration } from '../api/types'
 import { useTeam } from '../stores/team'; import { useAuth } from '../stores/auth'; import { useToast } from '../stores/toast'
+import { fmtDateTime } from '../utils/datetime'
 const team = useTeam(), auth = useAuth(), toast = useToast()
 // kind 映射（与后端 ReportService 对齐）：STANDUP_SUMMARY 站会摘要 / WEEKLY 周报 / ITERATION_SUMMARY 迭代总结 / PERSONAL_WEEKLY 我的周报 / RISK_SUMMARY 风险摘要
 const KIND_LABELS: Record<string,string> = { STANDUP_SUMMARY:'站会摘要', WEEKLY:'周报', ITERATION_SUMMARY:'迭代总结', PERSONAL_WEEKLY:'个人周报', RISK_SUMMARY:'风险摘要' }
@@ -114,7 +115,7 @@ const canEditCurrent = computed(()=> { const r = current.value; if (!r) return f
   if (r.kind==='ITERATION_SUMMARY') return role.value==='LEADER'
   return isLeaderOrPO.value })
 const contentOf = (r:ReportItem)=> r.contentMd ?? r.content ?? ''
-const fmtTime = (s:string)=> s ? s.slice(0,16).replace('T',' ') : ''
+const fmtTime = fmtDateTime
 function esc(s:string){ return s.replace(/&/g,'&amp;').replace(/</g,'&lt;') }
 function inline(s:string){ return esc(s).replace(/\*\*([^*]+)\*\*/g, '<b>$1</b>') }
 const rendered = computed(()=> { if (!current.value) return ''
@@ -137,7 +138,7 @@ async function load(){ if(!team.currentId) return; loading.value = true; loadErr
     if (!current.value && reports.value.length) openReport(reports.value[0])
   } catch(e){ loadErr.value = e instanceof ApiError ? e.message : '加载失败' } finally { loading.value = false } }
 onMounted(load)
-//：一次点击意图一个幂等键；失败重试复用同键，成功或换周期后作废重建。
+// §16.3：一次点击意图一个幂等键；失败重试复用同键，成功或换周期后作废重建。
 let genKey = ''
 watch([genKind, dateArg, weekArg, iterArg], ()=>{ genKey = '' })
 async function generateOrView(){ const g = currentGen.value; if (!g || generating.value) return

@@ -1,5 +1,6 @@
 package com.iterationboard.collab;
 
+import com.iterationboard.common.PlatformTime;
 import com.iterationboard.config.CurrentUser;
 import com.iterationboard.domain.AppUser;
 import com.iterationboard.reminder.ReminderService;
@@ -18,14 +19,16 @@ public class CollabController {
     private final ReminderService reminderService;
     private final TeamService teamService;
     private final CurrentUser currentUser;
+    private final PlatformTime platformTime;
 
     public CollabController(StandupService standupService, OverviewService overviewService,
-                            ReminderService reminderService, TeamService teamService, CurrentUser currentUser) {
+                            ReminderService reminderService, TeamService teamService, CurrentUser currentUser, PlatformTime platformTime) {
         this.standupService = standupService;
         this.overviewService = overviewService;
         this.reminderService = reminderService;
         this.teamService = teamService;
         this.currentUser = currentUser;
+        this.platformTime = platformTime;
     }
 
     public record NoteRequest(LocalDate date, String content) {}
@@ -34,13 +37,13 @@ public class CollabController {
     public Map<String, Object> standup(@PathVariable Long teamId,
                                        @RequestParam(required = false) LocalDate date) {
         AppUser u = currentUser.require();
-        return standupService.standup(teamId, u, date == null ? LocalDate.now() : date);
+        return standupService.standup(teamId, u, date == null ? platformTime.today() : date);
     }
 
     @PutMapping("/standup/note")
     public Map<String, Object> saveNote(@PathVariable Long teamId, @RequestBody NoteRequest req) {
         AppUser u = currentUser.require();
-        return standupService.saveNote(teamId, u, req.date() == null ? LocalDate.now() : req.date(), req.content());
+        return standupService.saveNote(teamId, u, req.date() == null ? platformTime.today() : req.date(), req.content());
     }
 
     @GetMapping("/overview")
@@ -53,7 +56,7 @@ public class CollabController {
     public Map<String, Object> scanReminders(@PathVariable Long teamId) {
         AppUser u = currentUser.require();
         teamService.requireLeader(teamId, u);
-        int generated = reminderService.scanTeam(teamService.requireTeam(teamId), LocalDate.now());
+        int generated = reminderService.scanTeam(teamService.requireTeam(teamId), platformTime.today());
         return Map.of("generated", generated);
     }
 }

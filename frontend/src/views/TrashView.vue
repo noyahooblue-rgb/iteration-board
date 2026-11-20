@@ -25,9 +25,10 @@ import AppShell from '../components/AppShell.vue'; import AppButton from '../com
 import { api, ApiError } from '../api/http'; import { itemColor } from '../api/types'
 import { useTeam } from '../stores/team'; import { useToast } from '../stores/toast'
 import { useBusy } from '../utils/busy'
+import { fmtDateTime } from '../utils/datetime'
 const team = useTeam(), toast = useToast(), busy = useBusy()
 const entries = ref<any[]>([]), loading = ref(false), loadErr = ref(''), typeFilter = ref('ALL')
-const fmt = (s?: string | null) => s ? s.slice(0, 16).replace('T', ' ') : '—'
+const fmt = (s?: string | null) => s ? fmtDateTime(s) : '—'
 const kindLabel = (k: string) => ({ STANDUP_SUMMARY: '站会摘要', WEEKLY: '周报', ITERATION_SUMMARY: '迭代总结', PERSONAL_WEEKLY: '我的周报', RISK_SUMMARY: '风险摘要' } as Record<string, string>)[k] ?? k
 const itemColorOf = (e: any) => e.kind === 'ITEM' ? itemColor({ type: e.itemType, storyCategory: null }) : '#5856D6'
 async function load(){ if (!team.currentId) return; loading.value = true; loadErr.value = ''; try { entries.value = await api.get(`/teams/${team.currentId}/trash?type=${typeFilter.value}`) } catch(e){ loadErr.value = e instanceof ApiError ? e.message : '加载失败' } finally { loading.value = false } }

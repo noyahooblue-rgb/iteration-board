@@ -14,7 +14,7 @@
       <span class="code">{{e.task.code}}</span><b class="grow">{{e.task.title}}</b>
       <span class="small">PO：{{team.memberName(e.task.poId)}}</span>
       <span class="tpill">{{TASK_STATUS_META[e.task.taskStatus ?? 'NOT_STARTED'].label}}</span>
-      <span class="small">{{e.doneStoryCount}}/{{e.storyCount}} 故事 · {{e.task.progressPercent}}%</span>
+      <span class="small">{{e.doneStoryCount}}/{{e.storyCount}} 故事 · {{clampPct(e.task.progressPercent)}}%</span>
       <ProgressBar :value="e.task.progressPercent" style="width:120px"/>
     </button>
     <div v-if="open.has(e.task.id)" class="stories">
@@ -40,6 +40,7 @@ import AppShell from '../components/AppShell.vue'; import AppButton from '../com
 import ImportWizard from '../components/ImportWizard.vue'
 import { api, ApiError } from '../api/http'; import { TYPE_META, TASK_STATUS_META, STATUS_META, STORY_CAT_META, itemColor, estimateUnitLabel, type BacklogEntry, type Item } from '../api/types'
 import { useTeam } from '../stores/team'; import { useUi } from '../stores/ui'; import { useToast } from '../stores/toast'
+import { clampPct } from '../utils/progress'
 const team = useTeam(), ui = useUi(), toast = useToast()
 const entries = ref<BacklogEntry[]>([]), loading = ref(false), loadErr = ref(''), open = ref(new Set<number>())
 const drawerOpen = ref(false), openId = ref<number|null>(null)

@@ -39,7 +39,8 @@ public class ItemController {
                                     Long replaceUserId, List<Long> reopenItemIds, List<NewStoryInput> newStories) {}
     public record JoinRequest(Integer version) {}
     public record ReorderRequest(List<Long> orderedIds) {}
-    public record ProgressRequest(String text, Integer percent, Boolean blocked, String blockReason, String nextStep, String kind) {}
+    public record ProgressRequest(String text, Integer percent, Boolean blocked, String blockReason, String nextStep, String kind,
+                                  List<Long> mentionIds) {}
     public record NudgeRespondRequest(String response) {}
     public record CommentRequest(String content, List<Long> mentionIds) {}
     public record ChecklistCreateRequest(String text, Integer sortOrder) {}
@@ -188,7 +189,7 @@ public class ItemController {
                                                      @RequestBody ProgressRequest req) {
         AppUser u = currentUser.require();
         var p = itemService.addProgress(teamId, itemId, u, req.text(), req.percent(), req.blocked(), req.blockReason(), req.nextStep(),
-                req.kind() == null ? "NORMAL" : req.kind());
+                req.kind() == null ? "NORMAL" : req.kind(), req.mentionIds());
         return ResponseEntity.status(HttpStatus.CREATED).body(Dtos.ProgressDto.of(p));
     }
 

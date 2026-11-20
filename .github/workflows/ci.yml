@@ -66,4 +66,6 @@ jobs:
           if grep -r -q '云雀小组' dist; then echo '::error::真实构建产物中出现演示数据字符串「云雀小组」'; exit 1; fi
           if grep -r -q 'Demo1234' dist; then echo '::error::真实构建产物中出现演示口令'; exit 1; fi
           if grep -r -q 'CHANGE_ME_DEMO_PASSWORD' dist; then echo '::error::真实构建产物中出现演示口令占位符'; exit 1; fi
+          if grep -r -qi 'showcase' dist; then echo '::error::真实构建产物中出现开发组件展示页（ShowcaseView）痕迹'; exit 1; fi
+          if grep -r -q '组件展示' dist; then echo '::error::真实构建产物中出现「组件展示」开发页文案'; exit 1; fi
           echo '隔离检查通过'

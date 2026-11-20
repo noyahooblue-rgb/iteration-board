@@ -12,7 +12,7 @@ import java.time.Instant;
 import java.util.List;
 
 /**
-* 状态流转的唯一实现：看板拖拽、详情页按钮、一句话更新、导入都调用此处。
+* 状态流转的唯一实现（设计 §8.2）：看板拖拽、详情页按钮、一句话更新、导入都调用此处。
 * 规则唯一来源 contract/state-machine.md。
 * 校验顺序：版本(409) → 流转合法性(422) → 权限(403) → 原因必填(400)。
 * M2：负责人改为 item_owner 多名共同负责；新增 DECLINE；TASK 任务只允许 PO 的 APPROVE/CANCEL。
@@ -126,6 +126,8 @@ if (from == ItemStatus.DONE || from == ItemStatus.CANCELLED) throw illegal(item,
 if (!isPo) throw ApiException.forbidden("仅 PO 可取消任务");
 requireReason(reason);
 item.setStatus(ItemStatus.CANCELLED);
+// 任务被取消 → 通知创建人（与普通事项 CANCEL 口径一致；操作者本人由 NotifyService 自动跳过）
+notifyService.notify(item.getCreator(), "CANCEL", item, actor, "任务已被取消：" + reason);
 }
 case REJECT -> {
 // 任务打回（M3，验收批复待问 1 定稿）：必须说明原因，且必须同时重开已完成故事或新建补充故事，
@@ -198,6 +200,8 @@ if (from!= ItemStatus.UNCLAIMED) throw illegal(item, action);
 setOwners(item, List.of(actor));
 item.setAssignedDirectly(false);
 item.setStatus(ItemStatus.NOT_STARTED);
+// 发布的事项被认领 → 通知创建人（设计 §3.7，此前缺失）
+notifyService.notify(item.getCreator(), "CLAIM", item, actor, "你发布的事项已被认领");
 }
 case START -> {
 if (from!= ItemStatus.NOT_STARTED) throw illegal(item, action);
@@ -302,6 +306,11 @@ boolean allowed = (eq(item.getCreator(), actor) && notStarted) || isLeaderOrPo(t
 if (!allowed) throw ApiException.forbidden("仅创建人（尚未开始时）或 PO/组长可取消事项");
 requireReason(reason);
 item.setStatus(ItemStatus.CANCELLED);
+// 事项被取消 → 通知负责人与创建人（设计 §3.7，此前缺失；操作者本人由 NotifyService 自动跳过）
+for (ItemOwner o : ownerRepo.findByItemId(item.getId())) {
+notifyService.notify(o.getUser(), "CANCEL", item, actor, "事项已被取消：" + reason);
+}
+notifyService.notify(item.getCreator(), "CANCEL", item, actor, "事项已被取消：" + reason);
 }
 case REOPEN -> {
 if (from!= ItemStatus.DONE && from!= ItemStatus.CANCELLED) throw illegal(item, action);

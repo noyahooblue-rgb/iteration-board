@@ -1,6 +1,7 @@
 package com.iterationboard.iteration;
 
 import com.iterationboard.common.ApiException;
+import com.iterationboard.common.PlatformTime;
 import com.iterationboard.config.Dtos;
 import com.iterationboard.domain.*;
 import com.iterationboard.domain.Enums.*;
@@ -31,11 +32,12 @@ private final ItemOwnerRepo ownerRepo;
 private final TeamMemberRepo memberRepo;
 private final TeamService teamService;
 private final ItemService itemService;
+private final PlatformTime platformTime;
 
 public PlanningService(IterationRepo iterationRepo, ItemRepo itemRepo, ItemOwnerRepo ownerRepo,
-TeamMemberRepo memberRepo, TeamService teamService, ItemService itemService) {
+TeamMemberRepo memberRepo, TeamService teamService, ItemService itemService, PlatformTime platformTime) {
 this.iterationRepo = iterationRepo; this.itemRepo = itemRepo; this.ownerRepo = ownerRepo;
-this.memberRepo = memberRepo; this.teamService = teamService; this.itemService = itemService;
+this.memberRepo = memberRepo; this.teamService = teamService; this.itemService = itemService; this.platformTime = platformTime;
 }
 
 @Transactional(readOnly = true)
@@ -93,7 +95,7 @@ List<Dtos.PlanningLoadDto> loads = points.keySet().stream()
 Team team = iteration.getTeam();
 com.iterationboard.team.TeamSettings settings = com.iterationboard.team.TeamSettings.from(team);
 List<Dtos.PlanningCapacityDto> capacities = new ArrayList<>();
-LocalDate today = LocalDate.now();
+LocalDate today = platformTime.today();
 for (TeamMember m: memberRepo.findByTeamId(teamId)) {
 int available = 0;
 int remaining = 0;

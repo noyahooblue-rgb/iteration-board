@@ -67,6 +67,7 @@ import Modal from './Modal.vue'; import AppButton from './AppButton.vue'
 import { api, ApiError, newIdempotencyKey } from '../api/http'; import type { ImportRow, ImportBatch } from '../api/types'
 import { useTeam } from '../stores/team'; import { useToast } from '../stores/toast'; import { useAi } from '../stores/ai'
 import { useBusy } from '../utils/busy'
+import { fmtDateTime } from '../utils/datetime'
 const props = defineProps<{ open: boolean }>()
 const emit = defineEmits<{ close: []; done: [] }>()
 const team = useTeam(), toast = useToast(), ai = useAi(), busy = useBusy()
@@ -76,7 +77,7 @@ const parsed = ref<{ headers: string[]; rows: string[][] } | null>(null)
 const parseErr = ref(''), mapping = ref<Record<string, number | ''>>({ title: 0, description: '', priority: '', estimate: '', dueDate: '', externalId: '', externalUrl: '' })
 const mapFields = [{ key: 'title', label: '标题（必选）' }, { key: 'description', label: '描述' }, { key: 'priority', label: '优先级' }, { key: 'estimate', label: '估算' }, { key: 'dueDate', label: '截止日期' }, { key: 'externalId', label: '外部编号' }, { key: 'externalUrl', label: '外部链接' }]
 let importKey = ''
-const fmt = (s: string) => s ? s.slice(0, 16).replace('T', ' ') : ''
+const fmt = fmtDateTime
 const canUndo = (b: ImportBatch) => !b.undoneAt && Date.now() - new Date(b.createdAt).getTime() < 24 * 3600 * 1000
 watch(() => props.open, async (o) => { if (o) { importKey = newIdempotencyKey(); step.value = 'input'; await loadHistory() } })
 async function loadHistory(){ history.value = await api.get(`/teams/${team.currentId}/imports`).catch(() => []) }

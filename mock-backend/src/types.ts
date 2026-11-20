@@ -19,7 +19,7 @@ export interface Item {
   createdAt:string; updatedAt:string; lastProgressAt:string|null; deletedAt:string|null;
   checklist: ChecklistEntry[]
 }
-export interface ProgressUpdate { id:number; itemId:number; authorId:number; text:string; percent:number|null; blocked:boolean; blockReason:string|null; nextStep:string|null; kind:string; createdAt:string }
+export interface ProgressUpdate { id:number; itemId:number; authorId:number; text:string; percent:number|null; blocked:boolean; blockReason:string|null; nextStep:string|null; kind:string; createdAt:string; mentionIds?:number[] }
 export interface Comment { id:number; itemId:number; authorId:number; content:string; mentionIds:number[]; createdAt:string }
 export interface Activity { id:number; itemId:number; actorId:number; action:string; fromStatus:string|null; toStatus:string|null; detail:string|null; createdAt:string }
 export interface Iteration { id:number; teamId:number; name:string; goal:string; startDate:string; endDate:string; status:string }

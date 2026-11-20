@@ -32,11 +32,12 @@ import { Search, BookmarkPlus, X } from 'lucide-vue-next'
 import AppShell from '../components/AppShell.vue'; import AppButton from '../components/AppButton.vue'; import TypeBadge from '../components/TypeBadge.vue'; import StatusPill from '../components/StatusPill.vue'; import AvatarStack from '../components/AvatarStack.vue'; import ItemDrawer from '../components/ItemDrawer.vue'
 import { api, ApiError } from '../api/http'; import { TYPE_META, itemColor, type Item, type SavedFilter } from '../api/types'
 import { useTeam } from '../stores/team'; import { useToast } from '../stores/toast'
+import { fmtDateTime } from '../utils/datetime'
 const route = useRoute(), team = useTeam(), toast = useToast()
 const q = ref(''), fType = ref(''), results = ref<Item[]>([]), filters = ref<SavedFilter[]>([]), searched = ref(false), searching = ref(false), loadErr = ref('')
 const drawerOpen = ref(false), openId = ref<number|null>(null)
 const shown = computed(()=> fType.value ? results.value.filter(i=>i.type===fType.value) : results.value)
-const fmt = (s:string)=> s ? s.slice(0,16).replace('T',' ') : ''
+const fmt = fmtDateTime
 async function run(){ const kw = q.value.trim(); if (!kw) { results.value = []; searched.value = false; return }
   searching.value = true; loadErr.value = ''
   try { results.value = await api.get(`/teams/${team.currentId}/search?q=${encodeURIComponent(kw)}`); searched.value = true } catch(e){ loadErr.value = e instanceof ApiError ? e.message : '搜索失败' } finally { searching.value = false } }

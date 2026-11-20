@@ -1,6 +1,7 @@
 package com.iterationboard.ai;
 
 import com.iterationboard.common.ApiException;
+import com.iterationboard.common.PlatformTime;
 import com.iterationboard.domain.*;
 import com.iterationboard.domain.Enums.*;
 import com.iterationboard.item.ItemService;
@@ -24,7 +25,7 @@ import java.util.List;
 import java.util.Map;
 
 /**
- * 六项 AI 功能编排：模型只出建议，写入一律走既有 item/report 服务与状态机。
+ * 六项 AI 功能编排（设计 §7、修订一 §8）：模型只出建议，写入一律走既有 item/report 服务与状态机。
  */
 @Service
 public class AiFeatureService {
@@ -37,10 +38,11 @@ public class AiFeatureService {
     private final RiskService riskService;
     private final AiQaRecordRepo qaRecordRepo;
     private final ObjectMapper om;
+    private final PlatformTime platformTime;
 
     public AiFeatureService(AiGateway gateway, TeamService teamService, TeamMemberRepo memberRepo,
                             ItemRepo itemRepo, ItemOwnerRepo ownerRepo, ItemService itemService,
-                            RiskService riskService, AiQaRecordRepo qaRecordRepo, ObjectMapper om) {
+                            RiskService riskService, AiQaRecordRepo qaRecordRepo, ObjectMapper om, PlatformTime platformTime) {
         this.gateway = gateway;
         this.teamService = teamService;
         this.memberRepo = memberRepo;
@@ -50,6 +52,7 @@ public class AiFeatureService {
         this.riskService = riskService;
         this.qaRecordRepo = qaRecordRepo;
         this.om = om;
+        this.platformTime = platformTime;
     }
 
     private String json(ObjectNode n) {
@@ -67,7 +70,7 @@ public class AiFeatureService {
         return byName;
     }
 
-    // ---------- 7.2 粘贴导入：解析 + 程序匹配，返回预览行 ----------
+    // ---------- 7.2 粘贴导入（导入的是任务，修订一 §8）：解析 + 程序匹配，返回预览行 ----------
     @Transactional // D-1：经 AiGateway 写 ai_call_log，必须可写事务（只读事务会让日志 INSERT 失败并毒化外层事务）
     public Map<String, Object> pasteImport(Long teamId, AppUser user, String text, String imageDataUrl) {
         requirePo(teamId, user);
@@ -295,9 +298,9 @@ public class AiFeatureService {
     public Map<String, Object> riskSummary(Long teamId, AppUser user) {
         TeamMember me = teamService.requireMember(teamId, user);
         if (me.getRole() != Role.LEADER && me.getRole() != Role.PO) {
-            throw ApiException.forbidden("风险清单仅组长、PO 可见");
+            throw ApiException.forbidden("风险清单仅组长、PO 可见（§16.2）");
         }
-        List<RiskService.RiskSignal> signals = riskService.computeRisks(me.getTeam(), LocalDate.now());
+        List<RiskService.RiskSignal> signals = riskService.computeRisks(me.getTeam(), platformTime.today());
         List<Map<String, Object>> signalMaps = signals.stream().map(RiskService.RiskSignal::toMap).toList();
         Map<String, Object> out = new LinkedHashMap<>();
         out.put("signals", signalMaps);

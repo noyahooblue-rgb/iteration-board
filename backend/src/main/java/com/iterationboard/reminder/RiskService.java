@@ -1,5 +1,6 @@
 package com.iterationboard.reminder;
 
+import com.iterationboard.common.PlatformTime;
 import com.iterationboard.common.Workdays;
 import com.iterationboard.domain.*;
 import com.iterationboard.domain.Enums.*;
@@ -11,14 +12,13 @@ import org.springframework.transaction.annotation.Transactional;
 import java.math.BigDecimal;
 import java.math.RoundingMode;
 import java.time.LocalDate;
-import java.time.ZoneId;
 import java.util.ArrayList;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 
 /**
- * 风险信号：总览页与风险摘要报告共用。
+ * 风险信号（设计 §7.6 规则版）：总览页与风险摘要报告共用。
  * 阈值取小组设置的 reminderThresholds（与自动提醒同一口径）。
  */
 @Service
@@ -49,7 +49,7 @@ public class RiskService {
     }
 
     public static LocalDate dateOf(java.time.Instant instant) {
-        return instant == null ? null : instant.atZone(ZoneId.systemDefault()).toLocalDate();
+        return instant == null ? null : instant.atZone(PlatformTime.zoneId()).toLocalDate();
     }
 
     /** 参考时间：最近进展时间，无进展时用状态变更时间，再无则创建时间。 */

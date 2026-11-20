@@ -1,6 +1,7 @@
 package com.iterationboard.integration;
 
 import com.iterationboard.common.ApiException;
+import com.iterationboard.common.PlatformTime;
 import com.iterationboard.domain.*;
 import com.iterationboard.imports.ImportService;
 import com.iterationboard.item.NotifyService;
@@ -26,7 +27,7 @@ import java.util.Base64;
 import java.util.List;
 
 /**
- * 外部系统适配器：MOCK 内置虚构样例 / HTTP 通用配置适配器。
+ * 外部系统适配器（设计 §9）：MOCK 内置虚构样例 / HTTP 通用配置适配器。
  * 同步规则：按「系统名+外部编号」识别；新任务进待办池（任务状态 NOT_STARTED 即待办池口径）；
  * 已存在只更新外部字段；外部关闭只加「外部已关闭」标记不改状态；
  * 每次同步写日志；连续失败 3 次通知组长。密钥只写不回显（读取时脱敏）。
@@ -40,9 +41,10 @@ public class AdapterService {
     private final TeamMemberRepo memberRepo;
     private final NotifyService notifyService;
     private final ObjectMapper om;
+    private final PlatformTime platformTime;
 
     public AdapterService(IntegrationAdapterRepo adapterRepo, SyncLogRepo syncLogRepo, ImportService importService,
-                          TeamService teamService, TeamMemberRepo memberRepo, NotifyService notifyService, ObjectMapper om) {
+                          TeamService teamService, TeamMemberRepo memberRepo, NotifyService notifyService, ObjectMapper om, PlatformTime platformTime) {
         this.adapterRepo = adapterRepo;
         this.syncLogRepo = syncLogRepo;
         this.importService = importService;
@@ -50,6 +52,7 @@ public class AdapterService {
         this.memberRepo = memberRepo;
         this.notifyService = notifyService;
         this.om = om;
+        this.platformTime = platformTime;
     }
 
     // ---------- CRUD（仅组长配置） ----------
@@ -142,14 +145,14 @@ public class AdapterService {
                                LocalDate dueDate, String url, boolean closed) {}
 
     /** MOCK 适配器内置虚构样例数据（通用软件开发场景）。 */
-    static List<ExternalTask> mockTasks() {
+    List<ExternalTask> mockTasks() {
         return List.of(
                 new ExternalTask("MOCK-101", "门户首页改版需求确认", "确认新版门户首页的信息架构与视觉稿", "P1",
-                        LocalDate.now().plusDays(7), "https://example.invalid/mock/101", false),
+                        platformTime.today().plusDays(7), "https://example.invalid/mock/101", false),
                 new ExternalTask("MOCK-102", "导出功能性能优化", "大文件导出改为异步生成并通知下载", "P2",
-                        LocalDate.now().plusDays(14), "https://example.invalid/mock/102", false),
+                        platformTime.today().plusDays(14), "https://example.invalid/mock/102", false),
                 new ExternalTask("MOCK-103", "历史缺陷单关闭确认", "该外部任务已在源系统关闭", "P3",
-                        LocalDate.now().minusDays(3), "https://example.invalid/mock/103", true));
+                        platformTime.today().minusDays(3), "https://example.invalid/mock/103", true));
     }
 
     private List<ExternalTask> fetch(IntegrationAdapter a) throws Exception {

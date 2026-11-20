@@ -45,7 +45,7 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: ib-offline-package
-          path: packaging/dist/iteration-board-offline-1.0.3.zip
+          path: packaging/dist/iteration-board-offline-1.0.4.zip
           retention-days: 7
 
   windows-install:

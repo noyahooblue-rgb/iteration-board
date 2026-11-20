@@ -3,7 +3,7 @@
 # Invoked by .github/workflows/windows-install.yml on
 # windows-latest (the runner user is a local administrator).
 #
-# Expects the built package zip at C:\ibdl\iteration-board-offline-1.0.3.zip
+# Expects the built package zip at C:\ibdl\iteration-board-offline-1.0.4.zip
 # (downloaded from the build job's artifact by the workflow).
 # All console output of every .bat run is kept under
 # C:\ibwork\evidence and uploaded as a workflow artifact,
@@ -11,22 +11,22 @@
 #
 # Phases:
 #   P1  fresh install (no-space path, --no-pause), full assertions
-#   P2  Playwright direct-visit flow + 3 screenshots
+#   P2  Playwright direct-visit flow + 3 screenshots (8eyn4mwp)
 #   P3  stop -> backup must SKIP with exit 0 while PG is stopped
-# -> start
+#       (hbztskr3) -> start
 #   P4  backup (auto) produces backup\<ts>\db.dump
 #   P5  restore that backup
 #   P6  upgrade in place from a second copy of the same package
 #   P7  uninstall keeping data (services gone, pgdata kept)
 #   P8  reinstall over the half-installed state (recovery path,
-#       recovery path): existing config + pgdata are reused
+#       re66unpr): existing config + pgdata are reused
 #   P9  uninstall again
 #   P10 install into a path WITH spaces (warning only, continues)
 #   P11 install with --autostart: both services AUTO_START
-#; P1 asserted DEMAND_START for the default mode
+#       (hbztskr3); P1 asserted DEMAND_START for the default mode
 # ============================================================
 $ErrorActionPreference = 'Continue'
-$Zip = 'C:\ibdl\iteration-board-offline-1.0.3.zip'
+$Zip = 'C:\ibdl\iteration-board-offline-1.0.4.zip'
 $Work = 'C:\ibwork'
 $Evidence = Join-Path $Work 'evidence'
 New-Item -ItemType Directory -Force $Evidence | Out-Null
@@ -120,7 +120,7 @@ try {
   # ---------- P1: fresh install, default (manual start) mode ----------
   Phase 'P1 fresh install (default mode)'
   Expand-Archive -Path $Zip -DestinationPath (Join-Path $Work 'pkg') -Force
-  $Root = Join-Path $Work 'pkg\iteration-board-offline-1.0.3'
+  $Root = Join-Path $Work 'pkg\iteration-board-offline-1.0.4'
   $code = Run-Bat $Root 'install.bat' @('--no-pause') 'p1-install.log'
   Check 'P1 install.bat exit 0' ($code -eq 0)
   Assert-Installed $Root 'P1'
@@ -141,8 +141,22 @@ try {
     & node e2e.mjs *>> $e2eLog
     Check 'P2 Playwright flow passed' ($LASTEXITCODE -eq 0)
   } finally { Pop-Location }
-  foreach ($shot in '01-home-login.png', '02-workbench.png', '03-board-after-refresh.png') {
+  foreach ($shot in '01-home-login.png', '02-workbench.png', '03-board-after-refresh.png', '04-admin.png') {
     Check "P2 screenshot $shot exists" (Test-Path (Join-Path $Evidence "shots\$shot"))
+  }
+
+  # ---------- P2b: Scenario E (multi-user real-time collaboration, 1.0.4) ----------
+  Phase 'P2b Scenario E (four browsers, real-time notifications)'
+  $eLog = Join-Path $Evidence 'p2b-scenario-e.log'
+  Push-Location (Join-Path $env:GITHUB_WORKSPACE 'tools\windows-e2e')
+  try {
+    $env:IB_BASE = 'http://localhost:18080'
+    $env:IB_SHOTS = Join-Path $Evidence 'shots-e'
+    & node e2e-scenario-e.mjs *>> $eLog
+    Check 'P2b Scenario E passed' ($LASTEXITCODE -eq 0)
+  } finally { Pop-Location }
+  foreach ($shot in 'E1-invite-and-global-badge.png', 'E8-bell-panel-timezone.png', 'E6-acceptance-flow.png', 'E7-nudge-notify.png') {
+    Check "P2b screenshot $shot exists" (Test-Path (Join-Path $Evidence "shots-e\$shot"))
   }
 
   # ---------- P3: stop, backup-skip while stopped, start ----------
@@ -192,7 +206,7 @@ try {
   # ---------- P6: upgrade in place (same package as its own new version) ----------
   Phase 'P6 upgrade (same package)'
   Expand-Archive -Path $Zip -DestinationPath (Join-Path $Work 'pkg2') -Force
-  $Root2 = Join-Path $Work 'pkg2\iteration-board-offline-1.0.3'
+  $Root2 = Join-Path $Work 'pkg2\iteration-board-offline-1.0.4'
   $code = Run-Bat $Root2 'upgrade.bat' @("`"$Root`"", '--yes', '--no-pause') 'p6-upgrade.log'
   Check 'P6 upgrade.bat exit 0' ($code -eq 0)
   Check 'P6 PG service Running after upgrade' (Wait-State 'IterationBoardPG' 'Running')
@@ -223,7 +237,7 @@ try {
   Phase 'P10 install into path with spaces'
   $SpaceBase = 'C:\ib space test'
   Expand-Archive -Path $Zip -DestinationPath (Join-Path $SpaceBase 'pkg') -Force
-  $SRoot = Join-Path $SpaceBase 'pkg\iteration-board-offline-1.0.3'
+  $SRoot = Join-Path $SpaceBase 'pkg\iteration-board-offline-1.0.4'
   $code = Run-Bat $SRoot 'install.bat' @('--no-pause') 'p10-space-install.log'
   Check 'P10 install.bat exit 0 despite spaces in path' ($code -eq 0)
   Check 'P10 PG service Running' (Wait-State 'IterationBoardPG' 'Running')
@@ -260,6 +274,7 @@ if ($script:Failures.Count -gt 0) {
   $script:Failures | ForEach-Object { Write-Host "  - $_" }
   if ($script:Failures -match 'P1 ') { Dump-Tail 'p1-install.log' }
   if ($script:Failures -match 'P2 ') { Dump-Tail 'p2-playwright.log' }
+  if ($script:Failures -match 'P2b ') { Dump-Tail 'p2b-scenario-e.log' }
   if ($script:Failures -match 'P3 ') { Dump-Tail 'p3-stop.log' }
   if ($script:Failures -match 'P6 ') { Dump-Tail 'p6-upgrade.log' }
   if ($script:Failures -match 'P10 ') { Dump-Tail 'p10-space-install.log' }

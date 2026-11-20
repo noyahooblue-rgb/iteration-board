@@ -64,4 +64,5 @@ public class Team {
     public void setDeletedAt(Instant v) { deletedAt = v; }
     public long getItemSeq() { return itemSeq; }
     public void setItemSeq(long v) { itemSeq = v; }
+    public Instant getCreatedAt() { return createdAt; }
 }

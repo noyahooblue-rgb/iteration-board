@@ -17,10 +17,11 @@ import { ref, computed, onMounted } from 'vue'
 import { api, ApiError } from '../../api/http'; import { AI_FEATURE_LABELS, DEFAULT_TEAM_AI_SETTINGS, type AiStatus, type AiLog, type TeamAiSettings } from '../../api/types'
 import { useTeam } from '../../stores/team'; import { useToast } from '../../stores/toast'; import { useAi } from '../../stores/ai'
 import { useBusy } from '../../utils/busy'
+import { fmtDateTime } from '../../utils/datetime'
 const team = useTeam(), toast = useToast(), aiStore = useAi(), busy = useBusy()
 const status = ref<AiStatus | null>(null), settings = ref<TeamAiSettings>({ ...DEFAULT_TEAM_AI_SETTINGS }), logs = ref<AiLog[]>([])
 const isLeader = computed(() => team.current?.myRole === 'LEADER')
-const fmt = (s: string) => s ? s.slice(0, 16).replace('T', ' ') : ''
+const fmt = fmtDateTime
 async function load(){ status.value = await api.get(`/teams/${team.currentId}/ai/status`).catch(() => null)
   if (status.value) settings.value = { ...status.value.teamSettings }
   if (isLeader.value) logs.value = await api.get(`/teams/${team.currentId}/ai/logs`).catch(() => []) }

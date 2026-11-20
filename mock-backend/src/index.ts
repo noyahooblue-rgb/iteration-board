@@ -157,7 +157,7 @@ const validPwd = (p: string) => p.length >= 8 && /[A-Za-z]/.test(p) && /\d/.test
 // ---------------- 路由 ----------------
 let currentHeaders: Record<string, string> = {}
 const idemStore = new Map<string, { at: number; status: number; data: any }>()
-// 幂等键：同一键 10 分钟内重复提交只生效一次，重复请求直接返回首次结果。
+// §16.3 幂等键：同一键 10 分钟内重复提交只生效一次，重复请求直接返回首次结果。
 function idemWrap(scope: string, fn: () => { status: number; data: any }): { status: number; data: any } {
   const key = currentHeaders['Idempotency-Key'] ?? currentHeaders['idempotency-key']
   if (!key) return fn()
@@ -194,6 +194,14 @@ function route(method: string, rawPath: string, body: any): { status: number; da
 // ---------------- 平台管理（M5 Q6 审计日志） ----------------
 function adminRoute(method: string, seg: string[], body: any, q: URLSearchParams) {
   const u = me(); if (!u.platformAdmin) throw err(403, 'FORBIDDEN', '仅平台管理员可访问')
+  // 平台管理新接口（1.0.4 J）：账号 / 小组列表，字段与前端 AdminView 约定一致；演示数据即种子虚构数据（云雀小组 SKY 等）。
+  // StoredUser 无 createdAt 字段，演示口径统一回固定演示日期，不虚构逐个不同的注册时间。
+  if (method === 'GET' && seg[1] === 'users') {
+    return { status: 200, data: users.map(x => ({ id: x.id, loginName: x.loginName, displayName: x.displayName, platformAdmin: x.platformAdmin, createdAt: '2026-11-01T09:00:00' })) }
+  }
+  if (method === 'GET' && seg[1] === 'teams') {
+    return { status: 200, data: allTeams().map(t => ({ id: t.id, name: t.name, code: t.code, memberCount: members.filter(m => m.teamId === t.id).length, createdAt: '2026-11-01T09:00:00' })) }
+  }
   if (method === 'GET' && seg[1] === 'audit-logs') {
     const tid = q.get('teamId')
     return { status: 200, data: auditPage(tid ? auditLogs.filter(l => l.teamId === Number(tid)) : auditLogs, q) }
@@ -499,7 +507,7 @@ function scanReminders(teamId: number) {
     for (const uid of targets) { const mm = memberOf(teamId, uid); if (mm && awayOn(mm, today)) { const ld = leaderOf(teamId); if (ld && ld.userId !== uid) send(ld.userId, it, sig.rule + '_LEADER', `${sig.message}（负责人请假/出差，转提醒组长）`) } else send(uid, it, sig.rule, sig.message) } }
   return generated
 }
-// ---------------- 报告（） ----------------
+// ---------------- 报告（修订二 §16.1） ----------------
 // kind 与真实后端 ReportService 对齐：STANDUP_SUMMARY / WEEKLY / ITERATION_SUMMARY / PERSONAL_WEEKLY / RISK_SUMMARY。
 // 可见范围服务端过滤；一个周期一份（generate 命中已有返回 existed=true）；重新生成 60 秒节流；
 // 历史版本最多 5 个（覆盖前留存，可查看/恢复）；删除为软删除进回收站并记墓碑（自动任务不再重建该周期）。
@@ -676,6 +684,8 @@ function createItemCore(teamId: number, creator: StoredUser, role: string, body:
   }
   nextItemId++; items.push(it); act(it.id, creator.id, 'CREATE', null, it.status, '创建事项')
   for (const oid of it.ownerIds) if (oid !== creator.id) notify(oid, teamId, 'ASSIGNMENT', it, `你被指派了 ${it.code} ${it.title}`, creator.id)
+  // 邀请认领通知（1.0.4 J，对齐设计 3.7「被邀请认领要通知」）：destination=INVITE 建项时逐个通知 inviteeIds。
+  if (dest === 'INVITE') for (const iid of it.inviteeIds) if (iid !== creator.id) notify(iid, teamId, 'ASSIGNMENT', it, `${creator.displayName} 邀请你认领 ${it.code} ${it.title}`, creator.id)
   if (it.parentId) { const p = items.find(x => x.id === it.parentId); if (p) deriveTask(p) }
   return it
 }
@@ -828,8 +838,10 @@ function itemsRoute(method: string, teamId: number, seg: string[], body: any, q:
     if (it.type === 'TASK') throw err(422, 'ILLEGAL_TRANSITION', '任务不登记进展，进展登记在故事上')
     if (it.status === 'NOT_STARTED') { it.status = 'IN_PROGRESS'; act(it.id, u.id, 'START', 'NOT_STARTED', 'IN_PROGRESS', '登记进展时自动开始') }
     if (it.status !== 'IN_PROGRESS') throw err(422, 'ILLEGAL_TRANSITION', '当前状态不能登记进展')
-    const p = { id: nextId++, itemId: it.id, authorId: u.id, text: body.text, percent: body.percent ?? null, blocked: !!body.blocked, blockReason: body.blockReason ?? null, nextStep: body.nextStep ?? null, kind: body.kind ?? 'NORMAL', createdAt: new Date().toISOString() }
+    // 进展 @提及（1.0.4 J）：接受 mentionIds 并回显在进展记录上，被 @ 者收 MENTION 通知（与评论口径一致）。
+    const p = { id: nextId++, itemId: it.id, authorId: u.id, text: body.text, percent: body.percent ?? null, blocked: !!body.blocked, blockReason: body.blockReason ?? null, nextStep: body.nextStep ?? null, kind: body.kind ?? 'NORMAL', createdAt: new Date().toISOString(), mentionIds: Array.isArray(body.mentionIds) ? body.mentionIds : [] }
     progressList.unshift(p); if (body.percent != null) it.progressPercent = body.percent
+    for (const mid of p.mentionIds) if (mid !== u.id) notify(mid, teamId, 'MENTION', it, `${u.displayName} 在 ${it.code} 的进展中 @ 了你`, u.id)
     it.blocked = !!body.blocked; it.blockReason = body.blocked ? (body.blockReason ?? '未填写原因') : null
     it.lastProgressAt = p.createdAt; it.nudgeCount = 0; it.version++; it.updatedAt = p.createdAt
     if (body.blocked) { const ld = leaderOf(teamId); if (ld && ld.userId !== u.id) notify(ld.userId, teamId, 'ITEM_UPDATE', it, `${it.code} 已标记阻塞：${it.blockReason}`, u.id) }
@@ -1087,7 +1099,7 @@ function aiRoute(method: string, teamId: number, seg: string[], body: any) {
     r.aiGenerated = true; r.content = r.content.replace('本报告由系统按结构化数据自动生成（非 AI 生成）', '本报告由 AI 基于结构化数据汇总生成，数字以程序统计区为准')
     aiLog(teamId, u.id, 'summarize', t0); return { status: 201, data: { ...reportView(r), existed: false } } }
   if (sub === 'risk-summary' && method === 'GET') { const t0 = Date.now(); requireAi(teamId, 'riskSummary')
-    if (!(m.role === 'LEADER' || m.role === 'PO')) throw err(403, 'FORBIDDEN', '风险摘要仅组长、PO 可见')
+    if (!(m.role === 'LEADER' || m.role === 'PO')) throw err(403, 'FORBIDDEN', '风险摘要仅组长、PO 可见（§16.2）')
     const signals = riskSignals(teamId)
     const top = signals.slice(0, 3).map((sg: any) => ({ itemId: sg.itemId, itemCode: sg.itemCode, reason: sg.message, action: sg.rule === 'BLOCKED_LONG' ? '请负责人今天内同步阻塞进展，组长协助推进解除' : sg.rule === 'OVERDUE' ? '优先处理或申请调整截止日期' : '在站会上确认下一步与负责人' }))
     aiLog(teamId, u.id, 'risk-summary', t0); return { status: 200, data: { aiGenerated: true, top, signals } } }

@@ -37,10 +37,11 @@ import AppShell from '../components/AppShell.vue'; import GlassPanel from '../co
 import { api, ApiError } from '../api/http'; import type { QaRecord, QaAnswer } from '../api/types'
 import { useTeam } from '../stores/team'; import { useToast } from '../stores/toast'; import { useAi } from '../stores/ai'
 import { useBusy } from '../utils/busy'
+import { fmtDateTime } from '../utils/datetime'
 const team = useTeam(), toast = useToast(), ai = useAi(), busy = useBusy()
 const question = ref(''), answer = ref<QaAnswer | null>(null), history = ref<QaRecord[]>([])
 const drawerOpen = ref(false), openId = ref<number | null>(null)
-const fmt = (s: string) => s ? s.slice(0, 16).replace('T', ' ') : ''
+const fmt = fmtDateTime
 async function loadHistory(){ history.value = await api.get(`/teams/${team.currentId}/ai/qa/history`).catch(() => []) }
 onMounted(loadHistory)
 async function ask(){ await busy.wrap('ask', async () => { try { answer.value = await api.post(`/teams/${team.currentId}/ai/qa`, { question: question.value.trim() }); loadHistory() } catch(e){ toast.show(e instanceof ApiError ? e.message : '提问失败') } }) }

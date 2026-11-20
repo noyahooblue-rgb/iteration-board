@@ -9,7 +9,7 @@
         <AppButton v-if="task.taskStatus==='PENDING_ACCEPTANCE' && canAccept" @click="acceptTask">验收任务</AppButton>
       </div>
       <h2 class="ttitle">{{task.title}}</h2>
-      <p class="small">所属 PO：{{team.memberName(task.poId)}} · 整体进度 {{task.progressPercent}}%（故事点加权，无估算按件数）· {{doneCount}}/{{stories.length}} 个故事完成</p>
+      <p class="small">所属 PO：{{team.memberName(task.poId)}} · 整体进度 {{clampPct(task.progressPercent)}}%（故事点加权，无估算按件数）· {{doneCount}}/{{stories.length}} 个故事完成</p>
       <ProgressBar :value="task.progressPercent" style="margin:10px 0 4px"/>
       <div class="md" v-html="html"/>
     </GlassPanel>
@@ -82,6 +82,7 @@ import AppShell from '../components/AppShell.vue'; import GlassPanel from '../co
 import { api, ApiError, newIdempotencyKey } from '../api/http'; import { TASK_STATUS_META, STATUS_META, STORY_CAT_META, itemColor, estimateUnitLabel, type Item, type Planning, type StoryCategory } from '../api/types'
 import AiBadge from '../components/AiBadge.vue'
 import { useBusy } from '../utils/busy'; import { useAi } from '../stores/ai'
+import { clampPct } from '../utils/progress'
 import { useTeam } from '../stores/team'; import { useUi } from '../stores/ui'; import { useToast } from '../stores/toast'
 const route = useRoute(), team = useTeam(), ui = useUi(), toast = useToast(), busy = useBusy(), ai = useAi()
 const taskId = Number(route.params.id)

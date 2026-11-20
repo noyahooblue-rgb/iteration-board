@@ -128,6 +128,7 @@ import LabelsPanel from '../components/settings/LabelsPanel.vue'; import AiPanel
 import { useRouter } from 'vue-router'
 import { api, ApiError } from '../api/http'; import { MEMBER_STATUS_META, estimateUnitLabel, auditActionLabel, auditTargetLabel, type JoinRequest, type Member, type TeamSettings, type AuditLog } from '../api/types'
 import { useTeam } from '../stores/team'; import { useToast } from '../stores/toast'; import { useAuth } from '../stores/auth'
+import { fmtDateTime } from '../utils/datetime'
 const team = useTeam(), toast = useToast(), router = useRouter(), auth = useAuth()
 const tab = ref('members')
 const isAdmin = computed(()=> !!auth.user?.platformAdmin)
@@ -174,7 +175,7 @@ async function leaveTeam(){ if (!confirm('确定退出本小组吗？退出后�
 const isLeader = computed(()=> team.current?.myRole === 'LEADER')
 const unit = computed(()=> estimateUnitLabel(team.current))
 const requests = ref<JoinRequest[]>([]); const reqRoles = reactive<Record<number,string>>({})
-const fmt = (s:string)=> s ? s.slice(0,16).replace('T',' ') : ''
+const fmt = fmtDateTime
 const roleName = (r:string)=> r==='LEADER' ? '组长' : r==='PO' ? 'PO' : '成员'
 async function load(){ syncForms(); if (isLeader.value && team.currentId) { requests.value = await api.get(`/teams/${team.currentId}/join-requests`).catch(()=>[]); for (const r of requests.value) reqRoles[r.id] ??= 'MEMBER' } }
 onMounted(load)

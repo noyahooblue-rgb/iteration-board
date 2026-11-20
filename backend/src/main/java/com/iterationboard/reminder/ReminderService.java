@@ -1,5 +1,6 @@
 package com.iterationboard.reminder;
 
+import com.iterationboard.common.PlatformTime;
 import com.iterationboard.common.Workdays;
 import com.iterationboard.domain.*;
 import com.iterationboard.domain.Enums.*;
@@ -11,11 +12,10 @@ import org.springframework.transaction.annotation.Transactional;
 
 import java.time.Instant;
 import java.time.LocalDate;
-import java.time.ZoneOffset;
 import java.util.List;
 
 /**
- * 自动提醒：定时扫描与组长「立即扫描」共用同一实现。
+ * 自动提醒（设计 §3.6 规则表）：定时扫描与组长「立即扫描」共用同一实现。
  * 去重：同一规则、同一事项、同一接收人当天最多一条（按已生成的同类通知判定）。
  * 请假/出差成员不提醒本人，改提醒组长；逾期在每个工作日重复提醒（靠每日去重实现逐日一条）。
  */
@@ -27,15 +27,17 @@ public class ReminderService {
     private final TeamRepo teamRepo;
     private final NotificationRepo notificationRepo;
     private final NotifyService notifyService;
+    private final PlatformTime platformTime;
 
     public ReminderService(ItemRepo itemRepo, ItemOwnerRepo ownerRepo, TeamMemberRepo memberRepo,
-                           TeamRepo teamRepo, NotificationRepo notificationRepo, NotifyService notifyService) {
+                           TeamRepo teamRepo, NotificationRepo notificationRepo, NotifyService notifyService, PlatformTime platformTime) {
         this.itemRepo = itemRepo;
         this.ownerRepo = ownerRepo;
         this.memberRepo = memberRepo;
         this.teamRepo = teamRepo;
         this.notificationRepo = notificationRepo;
         this.notifyService = notifyService;
+        this.platformTime = platformTime;
     }
 
     @Transactional
@@ -43,7 +45,7 @@ public class ReminderService {
         int total = 0;
         for (Team team : teamRepo.findAll()) {
             if (!"ACTIVE".equals(team.getStatus())) continue;
-            total += scanTeam(team, LocalDate.now());
+            total += scanTeam(team, platformTime.today());
         }
         return total;
     }
@@ -131,7 +133,7 @@ public class ReminderService {
 
     private int sendRaw(AppUser recipient, String type, Item item, String content) {
         if (recipient == null) return 0;
-        Instant startOfToday = LocalDate.now(ZoneOffset.UTC).atStartOfDay(ZoneOffset.UTC).toInstant();
+        Instant startOfToday = platformTime.startOfTodayInstant();
         boolean exists = !notificationRepo.findRecent(recipient.getId(), type, item.getId(), startOfToday).isEmpty();
         if (exists) return 0;
         notifyService.notify(recipient, type, item, null, content);

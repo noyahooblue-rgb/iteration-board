@@ -1,5 +1,6 @@
 package com.iterationboard.collab;
 
+import com.iterationboard.common.PlatformTime;
 import com.iterationboard.common.Workdays;
 import com.iterationboard.domain.*;
 import com.iterationboard.domain.Enums.*;
@@ -20,7 +21,7 @@ import java.util.List;
 import java.util.Map;
 
 /**
- * 组长总览：每位成员的状态、在做事项、待更新数、剩余点数与剩余容量；
+ * 组长总览（设计 §7.6）：每位成员的状态、在做事项、待更新数、剩余点数与剩余容量；
  * 风险清单仅组长/PO 可见；附当前迭代健康度（完成率、燃尽偏差、阻塞数、待更新数）。
  */
 @Service
@@ -32,10 +33,11 @@ public class OverviewService {
     private final TeamService teamService;
     private final ItemService itemService;
     private final RiskService riskService;
+    private final PlatformTime platformTime;
 
     public OverviewService(TeamMemberRepo memberRepo, ItemRepo itemRepo, ItemOwnerRepo ownerRepo,
                            IterationRepo iterationRepo, TeamService teamService, ItemService itemService,
-                           RiskService riskService) {
+                           RiskService riskService, PlatformTime platformTime) {
         this.memberRepo = memberRepo;
         this.itemRepo = itemRepo;
         this.ownerRepo = ownerRepo;
@@ -43,6 +45,7 @@ public class OverviewService {
         this.teamService = teamService;
         this.itemService = itemService;
         this.riskService = riskService;
+        this.platformTime = platformTime;
     }
 
     @Transactional(readOnly = true)
@@ -51,7 +54,7 @@ public class OverviewService {
         Team team = me.getTeam();
         TeamSettings settings = TeamSettings.from(team);
         TeamSettings.Thresholds th = settings.thresholds;
-        LocalDate today = LocalDate.now();
+        LocalDate today = platformTime.today();
         boolean canViewRisks = me.getRole() == Role.LEADER || me.getRole() == Role.PO;
 
         List<Item> teamItems = itemRepo.findByTeamId(teamId).stream()

@@ -2,6 +2,7 @@ package com.iterationboard.report;
 
 import com.iterationboard.collab.StandupService;
 import com.iterationboard.common.ApiException;
+import com.iterationboard.common.PlatformTime;
 import com.iterationboard.domain.*;
 import com.iterationboard.domain.Enums.*;
 import com.iterationboard.reminder.RiskService;
@@ -21,7 +22,7 @@ import java.util.Optional;
 import java.util.Map;
 
 /**
- * 报告与导出：站会摘要 / 周报 / 迭代总结 / 个人周报 / 风险摘要。
+ * 报告与导出（设计 §7.7）：站会摘要 / 周报 / 迭代总结 / 个人周报 / 风险摘要。
  * 本阶段（M3）报告正文由程序按结构化数据生成（aiGenerated=false），可在线编辑；
  * AI 叙述生成属 M4，不在本期范围。所有数字取自真实事项数据，不估算。
  */
@@ -42,13 +43,14 @@ public class ReportService {
     private final NotifyService notifyService;
     private final com.iterationboard.common.AuditService auditService;
     private final org.springframework.beans.factory.ObjectProvider<ReportNarrator> narratorProvider;
+    private final PlatformTime platformTime;
 
     public ReportService(ReportRepo reportRepo, ReportVersionRepo versionRepo, ItemRepo itemRepo, ItemOwnerRepo ownerRepo,
                          TeamMemberRepo memberRepo, ProgressRepo progressRepo, IterationRepo iterationRepo,
                          TeamService teamService, RiskService riskService, StandupService standupService,
                          UserRepo userRepo, TeamRepo teamRepo, NotifyService notifyService,
                          com.iterationboard.common.AuditService auditService,
-                         org.springframework.beans.factory.ObjectProvider<ReportNarrator> narratorProvider) {
+                         org.springframework.beans.factory.ObjectProvider<ReportNarrator> narratorProvider, PlatformTime platformTime) {
         this.reportRepo = reportRepo;
         this.versionRepo = versionRepo;
         this.itemRepo = itemRepo;
@@ -64,6 +66,7 @@ public class ReportService {
         this.notifyService = notifyService;
         this.auditService = auditService;
         this.narratorProvider = narratorProvider;
+        this.platformTime = platformTime;
     }
 
     /**
@@ -83,7 +86,7 @@ public class ReportService {
         return facts;
     }
 
-    // ----------  权限口径（kind 沿用 M3 字符串） ----------
+    // ---------- 修订二 §16.1 权限口径（kind 沿用 M3 字符串） ----------
     // STANDUP_SUMMARY 站会摘要 / WEEKLY 周报 / ITERATION_SUMMARY 迭代总结 / PERSONAL_WEEKLY 我的周报 / RISK_SUMMARY 风险摘要
     public static final java.util.Set<String> KINDS = java.util.Set.of(
             "STANDUP_SUMMARY", "WEEKLY", "ITERATION_SUMMARY", "PERSONAL_WEEKLY", "RISK_SUMMARY");
@@ -199,7 +202,7 @@ public class ReportService {
     }
 
     /**
-     * 生成（）：一个周期只有一份——该周期已有未删报告时不新建，返回 existed=true；
+     * 生成（修订二 §16.1）：一个周期只有一份——该周期已有未删报告时不新建，返回 existed=true；
      * 已有墓碑（已删）时同样返回 existed=true，定时任务据此跳过。拒绝未来周期。
      */
     @Transactional
@@ -218,7 +221,7 @@ public class ReportService {
         if (!canGenerate(kind, me, user, null)) {
             throw ApiException.forbidden("无权生成该类报告（站会/周报/风险=组长/PO，迭代总结=组长，我的周报=本人）");
         }
-        LocalDate today = LocalDate.now();
+        LocalDate today = platformTime.today();
         Report r = new Report();
         r.setTeam(team);
         r.setKind(kind);
@@ -289,7 +292,7 @@ public class ReportService {
         Team team = me.getTeam();
         if (kind == null || !KINDS.contains(kind)) throw ApiException.validation("kind 不合法");
         if (!canGenerate(kind, me, user, null)) throw ApiException.forbidden("无权生成该类报告");
-        LocalDate today = LocalDate.now();
+        LocalDate today = platformTime.today();
         Report r = new Report();
         r.setTeam(team);
         r.setKind(kind);
@@ -516,13 +519,13 @@ public class ReportService {
                 .orElseThrow(() -> ApiException.notFound("报告不存在"));
     }
 
-    /** 编辑（ 编辑权表 + 版本冲突）；version 为空时不校验（兼容 M3 调用）。 */
+    /** 编辑（修订二 §16.1 编辑权表 + §16.3 版本冲突）；version 为空时不校验（兼容 M3 调用）。 */
     @Transactional
     public Report patch(Long teamId, Long reportId, AppUser user, String title, String contentMd, Integer version) {
         TeamMember me = teamService.requireMember(teamId, user);
         Report r = requireRaw(teamId, reportId);
         if (r.getDeletedAt() != null) throw ApiException.notFound("报告不存在");
-        if (!canEdit(r, me, user)) throw ApiException.forbidden("无权编辑该报告（按 编辑权表）");
+        if (!canEdit(r, me, user)) throw ApiException.forbidden("无权编辑该报告（按 §16.1 编辑权表）");
         if (version != null && version != r.getVersion()) {
             throw ApiException.versionConflict("报告已被他人修改，请刷新后重试");
         }
@@ -594,7 +597,7 @@ public class ReportService {
         TeamMember me = teamService.requireMember(teamId, user);
         Report r = requireRaw(teamId, reportId);
         if (r.getDeletedAt() != null) throw ApiException.notFound("报告不存在");
-        if (!canEdit(r, me, user)) throw ApiException.forbidden("无权删除该报告（按 编辑权表）");
+        if (!canEdit(r, me, user)) throw ApiException.forbidden("无权删除该报告（按 §16.1 编辑权表）");
         r.setDeletedAt(Instant.now());
         r.setDeletedById(user.getId());
         reportRepo.save(r);
@@ -622,7 +625,7 @@ public class ReportService {
         return reportRepo.save(r);
     }
 
-    // ---------- 定时自动生成：已存在（含墓碑）则跳过 ----------
+    // ---------- 定时自动生成（§16.1）：已存在（含墓碑）则跳过 ----------
 
     /** 工作日 9:00：当日站会摘要（不通知）+ 风险摘要（通知组长/PO）。返回新建份数。 */
     @Transactional

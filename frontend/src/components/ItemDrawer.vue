@@ -67,14 +67,14 @@
       <div v-if="tab==='progress'" class="tl">
         <div v-for="p in progress" :key="p.id" class="tl-item"><Avatar :name="team.memberName(p.authorId)" :color="team.member(p.authorId)?.avatarColor"/><div>
           <b>{{team.memberName(p.authorId)}}</b> <span class="tiny">{{fmt(p.createdAt)}}</span>
-          <p>{{p.text}}</p><p v-if="p.percent!=null"><span class="tl-pct">进度 {{p.percent}}%</span></p>
+          <p><template v-for="(seg,si) in mentionSegments(p.text, p.mentionIds)" :key="si"><span v-if="seg.mention" class="mention">{{seg.text}}</span><template v-else>{{seg.text}}</template></template></p><p v-if="p.percent!=null"><span class="tl-pct">进度 {{p.percent}}%</span></p>
           <p v-if="p.blocked" class="blocked-txt">阻塞：{{p.blockReason}}</p><p v-if="p.nextStep" class="small">下一步：{{p.nextStep}}</p></div></div>
         <p v-if="!progress.length" class="small">暂无进展记录，在下方输入框里将提交第一条进展。</p>
       </div>
       <div v-else-if="tab==='comments'" class="tl">
         <div v-for="c in comments" :key="c.id" class="tl-item"><Avatar :name="team.memberName(c.authorId)" :color="team.member(c.authorId)?.avatarColor"/><div><b>{{team.memberName(c.authorId)}}</b> <span class="tiny">{{fmt(c.createdAt)}}</span>
           <template v-if="editCommentId===c.id"><textarea v-model="editCommentText" rows="2" style="width:100%"/><span style="display:flex;gap:6px;margin-top:4px"><AppButton variant="ghost" @click="editCommentId=null">取消</AppButton><AppButton :disabled="commentBusy" @click="saveComment(c)">{{ commentBusy ? '保存中…' : '保存' }}</AppButton></span></template>
-          <p v-else>{{c.content}}</p>
+          <p v-else><template v-for="(seg,si) in mentionSegments(c.content, c.mentionIds)" :key="si"><span v-if="seg.mention" class="mention">{{seg.text}}</span><template v-else>{{seg.text}}</template></template></p>
           <span v-if="editCommentId!==c.id" style="display:flex;gap:8px"><button v-if="canEditComment(c)" class="press tiny" style="color:var(--theme)" @click="editCommentId=c.id;editCommentText=c.content">编辑</button><button v-if="canDeleteComment(c)" class="press tiny" style="color:var(--c-red)" @click="removeComment(c)">删除</button></span></div></div>
         <p v-if="!comments.length" class="small">暂无评论</p>
       </div>
@@ -89,12 +89,14 @@
     <div class="dfoot" v-if="item">
       <p v-if="item.type==='TASK'" class="small">任务不登记进展：进展登记在它下面的故事上，任务进度由故事自动推算。</p>
       <template v-else-if="tab==='progress'">
-        <div class="pct-row"><span>进度</span><input type="range" min="0" max="100" step="5" v-model.number="pPercent"/><b>{{pPercent ?? item.progressPercent}}%</b>
+        <!-- 进度滑杆（1.0.4 F）：未操作时绑定 item.progressPercent（刚认领=0），不能用 v-model 的 null 初始值——
+             range 在 value 为 null 时浏览器默认停在 50%，会出现「文字 0% 但填充到中间」。只有用户 input 后才写入 pPercent。 -->
+        <div class="pct-row"><span>进度</span><input type="range" min="0" max="100" step="5" :value="pPercent ?? item.progressPercent" @input="pPercent = Number(($event.target as HTMLInputElement).value)"/><b>{{pPercent ?? item.progressPercent}}%</b>
           <label class="small"><input type="checkbox" v-model="pBlocked"/> 阻塞</label></div>
         <input v-if="pBlocked" v-model="pBlockReason" placeholder="阻塞原因" class="flexin" style="margin-bottom:8px"/>
-        <div class="foot-row"><textarea v-model="pText" rows="2" placeholder="记录最新进展，例如：已完成联调，正在回归…"/><AppButton variant="ghost" @click="submitKeepGoing">照常推进</AppButton><AppButton @click="submitProgress"><Send :size="15"/>提交</AppButton></div>
+        <div class="foot-row"><MentionInput v-model="pText" v-model:mention-ids="pMentionIds" :rows="2" placeholder="记录最新进展，例如：已完成联调，正在回归…（输入 @ 可提及成员）"/><AppButton variant="ghost" @click="submitKeepGoing">照常推进</AppButton><AppButton @click="submitProgress"><Send :size="15"/>提交</AppButton></div>
       </template>
-      <div v-else-if="tab==='comments'" class="foot-row"><textarea v-model="cText" rows="2" placeholder="发表评论…" @keyup.enter="submitComment"/><AppButton :disabled="commentBusy" @click="submitComment"><Send :size="15"/>{{ commentBusy ? '提交中…' : '提交' }}</AppButton></div>
+      <div v-else-if="tab==='comments'" class="foot-row"><MentionInput v-model="cText" v-model:mention-ids="cMentionIds" :rows="2" placeholder="发表评论…（输入 @ 可提及成员）" enter-submits @enter="submitComment"/><AppButton :disabled="commentBusy" @click="submitComment"><Send :size="15"/>{{ commentBusy ? '提交中…' : '提交' }}</AppButton></div>
     </div>
   </template>
 
@@ -137,6 +139,7 @@ import { marked } from 'marked'; import DOMPurify from 'dompurify'
 import { X, OctagonAlert, Zap, ChevronDown, FileText, Layers, ClipboardList, Check, Clock, Send, Pencil } from 'lucide-vue-next'
 import Drawer from './Drawer.vue'; import Modal from './Modal.vue'; import AppButton from './AppButton.vue'; import AppInput from './AppInput.vue'
 import StatusPill from './StatusPill.vue'; import EditItemModal from './EditItemModal.vue'; import { STATUS_META, TYPE_META, STORY_CAT_META, TASK_STATUS_META } from '../api/types'; import TypeBadge from './TypeBadge.vue'; import Avatar from './Avatar.vue'; import ProgressBar from './ProgressBar.vue'
+import MentionInput from './MentionInput.vue'; import { mentionSegments } from '../utils/mention'; import { fmtDateTime, localToday } from '../utils/datetime'
 import { api, ApiError } from '../api/http'; import type { Item, ProgressUpdate, Comment, Activity } from '../api/types'
 import { useTeam } from '../stores/team'; import { useAuth } from '../stores/auth'; import { useToast } from '../stores/toast'; import { useBusy } from '../utils/busy'
 const props = defineProps<{open:boolean; itemId:number|null}>()
@@ -146,6 +149,8 @@ const item = ref<Item|null>(null), loading = ref(false), titleDraft = ref(''), t
 const progress = ref<ProgressUpdate[]>([]), comments = ref<Comment[]>([]), activities = ref<Activity[]>([]), allItems = ref<Item[]>([])
 const showActions = ref(false), showTransfer = ref(false), reasonAction = ref<string|null>(null), reason = ref(''), editOpen = ref(false)
 const pText = ref(''), pPercent = ref<number|null>(null), pBlocked = ref(false), pBlockReason = ref(''), cText = ref('')
+// @提及（1.0.4 G）：MentionInput 维护被 @ 成员 id，提交评论/进展时随 mentionIds 一起发（评论 POST 已支持；进展 POST 后端 1.0.4 同步加同名字段）
+const pMentionIds = ref<number[]>([]), cMentionIds = ref<number[]>([])
 const checklist = ref<import('../api/types').ChecklistEntry[]>([]), newCheck = ref('')
 // M3：抽屉内联编辑（待问 5 批复：常用字段点击即改小浮层；全字段「编辑」弹窗保留）
 const editField = ref<string|null>(null), ownerDraft = ref<number[]>([]), dueDraft = ref(''), estimateDraft = ref(''), labelsDraft = ref('')
@@ -154,7 +159,7 @@ const taskRejectOpen = ref(false), reopenDraft = ref<number[]>([]), newStoryDraf
 const canInlineEdit = computed(()=> { const it = item.value; if (!it) return false; if (it.allowedActions) return it.allowedActions.includes('EDIT'); return !!auth.user && (team.current?.myRole==='LEADER' || team.current?.myRole==='PO' || it.creatorId===auth.user.id || it.ownerIds.includes(auth.user.id)) }) // Q11：优先读 DTO allowedActions
 const canManageLabels = computed(()=> team.current?.myRole==='LEADER' || team.current?.myRole==='PO')
 const editCommentId = ref<number|null>(null), editCommentText = ref(''), commentBusy = ref(false)
-// 删除收口：任务 PO/组长且其故事均未开始；故事 PO/组长且未开始（待认领/待开始）；独立事项维持原口径（后端再校验）。
+// §16.2 删除收口：任务 PO/组长且其故事均未开始；故事 PO/组长且未开始（待认领/待开始）；独立事项维持原口径（后端再校验）。
 const canDeleteItem = computed(()=> { const it = item.value; if (!it) return false; if (it.allowedActions) return it.allowedActions.includes('DELETE'); const r = team.current?.myRole
   if (it.type==='TASK') return (r==='LEADER' || r==='PO') && (it.taskStatus==='NOT_STARTED' || it.taskStatus==null) && children.value.every(c=> c.status==='UNCLAIMED' || c.status==='NOT_STARTED')
   if (it.type==='STORY') return (r==='LEADER' || r==='PO') && (it.status==='UNCLAIMED' || it.status==='NOT_STARTED')
@@ -178,7 +183,7 @@ async function saveEstimate(){ const v = estimateDraft.value === '' ? null : Num
 async function saveLabels(){ const names = labelsDraft.value.split(/[,，]/).map(s=>s.trim()).filter(Boolean); editField.value=null; await patch({ labelNames: names }); load() }
 async function nudgeItem(){ if(!item.value) return; await busy.wrap('nudge', async () => { try{ const r = await api.post(`/teams/${team.currentId}/items/${item.value!.id}/nudge`); toast.show(r.redirectedToLeader ? '对方请假/出差，已改催组长' : `已催一下（本轮第 ${r.nudgeCount} 次）`); emit('changed'); load() }catch(e){ handleErr(e) } }) }
 async function respondNudge(response:string){ if(!item.value) return; await busy.wrap('respond', async () => { try{ await api.post(`/teams/${team.currentId}/items/${item.value!.id}/nudge/respond`, { response }); toast.show(response==='SOON' ? '已回应：马上更新' : response==='TODAY' ? '已回应：今天搞定' : '已回应：卡住了'); emit('changed'); load() }catch(e){ toast.show(e instanceof ApiError ? (e.status===404 ? '没有待回应的催' : e.message) : '回应失败') } }) }
-async function submitKeepGoing(){ if(!item.value) return; try{ await api.post(`/teams/${team.currentId}/items/${item.value.id}/progress`, { text: pText.value.trim() || undefined, kind: 'KEEP_GOING', percent: pPercent.value ?? undefined }); pText.value=''; toast.show('已登记：照常推进'); emit('changed'); load() }catch(e){ handleErr(e) } }
+async function submitKeepGoing(){ if(!item.value) return; try{ await api.post(`/teams/${team.currentId}/items/${item.value.id}/progress`, { text: pText.value.trim() || undefined, kind: 'KEEP_GOING', percent: pPercent.value ?? undefined, mentionIds: pMentionIds.value.length ? [...pMentionIds.value] : undefined }); pText.value=''; pMentionIds.value=[]; toast.show('已登记：照常推进'); emit('changed'); load() }catch(e){ handleErr(e) } }
 function openTaskReject(){ reason.value=''; reopenDraft.value=[]; newStoryDraft.value=[]; taskRejectOpen.value=true; showActions.value=false }
 async function confirmTaskReject(){ if(!item.value) return
   if (!reason.value.trim()){ toast.show('请填写打回原因'); return }
@@ -189,9 +194,9 @@ async function confirmTaskReject(){ if(!item.value) return
 const children = computed(()=> allItems.value.filter(i=>i.parentId===item.value?.id))
 const parentTitle = computed(()=> { const p = allItems.value.find(i=>i.id===item.value?.parentId); return p ? `${p.code} · ${p.title}` : '无' })
 const html = computed(()=> item.value ? DOMPurify.sanitize(marked.parse(item.value.description || '暂无描述') as string) : '')
-const fmt = (s:string)=> s ? s.slice(0,16).replace('T',' ') : ''
+const fmt = fmtDateTime
 const fmtDue = (d:string)=> { const m = d.match(/^(\d+)-(\d+)-(\d+)$/); return m ? `${Number(m[2])}月${Number(m[3])}日` : d }
-const dueState = computed(()=> { const d = item.value?.dueDate; if(!d || item.value?.status==='DONE') return ''; const today = new Date().toISOString().slice(0,10); return d < today ? 'over' : d === today ? 'today' : '' })
+const dueState = computed(()=> { const d = item.value?.dueDate; if(!d || item.value?.status==='DONE') return ''; const today = localToday(); return d < today ? 'over' : d === today ? 'today' : '' })
 function typeColor(t:string){ return (TYPE_META as any)[t]?.color ?? '#007AFF' }
 const actions = computed(()=>{
   if(!item.value || !auth.user) return [] as {action:string;label:string}[]
@@ -231,13 +236,13 @@ async function transfer(uid:number){ showTransfer.value=false; const extra = ite
 async function doJoin(){ showActions.value=false; if(!item.value) return; await busy.wrap('join', async () => { try{ item.value = await api.post(`/teams/${team.currentId}/items/${item.value!.id}/join`, { version: item.value!.version }); toast.show('已加入共同负责'); emit('changed'); load() }catch(e){ handleErr(e) } }) }
 async function removeItem(){ showActions.value=false; if(!item.value) return; if(!confirm('确定删除该事项吗？删除后进入回收站，30 天内可恢复。')) return; try{ await api.del(`/teams/${team.currentId}/items/${item.value.id}`); toast.show('已移入回收站'); emit('changed'); emit('close') }catch(e){ handleErr(e) } }
 async function submitProgress(){ if(!item.value || !pText.value.trim()){ toast.show('进展文字必填'); return }
-  try{ await api.post(`/teams/${team.currentId}/items/${item.value.id}/progress`, { text:pText.value, percent:pPercent.value ?? undefined, blocked:pBlocked.value, blockReason:pBlocked.value? pBlockReason.value||undefined:undefined }); pText.value=''; pPercent.value=null; pBlocked.value=false; toast.show('进展已登记'); emit('changed'); load() }catch(e){ handleErr(e) } }
+  try{ await api.post(`/teams/${team.currentId}/items/${item.value.id}/progress`, { text:pText.value, percent:pPercent.value ?? undefined, blocked:pBlocked.value, blockReason:pBlocked.value? pBlockReason.value||undefined:undefined, mentionIds: pMentionIds.value.length ? [...pMentionIds.value] : undefined }); pText.value=''; pMentionIds.value=[]; pPercent.value=null; pBlocked.value=false; toast.show('进展已登记'); emit('changed'); load() }catch(e){ handleErr(e) } }
 async function unblock(){ if(!item.value) return; try{ await api.post(`/teams/${team.currentId}/items/${item.value.id}/progress`, { text:'阻塞已解除，继续推进', blocked:false }); toast.show('已解除阻塞'); emit('changed'); load() }catch(e){ handleErr(e) } }
 async function toggleCheck(c:import('../api/types').ChecklistEntry){ if(!item.value) return; const prev = c.done; c.done = !prev // 乐观更新
   try{ const e = await api.patch(`/teams/${team.currentId}/items/${item.value.id}/checklist/${c.id}`, { done: !prev }); c.done = e.done }catch(e){ c.done = prev; toast.show('勾选同步失败，已回滚'); handleErr(e) } }
 async function addCheck(){ if(!item.value || !newCheck.value.trim()) return; try{ const e = await api.post(`/teams/${team.currentId}/items/${item.value.id}/checklist`, { text: newCheck.value.trim() }); checklist.value.push(e); newCheck.value='' }catch(e){ handleErr(e) } }
 async function removeCheck(c:import('../api/types').ChecklistEntry){ if(!item.value) return; try{ await api.del(`/teams/${team.currentId}/items/${item.value.id}/checklist/${c.id}`); checklist.value = checklist.value.filter(x=>x.id!==c.id) }catch(e){ handleErr(e) } }
-async function submitComment(){ if(!item.value || !cText.value.trim() || commentBusy.value) return; commentBusy.value = true; try{ await api.post(`/teams/${team.currentId}/items/${item.value.id}/comments`, { content:cText.value }); cText.value=''; emit('changed'); load() }catch(e){ handleErr(e) } finally { commentBusy.value = false } }
+async function submitComment(){ if(!item.value || !cText.value.trim() || commentBusy.value) return; commentBusy.value = true; try{ await api.post(`/teams/${team.currentId}/items/${item.value.id}/comments`, { content:cText.value, mentionIds: [...cMentionIds.value] }); cText.value=''; cMentionIds.value=[]; emit('changed'); load() }catch(e){ handleErr(e) } finally { commentBusy.value = false } }
 </script>
 <style scoped>
 .banner{display:flex;gap:10px;align-items:flex-start;padding:12px 14px;border-radius:12px;font-size:13.5px;margin-bottom:12px}.banner .grow{flex:1}.banner-btn{min-height:34px;padding:5px 12px}
@@ -278,6 +283,7 @@ async function submitComment(){ if(!item.value || !cText.value.trim() || comment
 .sec{margin-top:20px}.md :deep(p){margin:6px 0}.md :deep(h2){margin:10px 0 4px}
 .child{display:flex;align-items:center;gap:10px;width:100%;text-align:left;padding:9px 12px;border:1px solid rgba(255,255,255,.65);background:var(--card);border-radius:12px;margin-bottom:8px;font-size:13px}.child:hover{background:var(--hover)}
 .check{display:flex;gap:8px;align-items:center;padding:5px 0}.check .grow{flex:1}.icon.sm{width:26px;height:26px}.check input{width:18px;height:18px}.check .done{text-decoration:line-through;color:var(--text-2)}
+.mention{color:var(--theme);font-weight:600;background:var(--sel);border-radius:5px;padding:0 3px}
 .tl{margin-top:14px;display:flex;flex-direction:column;gap:14px}
 .tl-item{display:flex;gap:10px}.tl-item p{margin:2px 0}.blocked-txt{color:var(--c-red);font-size:12px}
 .prow{display:flex;gap:8px;align-items:center;flex-wrap:wrap}.num{width:96px;min-height:40px;border:1px solid var(--separator);border-radius:10px;background:var(--fill);padding:6px 10px}
