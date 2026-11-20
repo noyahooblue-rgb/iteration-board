@@ -18,7 +18,7 @@ import java.util.List;
 import java.util.Map;
 
 /**
- * 风险信号（设计 §7.6 规则版）：总览页与风险摘要报告共用。
+ * 风险信号：总览页与风险摘要报告共用。
  * 阈值取小组设置的 reminderThresholds（与自动提醒同一口径）。
  */
 @Service

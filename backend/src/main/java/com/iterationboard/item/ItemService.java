@@ -245,7 +245,7 @@ public class ItemService {
         TeamMember member = teamService.requireMember(teamId, user);
         Item item = requireItem(teamId, itemId);
         if (!canEdit(member, item, user)) throw ApiException.forbidden("仅创建人、负责人、PO 或组长可编辑事项");
-        // 修订二 §16.2：故事 PATCH——PO/组长可全改；负责人（非 PO/组长）只能改 description，其余字段 403。
+        // ：故事 PATCH——PO/组长可全改；负责人（非 PO/组长）只能改 description，其余字段 403。
         if (item.getType() == ItemType.STORY && member.getRole() != Role.LEADER && member.getRole() != Role.PO) {
             if (!transitionService.isOwner(item, user)) {
                 throw ApiException.forbidden("故事仅 PO、组长或负责人可编辑");
@@ -364,7 +364,7 @@ public class ItemService {
     }
 
     /**
-     * 软删除进回收站。修订二 §16.2：
+     * 软删除进回收站。：
      * 任务仅 PO/组长，且其下故事全部未开始（UNCLAIMED/NOT_STARTED 且无进展）才可删；
      * 故事仅 PO/组长且未开始时；独立事项（DEFECT/ANALYSIS/ADHOC）维持既有口径
      * （创建人未开始时或 PO/组长）。
@@ -555,7 +555,7 @@ public class ItemService {
             item.setBlockedAt(blocked ? Instant.now() : null);
             if (blocked && !was) {
                 activityRepo.save(new Activity(item, user, "BLOCK", item.getStatus().name(), item.getStatus().name(), blockReason));
-                // 新阻塞通知组长（设计 §3.5：标记阻塞自动通知组长）
+                // 新阻塞通知组长
                 memberRepo.findByTeamId(teamId).stream()
                         .filter(m -> m.getRole() == Role.LEADER)
                         .forEach(m -> notifyService.notify(m.getUser(), "BLOCK", item, user,
@@ -617,7 +617,7 @@ public class ItemService {
                 .filter(c -> c.getDeletedAt() == null).toList();
     }
 
-    /** 评论修改（修订二 §16.2）：仅作者，且发出后 15 分钟内，超时 403。 */
+    /** 评论修改（）：仅作者，且发出后 15 分钟内，超时 403。 */
     @Transactional
     public Comment patchComment(Long teamId, Long itemId, Long commentId, AppUser user, String content) {
         teamService.requireMember(teamId, user);
@@ -635,7 +635,7 @@ public class ItemService {
         return commentRepo.save(c);
     }
 
-    /** 评论删除（修订二 §16.2）：作者或组长可删（软删除）。 */
+    /** 评论删除（）：作者或组长可删（软删除）。 */
     @Transactional
     public void deleteComment(Long teamId, Long itemId, Long commentId, AppUser user) {
         TeamMember member = teamService.requireMember(teamId, user);
@@ -663,7 +663,7 @@ public class ItemService {
                 || transitionService.isOwner(item, user);
     }
 
-    // ---------- 检查清单（设计 §5.2 checklist_entry：真实持久化，M1 收尾接入） ----------
+    // ---------- 检查清单 ----------
 
     @Transactional(readOnly = true)
     public List<ChecklistEntry> checklist(Long teamId, Long itemId, AppUser user) {

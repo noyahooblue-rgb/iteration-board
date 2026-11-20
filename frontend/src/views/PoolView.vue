@@ -49,7 +49,7 @@ const sort = ref('new'), fType = ref(''), loadErr = ref('')
 const importOpen = ref(false)
 const drawerOpen = ref(false), openId = ref<number|null>(null)
 const unit = computed(()=> estimateUnitLabel(team.current))
-// 导入仅 PO（§16.2）：导入向导入口只对 PO 显示，与后端 requirePo 口径一致（§16.4 无权限不显示，D-3）
+// 导入仅 PO：导入向导入口只对 PO 显示，与后端 requirePo 口径一致
 const isPo = computed(()=> team.current?.myRole === 'PO')
 const cap = computed(()=> planning.value?.capacities.find(c=>c.userId===auth.user?.id))
 const myPoints = computed(()=> planning.value?.loads.find(l=>l.userId===auth.user?.id)?.points ?? 0)

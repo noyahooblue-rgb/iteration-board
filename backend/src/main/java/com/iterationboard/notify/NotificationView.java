@@ -9,7 +9,7 @@ import java.util.Map;
 public final class NotificationView {
     private NotificationView() { }
 
-    /** 事件类型 → 类别。ASSIGNMENT 与 NUDGE 不可关闭（设计 §3.7）。 */
+    /** 事件类型 → 类别。ASSIGNMENT 与 NUDGE 不可关闭。 */
     public static String categoryOf(String type) {
         if (type == null) return "SYSTEM";
         return switch (type) {

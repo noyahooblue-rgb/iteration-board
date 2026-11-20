@@ -1,4 +1,4 @@
-// Windows runner E2E (8eyn4mwp): drive a real browser DIRECTLY against the
+// Windows runner E2E: drive a real browser DIRECTLY against the
 // installed application's own address (http://localhost:18080) - no proxy,
 // no mock. Flow: open / -> login page (must be HTML, never a 401 JSON body)
 // -> register the first account (captcha read from the SVG the page itself

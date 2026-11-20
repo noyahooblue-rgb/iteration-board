@@ -2,9 +2,9 @@
 export class ApiError extends Error {
   constructor(public status:number, public code:string, message:string, public detail:any=null){ super(message) }
 }
-import { handleRequest as mockHandle, subscribeEvents as mockSubscribe, DEMO_ACCOUNTS, DEMO_SUBTITLE, DEMO_FILL_HINT, DEMO_REG_CLOSED_TEXT } from '@mock-adapter'
-export { DEMO_ACCOUNTS, DEMO_SUBTITLE, DEMO_FILL_HINT, DEMO_REG_CLOSED_TEXT }
-// 通知实时推送（设计 §8.4）：real 走 EventSource(SSE)；mock 走适配器内的页面级事件总线。返回退订函数。
+import { handleRequest as mockHandle, subscribeEvents as mockSubscribe, DEMO_ACCOUNTS, DEMO_SUBTITLE, DEMO_FILL_HINT, DEMO_REG_CLOSED_TEXT, DEMO_PASSWORD_FILL } from '@mock-adapter'
+export { DEMO_ACCOUNTS, DEMO_SUBTITLE, DEMO_FILL_HINT, DEMO_REG_CLOSED_TEXT, DEMO_PASSWORD_FILL }
+// 通知实时推送：real 走 EventSource(SSE)；mock 走适配器内的页面级事件总线。返回退订函数。
 export function subscribeEvents(cb: (n: any) => void): () => void {
   if (MODE === 'mock') return mockSubscribe(cb)
   const es = new EventSource('/api/v1/notifications/stream')
@@ -52,7 +52,7 @@ export async function requestForm<T=any>(method:string, path:string, form:FormDa
 }
 export const api = {
   get: <T=any>(p:string)=>request<T>('GET',p), post: <T=any>(p:string,b?:any)=>request<T>('POST',p,b), put: <T=any>(p:string,b?:any)=>request<T>('PUT',p,b), patch: <T=any>(p:string,b?:any)=>request<T>('PATCH',p,b), del: <T=any>(p:string)=>request<T>('DELETE',p),
-  // §16.3 幂等：创建类请求带 Idempotency-Key，同一用户意图（同键）重复提交只生效一次。
+  // 幂等：创建类请求带 Idempotency-Key，同一用户意图（同键）重复提交只生效一次。
   postKey: <T=any>(p:string,b:any,key:string)=>request<T>('POST',p,b,{ 'Idempotency-Key': key }),
   postForm: <T=any>(p:string,form:FormData)=>requestForm<T>('POST',p,form),
 }

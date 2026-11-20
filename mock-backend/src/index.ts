@@ -157,7 +157,7 @@ const validPwd = (p: string) => p.length >= 8 && /[A-Za-z]/.test(p) && /\d/.test
 // ---------------- 路由 ----------------
 let currentHeaders: Record<string, string> = {}
 const idemStore = new Map<string, { at: number; status: number; data: any }>()
-// §16.3 幂等键：同一键 10 分钟内重复提交只生效一次，重复请求直接返回首次结果。
+// 幂等键：同一键 10 分钟内重复提交只生效一次，重复请求直接返回首次结果。
 function idemWrap(scope: string, fn: () => { status: number; data: any }): { status: number; data: any } {
   const key = currentHeaders['Idempotency-Key'] ?? currentHeaders['idempotency-key']
   if (!key) return fn()
@@ -507,7 +507,7 @@ function scanReminders(teamId: number) {
     for (const uid of targets) { const mm = memberOf(teamId, uid); if (mm && awayOn(mm, today)) { const ld = leaderOf(teamId); if (ld && ld.userId !== uid) send(ld.userId, it, sig.rule + '_LEADER', `${sig.message}（负责人请假/出差，转提醒组长）`) } else send(uid, it, sig.rule, sig.message) } }
   return generated
 }
-// ---------------- 报告（修订二 §16.1） ----------------
+// ---------------- 报告（） ----------------
 // kind 与真实后端 ReportService 对齐：STANDUP_SUMMARY / WEEKLY / ITERATION_SUMMARY / PERSONAL_WEEKLY / RISK_SUMMARY。
 // 可见范围服务端过滤；一个周期一份（generate 命中已有返回 existed=true）；重新生成 60 秒节流；
 // 历史版本最多 5 个（覆盖前留存，可查看/恢复）；删除为软删除进回收站并记墓碑（自动任务不再重建该周期）。
@@ -1099,7 +1099,7 @@ function aiRoute(method: string, teamId: number, seg: string[], body: any) {
     r.aiGenerated = true; r.content = r.content.replace('本报告由系统按结构化数据自动生成（非 AI 生成）', '本报告由 AI 基于结构化数据汇总生成，数字以程序统计区为准')
     aiLog(teamId, u.id, 'summarize', t0); return { status: 201, data: { ...reportView(r), existed: false } } }
   if (sub === 'risk-summary' && method === 'GET') { const t0 = Date.now(); requireAi(teamId, 'riskSummary')
-    if (!(m.role === 'LEADER' || m.role === 'PO')) throw err(403, 'FORBIDDEN', '风险摘要仅组长、PO 可见（§16.2）')
+    if (!(m.role === 'LEADER' || m.role === 'PO')) throw err(403, 'FORBIDDEN', '风险摘要仅组长、PO 可见')
     const signals = riskSignals(teamId)
     const top = signals.slice(0, 3).map((sg: any) => ({ itemId: sg.itemId, itemCode: sg.itemCode, reason: sg.message, action: sg.rule === 'BLOCKED_LONG' ? '请负责人今天内同步阻塞进展，组长协助推进解除' : sg.rule === 'OVERDUE' ? '优先处理或申请调整截止日期' : '在站会上确认下一步与负责人' }))
     aiLog(teamId, u.id, 'risk-summary', t0); return { status: 200, data: { aiGenerated: true, top, signals } } }

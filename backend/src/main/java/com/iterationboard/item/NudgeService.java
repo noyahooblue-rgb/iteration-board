@@ -18,7 +18,7 @@ import java.util.List;
 import java.util.Map;
 
 /**
- * 单事项催一下与快捷回应（M3，设计 §3.6 / 契约 0.3.0）。
+ * 单事项催一下与快捷回应。
  * 口径与批量下发一致：同一发起人对同一事项每天一次；请假/出差者不提醒本人，
  * 改记给组长且不计入事项被催次数；轮到谁催谁（进行中催负责人、待验收催验收人）。
  */
@@ -153,7 +153,7 @@ public class NudgeService {
         notifyService.notify(nudge.getNudger(), "NUDGE_RESPONSE", item, user,
                 "对催一下的回应：" + label);
         if ("BLOCKED".equals(response) && !item.isBlocked()) {
-            // 快捷回应「卡住了」同步标记阻塞并通知组长（设计 §3.5）
+            // 快捷回应「卡住了」同步标记阻塞并通知组长
             item.setBlocked(true);
             item.setBlockReason("快捷回应：卡住了");
             item.setBlockedAt(Instant.now());

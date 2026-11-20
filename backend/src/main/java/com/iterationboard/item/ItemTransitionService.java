@@ -12,7 +12,7 @@ import java.time.Instant;
 import java.util.List;
 
 /**
-* 状态流转的唯一实现（设计 §8.2）：看板拖拽、详情页按钮、一句话更新、导入都调用此处。
+* 状态流转的唯一实现：看板拖拽、详情页按钮、一句话更新、导入都调用此处。
 * 规则唯一来源 contract/state-machine.md。
 * 校验顺序：版本(409) → 流转合法性(422) → 权限(403) → 原因必填(400)。
 * M2：负责人改为 item_owner 多名共同负责；新增 DECLINE；TASK 任务只允许 PO 的 APPROVE/CANCEL。

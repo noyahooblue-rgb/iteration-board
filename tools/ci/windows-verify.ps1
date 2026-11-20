@@ -11,19 +11,19 @@
 #
 # Phases:
 #   P1  fresh install (no-space path, --no-pause), full assertions
-#   P2  Playwright direct-visit flow + 3 screenshots (8eyn4mwp)
+#   P2  Playwright direct-visit flow + 3 screenshots
 #   P3  stop -> backup must SKIP with exit 0 while PG is stopped
-#       (hbztskr3) -> start
+# -> start
 #   P4  backup (auto) produces backup\<ts>\db.dump
 #   P5  restore that backup
 #   P6  upgrade in place from a second copy of the same package
 #   P7  uninstall keeping data (services gone, pgdata kept)
 #   P8  reinstall over the half-installed state (recovery path,
-#       re66unpr): existing config + pgdata are reused
+#       recovery path): existing config + pgdata are reused
 #   P9  uninstall again
 #   P10 install into a path WITH spaces (warning only, continues)
 #   P11 install with --autostart: both services AUTO_START
-#       (hbztskr3); P1 asserted DEMAND_START for the default mode
+#; P1 asserted DEMAND_START for the default mode
 # ============================================================
 $ErrorActionPreference = 'Continue'
 $Zip = 'C:\ibdl\iteration-board-offline-1.0.4.zip'

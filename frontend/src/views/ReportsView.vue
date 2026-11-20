@@ -138,7 +138,7 @@ async function load(){ if(!team.currentId) return; loading.value = true; loadErr
     if (!current.value && reports.value.length) openReport(reports.value[0])
   } catch(e){ loadErr.value = e instanceof ApiError ? e.message : '加载失败' } finally { loading.value = false } }
 onMounted(load)
-// §16.3：一次点击意图一个幂等键；失败重试复用同键，成功或换周期后作废重建。
+//：一次点击意图一个幂等键；失败重试复用同键，成功或换周期后作废重建。
 let genKey = ''
 watch([genKind, dateArg, weekArg, iterArg], ()=>{ genKey = '' })
 async function generateOrView(){ const g = currentGen.value; if (!g || generating.value) return

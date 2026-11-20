@@ -13,7 +13,7 @@
       <span>长期未更新 <b>{{health.staleCount}}</b></span>
       <span>完成率 <b>{{clampPct(health.completionRate)}}%</b></span>
     </div>
-    <p class="tiny">健康度（§7.5）：剩余估算与理想线对比、阻塞数、长期未更新数与完成率。</p>
+    <p class="tiny">健康度：剩余估算与理想线对比、阻塞数、长期未更新数与完成率。</p>
   </GlassPanel>
 
   <GlassPanel class="panel">

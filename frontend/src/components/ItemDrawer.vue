@@ -159,7 +159,7 @@ const taskRejectOpen = ref(false), reopenDraft = ref<number[]>([]), newStoryDraf
 const canInlineEdit = computed(()=> { const it = item.value; if (!it) return false; if (it.allowedActions) return it.allowedActions.includes('EDIT'); return !!auth.user && (team.current?.myRole==='LEADER' || team.current?.myRole==='PO' || it.creatorId===auth.user.id || it.ownerIds.includes(auth.user.id)) }) // Q11：优先读 DTO allowedActions
 const canManageLabels = computed(()=> team.current?.myRole==='LEADER' || team.current?.myRole==='PO')
 const editCommentId = ref<number|null>(null), editCommentText = ref(''), commentBusy = ref(false)
-// §16.2 删除收口：任务 PO/组长且其故事均未开始；故事 PO/组长且未开始（待认领/待开始）；独立事项维持原口径（后端再校验）。
+// 删除收口：任务 PO/组长且其故事均未开始；故事 PO/组长且未开始（待认领/待开始）；独立事项维持原口径（后端再校验）。
 const canDeleteItem = computed(()=> { const it = item.value; if (!it) return false; if (it.allowedActions) return it.allowedActions.includes('DELETE'); const r = team.current?.myRole
   if (it.type==='TASK') return (r==='LEADER' || r==='PO') && (it.taskStatus==='NOT_STARTED' || it.taskStatus==null) && children.value.every(c=> c.status==='UNCLAIMED' || c.status==='NOT_STARTED')
   if (it.type==='STORY') return (r==='LEADER' || r==='PO') && (it.status==='UNCLAIMED' || it.status==='NOT_STARTED')

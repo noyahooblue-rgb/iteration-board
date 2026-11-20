@@ -35,7 +35,7 @@ public class TeamService {
         this.notifyService = notifyService;
     }
 
-    /** 成员身份校验：非成员一律 404，不泄露小组存在性（设计 §11 / 契约）。 */
+    /** 成员身份校验：非成员一律 404，不泄露小组存在性。 */
     public TeamMember requireMember(Long teamId, AppUser user) {
         return memberRepo.findByTeamIdAndUserId(teamId, user.getId())
                 .orElseThrow(() -> ApiException.notFound("小组不存在或无权访问"));

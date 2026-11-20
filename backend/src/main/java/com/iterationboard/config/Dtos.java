@@ -81,7 +81,7 @@ public final class Dtos {
     public record PlanningDto(IterationDto iteration, List<PlanningGroupDto> groups,
                               List<PlanningLoadDto> loads, List<PlanningCapacityDto> capacities) {}
 
-    /** 检查清单条目（设计 §5.2 checklist_entry：事项、文字、是否完成、排序）。 */
+    /** 检查清单条目。 */
     public record ChecklistDto(Long id, Long itemId, String text, boolean done, int sortOrder) {
         public static ChecklistDto of(ChecklistEntry e) {
             return new ChecklistDto(e.getId(), e.getItem().getId(), e.getText(), e.isDone(), e.getSortOrder());

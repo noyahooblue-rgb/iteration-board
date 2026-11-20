@@ -12,7 +12,7 @@ import static org.springframework.test.web.servlet.request.MockMvcRequestBuilder
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.*;
 
 /**
- * 1.0.3（实测第四轮 8eyn4mwp）回归测试：
+ * 1.0.3（实测第四轮）回归测试：
  * - 未登录 GET / 返回 200 HTML（前端入口，不再是 401 JSON）；
  * - 未登录 GET /board（前端路由）经 SPA 回退返回 index.html；
  * - 未登录 GET /api/v1/teams 返回 401 JSON 且中文不乱码（UTF-8）；
