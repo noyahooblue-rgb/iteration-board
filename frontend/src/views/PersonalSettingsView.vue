@@ -50,7 +50,7 @@
       <span class="grow"><b>桌面通知</b><br/><span class="tiny">仅对「指派给我 / 邀请我认领 / @我 / 催我 / 待我验收」五类弹出系统通知，点击直达对应事项；平台标签页在前台时不弹，同一事项 30 秒内只弹一条。</span></span>
       <label class="switch"><input type="checkbox" :checked="!!prefs.DESKTOP_NOTIFICATIONS" :disabled="!secureOk" @change="toggleDesktop(($event.target as HTMLInputElement).checked)"/><span/></label>
     </div>
-    <p v-if="!secureOk" class="errbox2">当前访问地址不是安全来源（通过局域网 IP 用 http 访问时，浏览器不允许使用桌面通知），开关已置灰。请管理员按部署手册为平台启用 HTTPS 后再开启；标题未读数与图标角标不受影响，照常工作。</p>
+    <p v-if="!secureOk" class="errbox2">通过局域网地址访问时，浏览器不允许弹出桌面通知。标签页上的红点和标题数字照常提醒你；如需桌面通知，请联系平台管理员开启 HTTPS。</p>
     <p class="tiny">注意：只有平台网页处于打开状态（含后台标签页）时才能收到桌面通知，关掉浏览器就收不到；建议把平台固定为浏览器标签页。</p>
     <div class="prefrow">
       <span class="grow"><b>提示音</b><br/><span class="tiny">有新通知时播放一声短提示音（默认关闭）</span></span>
@@ -96,7 +96,7 @@ async function loadLeaveDue(){ if (!auth.user || !team.currentId) return; leaveD
     const r = await api.get(`/teams/${team.currentId}/members/${auth.user.id}/leave-due-items?${qs}`); leaveDue.value = Array.isArray(r) ? r : (r.items ?? []) } catch { leaveDue.value = [] } finally { leaveDueLoading.value = false } }
 async function toggleDesktop(v: boolean){
   if (v) {
-    if (!secureOk) { toast.show('当前不是安全来源，无法开启桌面通知'); return }
+    if (!secureOk) { toast.show('通过局域网地址访问时不能开启桌面通知（红点和标题数字照常提醒）；如需桌面通知请联系管理员开启 HTTPS'); return }
     if (!('Notification' in window)) { toast.show('当前浏览器不支持桌面通知'); (prefs as any).DESKTOP_NOTIFICATIONS = false; return }
     const perm = await Notification.requestPermission()
     if (perm !== 'granted') { toast.show('浏览器未授予通知权限，桌面通知未开启'); (prefs as any).DESKTOP_NOTIFICATIONS = false; return }

@@ -54,6 +54,22 @@ if not exist "%TARGET%\install.bat" (
   call :ib_pause
   exit /b 1
 )
+rem --- source version gate: IB_EXPECTED_FROM is stamped by the
+rem patch builder (empty = no gate, e.g. the full-package copy).
+rem The check runs before anything is stopped or copied; a
+rem mismatch stops here and changes nothing.
+set "IB_EXPECTED_FROM="
+if "%IB_EXPECTED_FROM%"=="" goto :ver_gate_done
+set "CURVER="
+if exist "%TARGET%\version.txt" set /p CURVER=<"%TARGET%\version.txt"
+if "%CURVER%"=="%IB_EXPECTED_FROM%" goto :ver_gate_done
+echo [ERROR] This patch upgrades version %IB_EXPECTED_FROM% only, but the
+echo [ERROR] install folder reports version "%CURVER%". Nothing was changed.
+echo [ERROR] Use the patch that matches your current version, or reinstall
+echo [ERROR] from the full package.
+call :ib_pause
+exit /b 1
+:ver_gate_done
 if not exist "%PATCHROOT%\SHA256SUMS.txt" (
   echo [ERROR] SHA256SUMS.txt is missing next to apply-patch.bat.
   echo [ERROR] Extract the complete patch zip first.

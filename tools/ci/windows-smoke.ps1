@@ -7,7 +7,8 @@
 # 用法：pwsh -File tools/ci/windows-smoke.ps1 [-ZipPath C:\ibdl\iteration-board-offline-1.1.0.zip]
 param(
   [string]$ZipPath = 'C:\ibdl\iteration-board-offline-1.1.0.zip',
-  [string]$WorkRoot = 'C:\ibwork-smoke'
+  [string]$WorkRoot = 'C:\ibwork-smoke',
+  [string]$ChromeExe = ''
 )
 $ErrorActionPreference = 'Continue'
 $script:Failures = @()
@@ -116,9 +117,22 @@ try {
     Check 'S4 login with new password works' ($null -ne $s2)
   }
 
-  Write-Host 'PHASE S5 uninstall'
+  Write-Host 'PHASE S5 Chrome 128 real-browser check (Chrome for Testing 128.0.6613.x)'
+  if ($ChromeExe -and (Test-Path $ChromeExe)) {
+    $shot = Join-Path $Evidence 'chrome128-login.png'
+    $domFile = Join-Path $Evidence 'chrome128-dom.html'
+    & $ChromeExe --headless=new --disable-gpu --no-sandbox --window-size=1440,900 --screenshot=$shot 'http://localhost:18080/' 2>&1 | Out-Null
+    Check 'S5 Chrome 128 renders login page (screenshot exists)' (Test-Path $shot)
+    & $ChromeExe --headless=new --disable-gpu --no-sandbox --dump-dom 'http://localhost:18080/' 2>&1 | Out-File -Encoding utf8 $domFile
+    $dom = Get-Content $domFile -Raw -ErrorAction SilentlyContinue
+    Check 'S5 Chrome 128 DOM contains app login marker' ($dom -match 'demo-box|login|登录')
+  } else {
+    Write-Host 'SKIP S5 (no ChromeExe provided)'
+  }
+
+  Write-Host 'PHASE S6 uninstall'
   $code = Run-Bat 'uninstall.bat' @('--yes', '--no-pause') 'smoke-uninstall.log'
-  Check 'S5 uninstall.bat exit 0' ($code -eq 0)
+  Check 'S6 uninstall.bat exit 0' ($code -eq 0)
 } catch {
   Write-Host "::error::SMOKE FATAL: $($_.Exception.Message)"
   $script:Failures += "FATAL: $($_.Exception.Message)"
@@ -137,6 +151,16 @@ try {
   if ($script:Failures.Count -gt 0) {
     Write-Host "SMOKE RESULT: $($script:Failures.Count) FAILURE(S)"
     $script:Failures | ForEach-Object { Write-Host "  - $_" }
+    # 证据 artifact 无权限下载时，关键日志尾巴经 annotation 表面化（同 windows-verify.ps1 口径）
+    foreach ($ln in @('smoke-install.log', 'smoke-stop.log', 'smoke-start.log', 'smoke-uninstall.log')) {
+      $lf = Join-Path $Evidence $ln
+      if (Test-Path $lf) {
+        $tail = (Get-Content $lf -Tail 25 | ForEach-Object { $_.Trim() }) -join ' // '
+        if ($tail.Length -gt 900) { $tail = $tail.Substring(0, 900) }
+        $tail = $tail -replace '%', '%25' -replace "`r", '%0D' -replace "`n", '%0A'
+        Write-Host "::error::LOGTAIL ${ln}: $tail"
+      }
+    }
     exit 1
   }
   Write-Host 'SMOKE RESULT: ALL PASS'

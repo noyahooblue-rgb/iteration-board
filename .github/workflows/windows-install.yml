@@ -67,10 +67,16 @@ jobs:
         with:
           name: ib-offline-package
           path: C:\ibdl
+      - name: 下载 Chrome for Testing 128（单位浏览器兼容门禁）
+        shell: pwsh
+        timeout-minutes: 5
+        run: |
+          Invoke-WebRequest -Uri 'https://storage.googleapis.com/chrome-for-testing-public/128.0.6613.120/win64/chrome-win64.zip' -OutFile 'C:\ibdl\cft128.zip'
+          Expand-Archive -Path 'C:\ibdl\cft128.zip' -DestinationPath 'C:\ibdl\cft128' -Force
       - name: Windows 冒烟（档 2）
         shell: pwsh
         timeout-minutes: 20
-        run: ./tools/ci/windows-smoke.ps1
+        run: ./tools/ci/windows-smoke.ps1 -ChromeExe 'C:\ibdl\cft128\chrome-win64\chrome.exe'
       - name: 上传冒烟证据（脚本输出/应用与 PG 日志/WinSW 日志/SCM 事件）
         if: always()
         uses: actions/upload-artifact@v4

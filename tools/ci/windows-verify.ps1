@@ -554,6 +554,33 @@ try {
   try { $ciAfterRb = Api-Login 'ci_admin' $script:CiAdminPw } catch { Write-Host "  (post-rollback login failed: $($_.Exception.Message))" }
   Check 'P14 marker account still logs in after rollback' ($null -ne $ciAfterRb)
 
+  # ---------- P14b: failed upgrade -> rollback -> data intact ----------
+  # Rehearsal required by the release gate: an upgrade whose payload is
+  # corrupt must fail loudly, and rollback.bat must restore the previous
+  # program + database with user data intact.
+  Phase 'P14b failed upgrade + rollback rehearsal'
+  $teamsBefore = $null
+  try {
+    $sB = Api-Login 'ci_admin' $script:CiAdminPw
+    $teamsBefore = (Api-Call $sB 'Get' '/teams/mine' $null).Body.Count
+  } catch { }
+  Expand-Archive -Path $Zip -DestinationPath (Join-Path $Work 'pkgBad') -Force
+  $RootBad = Join-Path $Work "pkgBad\$PkgDirName"
+  $jarBad = Join-Path $RootBad 'app\iteration-board.jar'
+  [IO.File]::WriteAllBytes($jarBad, (New-Object byte[] 4096))
+  $code = Run-Bat $RootBad 'upgrade.bat' @("`"$Root`"", '--yes', '--no-pause') 'p14b-upgrade-bad.log'
+  Check 'P14b corrupted upgrade.bat exits non-zero' ($code -ne 0)
+  $code = Run-Bat $Root 'rollback.bat' @('--yes', '--no-pause') 'p14b-rollback.log'
+  Check 'P14b rollback.bat exit 0 after failed upgrade' ($code -eq 0)
+  Check 'P14b App service Running after rollback' (Wait-State 'IterationBoardApp' 'Running' 180)
+  Check 'P14b meta endpoint 200 after rollback' (Http-Ok 'http://localhost:18080/api/v1/meta')
+  $teamsAfter = $null
+  try {
+    $sA = Api-Login 'ci_admin' $script:CiAdminPw
+    $teamsAfter = (Api-Call $sA 'Get' '/teams/mine' $null).Body.Count
+  } catch { }
+  Check 'P14b data intact: marker account teams unchanged' ($null -ne $teamsBefore -and $teamsAfter -eq $teamsBefore)
+
   # ---------- P7: uninstall keeping data ----------
   Phase 'P7 uninstall (keep data)'
   $code = Run-Bat $Root 'uninstall.bat' @('--yes', '--no-pause') 'p7-uninstall.log'

@@ -63,6 +63,8 @@ jobs:
       - name: 安装依赖
         working-directory: frontend
         run: npm ci
+      - name: Chrome 128 兼容检查（单位浏览器门禁：禁止 129+ CSS/JS 特性）
+        run: node tools/compat/check-chrome128.mjs
       - name: 写死颜色检查（深色主题定稿：组件层禁止新增字面颜色，白名单见脚本头）
         run: node tools/theme/check-hardcoded-colors.mjs
       - name: 真实（非 mock）构建
