@@ -1,6 +1,6 @@
 # Windows 冒烟（CI 档 2，Claude 裁定 2026-11-20 诊断策略）：
 #   S0 中文路径拦截断言（裁定 A，3wzzexbc：install 必须非 0 退出、
-#   输出路径提示、且未注册服务/未建数据目录）→ 解包到空格路径 →
+#   输出路径提示、且未注册服务/未初始化数据库）→ 解包到空格路径 →
 #   install（空格路径、中文 TEMP、chcp 936）→ 健康检查
 #   → 用密码文件登录 admin → 改密（应用应删除密码文件）→ stop → start
 #   → 用新密码登录 → uninstall。每步输出单独落证据目录，失败不中断
@@ -89,7 +89,7 @@ try {
   Check 'S0 install.bat blocked: path message printed' ($blockedLog -match 'The install folder path contains non-English characters')
   $svcCount = @(Get-Service -Name 'IterationBoardPG', 'IterationBoardApp' -ErrorAction SilentlyContinue).Count
   Check 'S0 install.bat blocked: no services registered' ($svcCount -eq 0)
-  Check 'S0 install.bat blocked: no data directory created' (-not (Test-Path (Join-Path $BlockedRoot 'data')))
+  Check 'S0 install.bat blocked: no database directory created' (-not (Test-Path (Join-Path $BlockedRoot 'data\pgdata')))
 
   Write-Host "PHASE S1 unpack -> $PkgParent"
   Expand-Archive -Path $ZipPath -DestinationPath $PkgParent -Force
