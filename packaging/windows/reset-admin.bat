@@ -99,7 +99,13 @@ if "%ADMIN_PW%"=="" (
 )
 
 rem --- apply the reset + audit row in one transaction ----------
-"%PSQL%" -h 127.0.0.1 -p 15432 -U postgres -d iteration_board -v ON_ERROR_STOP=1 -v login="%LOGIN%" -v pw="%ADMIN_PW%" -c "BEGIN; CREATE EXTENSION IF NOT EXISTS pgcrypto; UPDATE app_user SET password_hash = crypt(:'pw', gen_salt('bf', 10)), platform_admin = TRUE, must_change_password = TRUE, status = 'ACTIVE', failed_attempts = 0, locked_until = NULL, password_version = password_version + 1, updated_at = now() WHERE login_name = :'login'; INSERT INTO audit_log (team_id, actor_id, action, target_type, target_id, detail) SELECT NULL, id, 'ADMIN_RESET_VIA_SCRIPT', 'USER', id, 'Emergency reset by reset-admin.bat on the server: platform admin granted, temporary password set, must change at next login' FROM app_user WHERE login_name = :'login'; COMMIT;"
+set "IB_PW=%ADMIN_PW%"
+set "IB_LOGIN=%LOGIN%"
+powershell -NoProfile -Command "$sql = 'BEGIN; CREATE EXTENSION IF NOT EXISTS pgcrypto; UPDATE app_user SET password_hash = crypt(''__PW__'', gen_salt(''bf'', 10)), platform_admin = TRUE, must_change_password = TRUE, status = ''ACTIVE'', failed_attempts = 0, locked_until = NULL, password_version = password_version + 1, updated_at = now() WHERE login_name = ''__LOGIN__''; INSERT INTO audit_log (team_id, actor_id, action, target_type, target_id, detail) SELECT NULL, id, ''ADMIN_RESET_VIA_SCRIPT'', ''USER'', id, ''Emergency reset by reset-admin.bat on the server: platform admin granted, temporary password set, must change at next login'' FROM app_user WHERE login_name = ''__LOGIN__''; COMMIT;'; $t = $sql.Replace('__PW__', $env:IB_PW.Replace([char]39, [char]39 + [char]39)).Replace('__LOGIN__', $env:IB_LOGIN.Replace([char]39, [char]39 + [char]39)); [IO.File]::WriteAllText($env:TEMP + '\ib-reset.sql', $t, [Text.Encoding]::ASCII)"
+"%PSQL%" -h 127.0.0.1 -p 15432 -U postgres -d iteration_board -v ON_ERROR_STOP=1 -f "%TEMP%\ib-reset.sql"
+del "%TEMP%\ib-reset.sql" 2>nul
+set "IB_PW="
+set "IB_LOGIN="
 set "IBRC=%ERRORLEVEL%"
 set "PGPASSWORD="
 if not "%IBRC%"=="0" (

@@ -209,7 +209,11 @@ if "%ADMIN_PW%"=="" (
   echo [WARN] a normal account of that name, or contact support.
   exit /b 0
 )
-"%TARGET%\runtime\pgsql\bin\psql.exe" -h 127.0.0.1 -p 15432 -U postgres -d iteration_board -v ON_ERROR_STOP=1 -v pw="%ADMIN_PW%" -c "BEGIN; CREATE EXTENSION IF NOT EXISTS pgcrypto; INSERT INTO app_user (login_name, display_name, password_hash, platform_admin, status, must_change_password) VALUES ('admin', E'\u5e73\u53f0\u7ba1\u7406\u5458', crypt(:'pw', gen_salt('bf', 10)), TRUE, 'ACTIVE', TRUE); INSERT INTO audit_log (team_id, actor_id, action, target_type, target_id, detail) SELECT NULL, id, 'ADMIN_BOOTSTRAP_VIA_UPGRADE', 'USER', id, 'Built-in admin account created by upgrade.bat (P01): no admin account existed' FROM app_user WHERE login_name = 'admin'; COMMIT;" >nul 2>&1
+set "IB_PW=%ADMIN_PW%"
+powershell -NoProfile -Command "$sql = 'BEGIN; CREATE EXTENSION IF NOT EXISTS pgcrypto; INSERT INTO app_user (login_name, display_name, password_hash, platform_admin, status, must_change_password) VALUES (''admin'', E''\u5e73\u53f0\u7ba1\u7406\u5458'', crypt(''__PW__'', gen_salt(''bf'', 10)), TRUE, ''ACTIVE'', TRUE); INSERT INTO audit_log (team_id, actor_id, action, target_type, target_id, detail) SELECT NULL, id, ''ADMIN_BOOTSTRAP_VIA_UPGRADE'', ''USER'', id, ''Built-in admin account created by upgrade.bat (P01): no admin account existed'' FROM app_user WHERE login_name = ''admin''; COMMIT;'; [IO.File]::WriteAllText($env:TEMP + '\ib-boot.sql', $sql.Replace('__PW__', $env:IB_PW.Replace([char]39, [char]39 + [char]39)), [Text.Encoding]::ASCII)"
+"%TARGET%\runtime\pgsql\bin\psql.exe" -h 127.0.0.1 -p 15432 -U postgres -d iteration_board -v ON_ERROR_STOP=1 -f "%TEMP%\ib-boot.sql" >nul 2>&1
+del "%TEMP%\ib-boot.sql" 2>nul
+set "IB_PW="
 set "IBRC=%ERRORLEVEL%"
 set "PGPASSWORD="
 if not "%IBRC%"=="0" (

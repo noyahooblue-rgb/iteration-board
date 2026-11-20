@@ -30,7 +30,7 @@ const USERS = {
   po: { login: 'r5_po', name: '示例PO', password: 'R5Test1234' },
   m1: { login: 'r5_m1', name: '示例成员', password: 'R5Test1234' },
 }
-const TEAM = { name: '修订五示例组', code: 'R5T' }
+const TEAM = { name: '修订五示例组', code: 'RFT' }
 
 // 1.1.0 first-run overlays: close whichever is visible; the close button
 // must be the TOPMOST one (.last()) - verified pitfall from scenario-e/f.

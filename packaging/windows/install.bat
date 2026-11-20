@@ -365,7 +365,11 @@ if "%EXISTS%"=="0" call :gen_password
 if not "%ADMIN_PW%"=="" set "DO_BOOTSTRAP=1"
 if "%DO_BOOTSTRAP%"=="1" echo [INFO] Step 9: creating the built-in admin account ...
 if not "%DO_BOOTSTRAP%"=="1" goto :admin_sql_done
-"%ROOT%\runtime\pgsql\bin\psql.exe" -h 127.0.0.1 -p 15432 -U postgres -d iteration_board -v ON_ERROR_STOP=1 -v pw="%ADMIN_PW%" -c "BEGIN; CREATE EXTENSION IF NOT EXISTS pgcrypto; INSERT INTO app_user (login_name, display_name, password_hash, platform_admin, status, must_change_password) VALUES ('admin', E'\u5e73\u53f0\u7ba1\u7406\u5458', crypt(:'pw', gen_salt('bf', 10)), TRUE, 'ACTIVE', TRUE); INSERT INTO audit_log (team_id, actor_id, action, target_type, target_id, detail) SELECT NULL, id, 'ADMIN_BOOTSTRAP_VIA_INSTALL', 'USER', id, 'Built-in admin account created by install.bat (P01)' FROM app_user WHERE login_name = 'admin'; COMMIT;"
+set "IB_PW=%ADMIN_PW%"
+powershell -NoProfile -Command "$sql = 'BEGIN; CREATE EXTENSION IF NOT EXISTS pgcrypto; INSERT INTO app_user (login_name, display_name, password_hash, platform_admin, status, must_change_password) VALUES (''admin'', E''\u5e73\u53f0\u7ba1\u7406\u5458'', crypt(''__PW__'', gen_salt(''bf'', 10)), TRUE, ''ACTIVE'', TRUE); INSERT INTO audit_log (team_id, actor_id, action, target_type, target_id, detail) SELECT NULL, id, ''ADMIN_BOOTSTRAP_VIA_INSTALL'', ''USER'', id, ''Built-in admin account created by install.bat (P01)'' FROM app_user WHERE login_name = ''admin''; COMMIT;'; [IO.File]::WriteAllText($env:TEMP + '\ib-boot.sql', $sql.Replace('__PW__', $env:IB_PW.Replace([char]39, [char]39 + [char]39)), [Text.Encoding]::ASCII)"
+"%ROOT%\runtime\pgsql\bin\psql.exe" -h 127.0.0.1 -p 15432 -U postgres -d iteration_board -v ON_ERROR_STOP=1 -f "%TEMP%\ib-boot.sql"
+del "%TEMP%\ib-boot.sql" 2>nul
+set "IB_PW="
 echo [INFO] Step 9: bootstrap statement exit code = %ERRORLEVEL%
 if not errorlevel 1 set "ADMIN_CREATED=1"
 :admin_sql_done
