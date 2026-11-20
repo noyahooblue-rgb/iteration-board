@@ -334,6 +334,11 @@ try {
   await team2Row.click()
   await S.page.waitForSelector('aside.sidebar', { timeout: 15000 })
   await S.page.waitForTimeout(900)
+  // first entry into a team pops the 3-step onboarding guide (per user+team,
+  // AppShell.checkOnboarding) whose modal mask covers the page; a real user
+  // dismisses it - do the same before touching the bell
+  const skipGuide = S.page.locator('button', { hasText: '跳过引导' })
+  if (await skipGuide.count() > 0) { await skipGuide.first().click(); await S.page.waitForTimeout(500) }
   const inTeam2 = await assertInvariant(S.page, 'after team switch')
   if (inTeam2 !== 1) fail(`F7: unread in second team view should be 1, got ${inTeam2}`)
   // (g) SSE reconnect: a full reload re-subscribes (connected reconcile);
