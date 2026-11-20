@@ -432,11 +432,27 @@ try {
     if (-not $appSvc -and -not $pgSvc) { break }
     Start-Sleep -Seconds 3
   }
+  # A's postmaster can outlive its deleted service and keep port
+  # 15432 bound; B's install starts a temporary PG on that port and
+  # fails if it is taken (second 1.1.0 runner round). Wait for the
+  # port and the processes to clear (max 90 s), then force-kill any
+  # leftover postgres.exe - the runner machine is disposable.
+  $portDeadline = (Get-Date).AddSeconds(90)
+  while ((Get-Date) -lt $portDeadline) {
+    $listener = Get-NetTCPConnection -LocalPort 15432 -State Listen -ErrorAction SilentlyContinue
+    $pgProcs = Get-Process -Name 'postgres' -ErrorAction SilentlyContinue
+    if (-not $listener -and -not $pgProcs) { break }
+    Start-Sleep -Seconds 3
+  }
+  Get-Process -Name 'postgres' -ErrorAction SilentlyContinue | Stop-Process -Force -ErrorAction SilentlyContinue
+  Start-Sleep -Seconds 2
   Expand-Archive -Path $Zip -DestinationPath (Join-Path $Work 'pkgB') -Force
   $RootB = Join-Path $Work "pkgB\$PkgDirName"
   $script:RootB = $RootB
   $code = Run-Bat $RootB 'install.bat' @('--no-pause') 'p13-install-b.log'
   Check 'P13 install B exit 0' ($code -eq 0)
+  $bPgLog = Join-Path $RootB 'logs\pg-init.log'
+  if (Test-Path $bPgLog) { Copy-Item $bPgLog (Join-Path $Evidence 'p13-pg-init.log') -Force }
   Assert-Installed $RootB 'P13-B'
   $migPkgArg = $null
   if ($migVol) {
@@ -575,7 +591,16 @@ if ($script:Failures.Count -gt 0) {
   if ($script:Failures -match 'P1 ') { Dump-Tail 'p1-install.log' }
   if ($script:Failures -match 'P1b') { Dump-Tail 'p1-install.log'; Dump-Tail 'p1b-stop.log'; Dump-Tail 'p1b-start.log' }
   if ($script:Failures -match 'P12') { Dump-Tail 'p12-stop.log'; Dump-Tail 'p12-start.log' }
-  if ($script:Failures -match 'P13') { Dump-Tail 'p13-install-b.log' 25; Dump-Tail 'p13-uninstall-a.log'; Dump-Tail 'p13-export.log' }
+  if ($script:Failures -match 'P13') { Dump-Tail 'p13-install-b.log' 25; Dump-Tail 'p13-uninstall-a.log'; Dump-Tail 'p13-export.log'; Dump-Tail 'p13-pg-init.log' 25 }
+  if ($script:Failures -match 'P1b') {
+    $p1log = Join-Path $Evidence 'p1-install.log'
+    if (Test-Path $p1log) {
+      $hits = (Select-String -Path $p1log -Pattern 'Step 9|admin|WARN' | Select-Object -First 14 | ForEach-Object { $_.Line.Trim() }) -join ' // '
+      if ($hits.Length -gt 900) { $hits = $hits.Substring(0, 900) }
+      $hits = $hits -replace '%', '%25' -replace "`r", '%0D' -replace "`n", '%0A'
+      Write-Host "::error::P1-ADMIN-LINES: $hits"
+    }
+  }
   if ($script:Failures -match 'P2 ') { Dump-Tail 'p2-playwright.log' }
   if ($script:Failures -match 'P2b ') { Dump-Tail 'p2b-scenario-e.log' }
   if ($script:Failures -match 'P2c ') { Dump-Tail 'p2c-scenario-f.log' }

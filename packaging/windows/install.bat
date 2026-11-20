@@ -350,7 +350,10 @@ if "%DBPWD%"=="" (
 )
 set "PGPASSWORD=%DBPWD%"
 set "EXISTS="
-for /f "usebackq delims=" %%R in (`"%ROOT%\runtime\pgsql\bin\psql.exe" -h 127.0.0.1 -p 15432 -U postgres -d iteration_board -t -A -c "SELECT count(*) FROM app_user WHERE login_name = 'admin'"`) do set "EXISTS=%%R"
+"%ROOT%\runtime\pgsql\bin\psql.exe" -h 127.0.0.1 -p 15432 -U postgres -d iteration_board -t -A -c "SELECT count(*) FROM app_user WHERE login_name = 'admin'" > "%TEMP%\ib-q-exists.txt" 2>nul
+if exist "%TEMP%\ib-q-exists.txt" set /p EXISTS=<"%TEMP%\ib-q-exists.txt"
+if exist "%TEMP%\ib-q-exists.txt" del "%TEMP%\ib-q-exists.txt"
+echo [INFO] Step 9: existing 'admin' account count = "%EXISTS%"
 rem The psql call below is intentionally NOT inside a
 rem parenthesized block: its SQL string contains parentheses,
 rem which cmd block parsing does not tolerate reliably.
@@ -359,8 +362,10 @@ if "%EXISTS%"=="0" (
   call :gen_password
   if not "%ADMIN_PW%"=="" set "DO_BOOTSTRAP=1"
 )
+if "%DO_BOOTSTRAP%"=="1" echo [INFO] Step 9: creating the built-in admin account ...
 if not "%DO_BOOTSTRAP%"=="1" goto :admin_sql_done
-"%ROOT%\runtime\pgsql\bin\psql.exe" -h 127.0.0.1 -p 15432 -U postgres -d iteration_board -v ON_ERROR_STOP=1 -v pw="%ADMIN_PW%" -c "BEGIN; CREATE EXTENSION IF NOT EXISTS pgcrypto; INSERT INTO app_user (login_name, display_name, password_hash, platform_admin, status, must_change_password) VALUES ('admin', E'\u5e73\u53f0\u7ba1\u7406\u5458', crypt(:'pw', gen_salt('bf', 10)), TRUE, 'ACTIVE', TRUE); INSERT INTO audit_log (team_id, actor_id, action, target_type, target_id, detail) SELECT NULL, id, 'ADMIN_BOOTSTRAP_VIA_INSTALL', 'USER', id, 'Built-in admin account created by install.bat (P01)' FROM app_user WHERE login_name = 'admin'; COMMIT;" >nul 2>&1
+"%ROOT%\runtime\pgsql\bin\psql.exe" -h 127.0.0.1 -p 15432 -U postgres -d iteration_board -v ON_ERROR_STOP=1 -v pw="%ADMIN_PW%" -c "BEGIN; CREATE EXTENSION IF NOT EXISTS pgcrypto; INSERT INTO app_user (login_name, display_name, password_hash, platform_admin, status, must_change_password) VALUES ('admin', E'\u5e73\u53f0\u7ba1\u7406\u5458', crypt(:'pw', gen_salt('bf', 10)), TRUE, 'ACTIVE', TRUE); INSERT INTO audit_log (team_id, actor_id, action, target_type, target_id, detail) SELECT NULL, id, 'ADMIN_BOOTSTRAP_VIA_INSTALL', 'USER', id, 'Built-in admin account created by install.bat (P01)' FROM app_user WHERE login_name = 'admin'; COMMIT;"
+echo [INFO] Step 9: bootstrap statement exit code = %ERRORLEVEL%
 if not errorlevel 1 set "ADMIN_CREATED=1"
 :admin_sql_done
 set "PGPASSWORD="

@@ -194,7 +194,9 @@ for /f "tokens=1,2" %%A in ('findstr /C:"password:" "%TARGET%\config\application
 if "%DBPWD%"=="" exit /b 0
 set "PGPASSWORD=%DBPWD%"
 set "EXISTS="
-for /f "usebackq delims=" %%R in (`"%TARGET%\runtime\pgsql\bin\psql.exe" -h 127.0.0.1 -p 15432 -U postgres -d iteration_board -t -A -c "SELECT count(*) FROM app_user WHERE login_name = 'admin'"`) do set "EXISTS=%%R"
+"%TARGET%\runtime\pgsql\bin\psql.exe" -h 127.0.0.1 -p 15432 -U postgres -d iteration_board -t -A -c "SELECT count(*) FROM app_user WHERE login_name = 'admin'" > "%TEMP%\ib-q-exists.txt" 2>nul
+if exist "%TEMP%\ib-q-exists.txt" set /p EXISTS=<"%TEMP%\ib-q-exists.txt"
+if exist "%TEMP%\ib-q-exists.txt" del "%TEMP%\ib-q-exists.txt"
 if not "%EXISTS%"=="0" (
   set "PGPASSWORD="
   exit /b 0
