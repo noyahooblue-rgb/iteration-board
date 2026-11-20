@@ -244,7 +244,13 @@ try {
   $AdminInitPw = Read-AdminInitialPassword $Root
   Check 'P1b initial admin password parsed, length >= 16' ($null -ne $AdminInitPw -and $AdminInitPw.Length -ge 16)
   if ($AdminInitPw) {
-    $adminS = Api-Login 'admin' $AdminInitPw
+    $adminS = $null
+    try { $adminS = Api-Login 'admin' $AdminInitPw } catch {
+      $st = ''
+      try { $st = (Invoke-WebRequest -UseBasicParsing -Uri 'http://localhost:18080/api/v1/admin/bootstrap/status' -TimeoutSec 10).Content } catch { $st = "bootstrap/status unreachable: $($_.Exception.Message)" }
+      Write-Host "::error::P1-DB-ADMIN bootstrap/status after failed admin login: $st"
+      throw
+    }
     $meAdmin = Api-Me $adminS
     Check 'P1b admin login: platformAdmin=true' ($meAdmin.platformAdmin -eq $true)
     Check 'P1b admin login: mustChangePassword=true' ($meAdmin.mustChangePassword -eq $true)
@@ -608,13 +614,13 @@ if ($script:Failures.Count -gt 0) {
   Write-Host "WINDOWS VERIFY: $($script:Failures.Count) FAILURE(S)"
   $script:Failures | ForEach-Object { Write-Host "  - $_" }
   if ($script:Failures -match 'P1 ') { Dump-Tail 'p1-install.log' }
-  if ($script:Failures -match 'P1b') { Dump-Tail 'p1-install.log'; Dump-Tail 'p1b-stop.log'; Dump-Tail 'p1b-start.log' }
+  if ($script:Failures -match 'P1b|FATAL') { Dump-Tail 'p1-install.log' 30; Dump-Tail 'p1b-stop.log'; Dump-Tail 'p1b-start.log' }
   if ($script:Failures -match 'P12') { Dump-Tail 'p12-stop.log'; Dump-Tail 'p12-start.log' }
   if ($script:Failures -match 'P13') { Dump-Tail 'p13-install-b.log' 25; Dump-Tail 'p13-uninstall-a.log'; Dump-Tail 'p13-export.log'; Dump-Tail 'p13-pg-init.log' 25; Dump-Tail 'p13b-app.log' 30; Dump-Tail 'p13b-IterationBoardApp.out.log' 30 }
-  if ($script:Failures -match 'P1b') {
+  if ($script:Failures -match 'P1b|FATAL') {
     $p1log = Join-Path $Evidence 'p1-install.log'
     if (Test-Path $p1log) {
-      $hits = (Select-String -Path $p1log -Pattern 'Step 9|admin|WARN' | Select-Object -First 14 | ForEach-Object { $_.Line.Trim() }) -join ' // '
+      $hits = (Select-String -Path $p1log -Pattern 'Step 9|admin rows|ERROR|WARN|psql' | Select-Object -First 14 | ForEach-Object { $_.Line.Trim() }) -join ' // '
       if ($hits.Length -gt 900) { $hits = $hits.Substring(0, 900) }
       $hits = $hits -replace '%', '%25' -replace "`r", '%0D' -replace "`n", '%0A'
       Write-Host "::error::P1-ADMIN-LINES: $hits"
