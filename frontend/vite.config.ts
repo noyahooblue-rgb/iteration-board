@@ -13,6 +13,8 @@ export default defineConfig(({ mode }) => {
     define: { __IB_SHOWCASE__: JSON.stringify(showcase) },
     resolve: { alias: { '@': fileURLToPath(new URL('./src', import.meta.url)), '@mock': fileURLToPath(new URL('../mock-backend/src', import.meta.url)), '@mock-adapter': fileURLToPath(new URL(apiMode === 'mock' ? './src/api/mock-adapter.ts' : './src/api/null-adapter.ts', import.meta.url)) } },
     server: { fs: { allow: [fileURLToPath(new URL('..', import.meta.url))] }, proxy: { '/api': 'http://localhost:8080' } },
-    build: { chunkSizeWarningLimit: 1200 },
+    // 构建目标钉死 chrome128（wb89pp2z）：与 browserslist "chrome >= 128" 及
+    // tools/compat 兼容检查同口径，保证产物语法/特性不超出单位浏览器 Chrome 128。
+    build: { target: ['chrome128'], chunkSizeWarningLimit: 1200 },
   }
 })

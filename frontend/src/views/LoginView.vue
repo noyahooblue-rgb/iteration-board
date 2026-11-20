@@ -5,7 +5,7 @@
     <p class="small sub">{{ meta.demoMode && DEMO_SUBTITLE ? DEMO_SUBTITLE : '小组的事项、进展与阻塞，一眼看清。' }}</p></div>
   <SegmentedControl v-model="tab" :options="[{label:'登录',value:'login'},{label:'注册',value:'register'}]" class="tabs"/>
   <template v-if="tab==='login'">
-    <AppInput v-model="f.loginName" label="登录名" placeholder="请输入登录名" :error="e.loginName"/>
+    <AppInput v-model="f.loginName" data-testid="login-form" label="登录名" placeholder="请输入登录名" :error="e.loginName"/>
     <AppInput v-model="f.password" label="密码" type="password" placeholder="请输入密码" :error="e.password" style="margin-top:10px"/>
     <div v-if="needCaptcha" class="caprow">
       <AppInput v-model="f.captchaCode" label="图形验证码" placeholder="4 位字符"/>

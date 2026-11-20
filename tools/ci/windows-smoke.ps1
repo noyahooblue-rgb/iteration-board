@@ -136,23 +136,31 @@ try {
     Check 'S4 login with new password works' ($null -ne $s2)
   }
 
-  Write-Host 'PHASE S5 Chrome 128 real-browser check (Chrome for Testing 128.0.6613.x)'
+  Write-Host 'PHASE S5 Chrome 128 compatibility gate (Playwright-driven, wb89pp2z)'
+  # 弃用 chrome --dump-dom（挂载前快照、无脚本错误可见性）。改用 Playwright
+  # 驱动 Chrome for Testing 128 本体跑 tools/windows-e2e/chrome128-check.mjs：
+  # 等 html[data-ib-ready="1"] 与 [data-testid="login-form"]（各 30 秒），
+  # 收集 console/pageerror/失败请求；再以 Playwright 自带 Chromium 129
+  # 同脚本跑对照组。证据（截图/DOM/JSON 报告）由脚本写入 $Evidence。
+  $repoRoot = (Resolve-Path (Join-Path $PSScriptRoot '..\..')).Path
+  $e2eDir = Join-Path $repoRoot 'tools\windows-e2e'
+  $env:IB_EVIDENCE = $Evidence
+  $s5a = 1
   if ($ChromeExe -and (Test-Path $ChromeExe)) {
-    $shot = Join-Path $Evidence 'chrome128-login.png'
-    $domFile = Join-Path $Evidence 'chrome128-dom.html'
-    & $ChromeExe --headless=new --disable-gpu --no-sandbox --window-size=1440,900 --screenshot=$shot 'http://localhost:18080/' 2>&1 | Out-Null
-    Check 'S5 Chrome 128 renders login page (screenshot exists)' (Test-Path $shot)
-    $dom = ''
-    for ($i = 0; $i -lt 3; $i++) {
-      & $ChromeExe --headless=new --disable-gpu --no-sandbox --dump-dom 'http://localhost:18080/' 2>&1 | Out-File -Encoding utf8 $domFile
-      $dom = Get-Content $domFile -Raw -ErrorAction SilentlyContinue
-      if ($dom -match 'demo-box|login|登录') { break }
-      Start-Sleep -Seconds 2
-    }
-    Check 'S5 Chrome 128 DOM contains app login marker' ($dom -match 'demo-box|login|登录')
+    $env:IB_CHROME_EXE = $ChromeExe
+    $env:IB_LABEL = 'chrome128'
+    Push-Location $e2eDir
+    try { & node chrome128-check.mjs *>> (Join-Path $Evidence 's5-chrome128.log'); $s5a = $LASTEXITCODE } finally { Pop-Location }
+    Check 'S5 Chrome 128 (CfT 128.0.6613) mounts app + login form, no pageerror' ($s5a -eq 0)
   } else {
-    Write-Host 'SKIP S5 (no ChromeExe provided)'
+    Write-Host 'SKIP S5 Chrome 128 run (no ChromeExe provided)'
   }
+  $s5b = 1
+  Remove-Item Env:IB_CHROME_EXE -ErrorAction SilentlyContinue
+  $env:IB_LABEL = 'chromium129'
+  Push-Location $e2eDir
+  try { & node chrome128-check.mjs *>> (Join-Path $Evidence 's5-chromium129.log'); $s5b = $LASTEXITCODE } finally { Pop-Location }
+  Check 'S5 control (bundled Chromium 129) mounts app + login form, no pageerror' ($s5b -eq 0)
 
   Write-Host 'PHASE S6 uninstall'
   $code = Run-Bat 'uninstall.bat' @('--yes', '--no-pause') 'smoke-uninstall.log'
@@ -177,7 +185,7 @@ try {
     $script:Failures | ForEach-Object { Write-Host "  - $_" }
     Write-Host "::error::SMOKE FAILURES: $($script:Failures -join ' | ')"
     # 证据 artifact 无权限下载时，关键日志尾巴经 annotation 表面化（同 windows-verify.ps1 口径）
-    foreach ($ln in @('smoke-blocked.log', 'smoke-install.log', 'smoke-stop.log', 'smoke-start.log', 'smoke-uninstall.log')) {
+    foreach ($ln in @('smoke-blocked.log', 'smoke-install.log', 'smoke-stop.log', 'smoke-start.log', 'smoke-uninstall.log', 's5-chrome128.log', 's5-chromium129.log')) {
       $lf = Join-Path $Evidence $ln
       if (Test-Path $lf) {
         $tail = (Get-Content $lf -Tail 25 | ForEach-Object { $_.Trim() }) -join ' // '

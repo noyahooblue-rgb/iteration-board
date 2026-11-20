@@ -15,9 +15,9 @@ on:
   workflow_dispatch:
     inputs:
       tier:
-        description: '重跑档位：all=冒烟+全量 E2E；smoke=只跑档 2 冒烟'
+        description: '重跑档位：all=冒烟+全量 E2E；smoke=只跑档 2 冒烟；e2e=跳过冒烟单独跑档 3（P14b 等与冒烟解耦，wb89pp2z）'
         type: choice
-        options: [all, smoke]
+        options: [all, smoke, e2e]
         default: all
 
 jobs:
@@ -58,10 +58,21 @@ jobs:
   # install → 健康 → 密码文件登录 admin → 改密 → stop → start → uninstall。
   windows-smoke:
     needs: build-package
+    if: ${{ inputs.tier != 'e2e' }}
     runs-on: windows-latest
-    timeout-minutes: 30
+    timeout-minutes: 40
     steps:
       - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+      - name: 安装 Playwright（S5 门禁脚本 + 自带 Chromium 129 对照组）
+        shell: pwsh
+        timeout-minutes: 10
+        working-directory: tools/windows-e2e
+        run: |
+          npm install --no-fund --no-audit
+          npx playwright install chromium
       - name: 下载安装包
         uses: actions/download-artifact@v4
         with:
@@ -86,10 +97,11 @@ jobs:
           retention-days: 7
           if-no-files-found: warn
 
-  # 档 3（全量 E2E 剧本）：只在档 2 冒烟全绿后跑。
+  # 档 3（全量 E2E 剧本）：默认只在档 2 冒烟全绿后跑；workflow_dispatch
+  # 选 tier=e2e 时与冒烟解耦单独跑（wb89pp2z：P14b 回滚演练等先行验证）。
   windows-install:
     needs: [build-package, windows-smoke]
-    if: ${{ inputs.tier != 'smoke' }}
+    if: ${{ always() && inputs.tier != 'smoke' && needs.build-package.result == 'success' && (needs.windows-smoke.result == 'success' || needs.windows-smoke.result == 'skipped') }}
     runs-on: windows-latest
     timeout-minutes: 150
     steps:
