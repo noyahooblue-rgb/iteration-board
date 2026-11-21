@@ -239,6 +239,13 @@ try {
   # platform admin. The e_* accounts of scenario E do not exist yet
   # at this point and are never touched here.
   Phase 'P1b P01 admin bootstrap flow'
+  # rc2 (hsa43amn): the deleted unauthenticated admin endpoints must stay
+  # unreachable — session-less requests to /admin/** return 401.
+  $anonS = New-Object Microsoft.PowerShell.Commands.WebRequestSession
+  $anonReset = Api-Call $anonS 'Get' '/admin/reset-admin' $null
+  Check 'P1b unauthenticated /admin/reset-admin is 401 (rc2 security fix)' ($anonReset.Status -eq 401)
+  $anonBackup = Api-Call $anonS 'Get' '/admin/backup-status' $null
+  Check 'P1b unauthenticated /admin/backup-status is 401' ($anonBackup.Status -eq 401)
   $AdminPwFile = Join-Path $Root 'config\admin-initial-password.txt'
   Check 'P1b admin-initial-password.txt exists after fresh install' (Test-Path $AdminPwFile)
   $AdminInitPw = Read-AdminInitialPassword $Root
@@ -246,9 +253,17 @@ try {
   if ($AdminInitPw) {
     $adminS = $null
     try { $adminS = Api-Login 'admin' $AdminInitPw } catch {
+      # rc2 (hsa43amn): the unauthenticated /admin/bootstrap/status endpoint was
+      # removed for security; diagnostics now read the app log instead of HTTP.
       $st = ''
-      try { $st = (Invoke-WebRequest -UseBasicParsing -Uri 'http://localhost:18080/api/v1/admin/bootstrap/status' -TimeoutSec 10).Content } catch { $st = "bootstrap/status unreachable: $($_.Exception.Message)" }
-      Write-Host "::error::P1-DB-ADMIN bootstrap/status after failed admin login: $st"
+      try {
+        $appLog = Join-Path $Root 'logs\app.log'
+        if (Test-Path $appLog) {
+          $st = ((Get-Content $appLog -Tail 300 | Select-String -Pattern 'AdminBootstrap|bootstrap|管理员' | Select-Object -Last 10) | Out-String).Trim()
+        }
+        if (-not $st) { $st = 'no bootstrap-related lines found in logs\app.log tail' }
+      } catch { $st = "app log unreadable: $($_.Exception.Message)" }
+      Write-Host "::error::P1-DB-ADMIN app-log bootstrap lines after failed admin login: $st"
       throw
     }
     $meAdmin = Api-Me $adminS
@@ -264,6 +279,8 @@ try {
     $ciS = Api-Login 'ci_admin' $script:CiAdminPw
     $meCi = Api-Me $ciS
     Check 'P1b newly registered account is NOT platform admin' ($meCi.platformAdmin -eq $false)
+    $ciForbidden = Api-Call $ciS 'Get' '/admin/backup-status' $null
+    Check 'P1b non-admin session /admin/backup-status is 403 (rc2 security fix)' ($ciForbidden.Status -eq 403)
     $CiId = $meCi.id
     $grant = Api-Call $adminS 'Patch' "/admin/users/$CiId/platform-admin" @{ platformAdmin = $true }
     Check 'P1b grant platform admin to personal account succeeds' ($grant.Status -eq 200 -and $grant.Body.platformAdmin -eq $true)

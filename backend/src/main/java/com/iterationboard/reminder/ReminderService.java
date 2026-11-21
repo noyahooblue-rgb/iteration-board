@@ -17,7 +17,9 @@ import java.util.List;
 /**
  * 自动提醒：定时扫描与组长「立即扫描」共用同一实现。
  * 去重：同一规则、同一事项、同一接收人当天最多一条（按已生成的同类通知判定）。
- * 请假/出差成员不提醒本人，改提醒组长；逾期在每个工作日重复提醒（靠每日去重实现逐日一条）。
+ * 请假/出差成员不提醒本人，改提醒组长。
+ * 逾期提醒为例外（裁定 hsa43amn 二.1）：两段式全程只各发一次——逾期当天提醒负责人一次；
+ * 到第 3 个工作日仍未完成，再提醒负责人并抄送组长一次；之后不再推送。
  */
 @Service
 public class ReminderService {
@@ -105,10 +107,17 @@ public class ReminderService {
                         "事项「" + i.getTitle() + "」阻塞已超过 " + th.blockedWorkdays() + " 个工作日，请协调解除");
             }
             if (i.getDueDate() != null && i.getDueDate().isBefore(today)) {
-                for (AppUser o : owners) created += send(team, members, leaders, o, "REMINDER_OVERDUE", i, today,
+                // 裁定（hsa43amn 二.1）两段式：逾期当天提醒负责人一次（REMINDER_OVERDUE，全程去重）；
+                // 第 3 个工作日仍未完成时再提醒负责人并抄送组长一次（REMINDER_OVERDUE_ESCALATED，全程去重）；
+                // 之后不再推送，逾期天数标记由卡片与「我的事项」持续显示。
+                for (AppUser o : owners) created += sendOnceEver(team, members, leaders, o, "REMINDER_OVERDUE", i, today,
                         "事项「" + i.getTitle() + "」已逾期（截止 " + i.getDueDate() + "），请更新进展或调整计划");
-                for (AppUser l : leaders) created += sendRaw(l, "REMINDER_OVERDUE", i,
-                        "事项「" + i.getTitle() + "」已逾期（截止 " + i.getDueDate() + "）");
+                if (Workdays.workdaysBetween(i.getDueDate(), today, settings) >= 3) {
+                    for (AppUser o : owners) created += sendOnceEver(team, members, leaders, o, "REMINDER_OVERDUE_ESCALATED", i, today,
+                            "事项「" + i.getTitle() + "」已逾期 3 个工作日仍未完成（截止 " + i.getDueDate() + "），请更新进展或调整计划");
+                    for (AppUser l : leaders) created += sendOnceEverRaw(l, "REMINDER_OVERDUE_ESCALATED", i,
+                            "事项「" + i.getTitle() + "」已逾期 3 个工作日仍未完成（截止 " + i.getDueDate() + "），请协调跟进");
+                }
             } else if (i.getDueDate() != null
                     && Workdays.workdaysBetween(today, i.getDueDate(), settings) <= th.dueSoonWorkdays()
                     && !i.getDueDate().isBefore(today)) {
@@ -137,6 +146,28 @@ public class ReminderService {
         if (recipient == null) return 0;
         Instant startOfToday = platformTime.startOfTodayInstant();
         boolean exists = !notificationRepo.findRecent(recipient.getId(), type, item.getId(), startOfToday).isEmpty();
+        if (exists) return 0;
+        notifyService.notify(recipient, type, item, null, content);
+        return 1;
+    }
+
+    /** 与 send 相同的收件人解析（请假/出差改发组长），但同一接收人+事项+类型历史上只发一次。 */
+    private int sendOnceEver(Team team, List<TeamMember> members, List<AppUser> leaders, AppUser recipient,
+                             String type, Item item, LocalDate today, String content) {
+        AppUser target = recipient;
+        TeamMember tm = members.stream().filter(m -> m.getUser().getId().equals(recipient.getId())).findFirst().orElse(null);
+        boolean away = tm != null && ("LEAVE".equals(tm.getMemberStatus()) || "TRAVEL".equals(tm.getMemberStatus()))
+                && tm.isAwayOn(today);
+        if (away && !leaders.isEmpty() && leaders.stream().noneMatch(l -> l.getId().equals(recipient.getId()))) {
+            target = leaders.get(0);
+            content = "（原负责人请假/出差）" + content;
+        }
+        return sendOnceEverRaw(target, type, item, content);
+    }
+
+    private int sendOnceEverRaw(AppUser recipient, String type, Item item, String content) {
+        if (recipient == null) return 0;
+        boolean exists = !notificationRepo.findRecent(recipient.getId(), type, item.getId(), Instant.EPOCH).isEmpty();
         if (exists) return 0;
         notifyService.notify(recipient, type, item, null, content);
         return 1;

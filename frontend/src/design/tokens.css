@@ -10,7 +10,7 @@
   --c-red:#FF3B30; --c-green:#34C759; --c-yellow:#FFCC00; --c-indigo:#5856D6;
   --theme:#007AFF; --theme-soft:rgba(0,122,255,.12);
   --theme-blue:#007AFF; --theme-indigo:#5856D6; --theme-violet:#AF52DE; --theme-pink:#FF2D55; --theme-orange:#FF9500; --theme-green:#34C759; --theme-teal:#30B0C7;
-  --bg:#dceBff; --text:#10233F; --text-2:rgba(16,35,63,.64); --text-3:rgba(16,35,63,.44);
+  --bg:#dceBff; --text:#10233F; --text-2:rgba(16,35,63,.68); --text-3:rgba(16,35,63,.44);
   --field:rgba(255,255,255,.72); --field-brd:rgba(16,60,130,.14); --track:rgba(16,60,130,.12); --glass-brd:rgba(255,255,255,.72); --glass-hi:rgba(255,255,255,.9); --hover:rgba(0,122,255,.08); --sel:rgba(0,122,255,.14);
   --card:rgba(255,255,255,.86); --card-solid:#ffffff; --fill:rgba(90,100,130,.10);
   --glass-rgb:255,255,255; --glass-alpha:.55; --glass-blur:20px;
@@ -28,7 +28,9 @@
   /* ===== 定稿令牌名（§3/§4）浅色映射：值与上方既有浅色令牌逐一等值，视觉不变 ===== */
   --bg-base:#DCEBFF; --bg-card:#FFFFFF; --bg-hover:rgba(0,122,255,.08);
   --text-1:#10233F;
-  --primary:#007AFF; --primary-btn:var(--theme); --primary-btn-hover:var(--theme); --primary-btn-active:var(--theme);
+  --primary:#007AFF; --primary-btn:#0071E3; --primary-btn-hover:#0068D6; --primary-btn-active:#0058B0;
+  /* 主按钮三态为 1.1.0-rc2 对比度裁定（hsa43amn 二.4）的固定值，不再跟随 --theme 团队色；
+     --theme / --primary 等其他 #007AFF 用途不变。浅色 --text-2 .64→.68 同出此裁定。 */
   --primary-soft:rgba(0,122,255,.14);
   --ai:#FFD60A; --ai-soft:rgba(255,214,10,.12); --ai-brd:rgba(255,214,10,.45);
   --danger:#FF3B30; --unread:#FF3B30; --danger-bg-min:rgba(255,59,48,.06); --primary-soft-12:rgba(0,122,255,.12);
@@ -90,7 +92,7 @@
   --bg-raised:#2F3848; --line:rgba(255,255,255,.10);
   --bg-base:#1A202B; --bg-card:#252D3B; --bg-hover:#3A4456;
   --text-1:#F4F7FB;
-  --primary:#409CFF; --primary-btn:#0071E3; --primary-btn-hover:#0A7CF0; --primary-btn-active:#0062C4;
+  --primary:#409CFF; --primary-btn:#0071E3; --primary-btn-hover:#0068D6; --primary-btn-active:#0058B0;
   --primary-soft:rgba(64,156,255,.20);
   --ai:#FFD60A; --ai-soft:rgba(255,214,10,.12); --ai-brd:rgba(255,214,10,.45);
   --danger:#FF6961; --unread:#FF453A; --danger-bg-min:rgba(255,105,97,.08); --primary-soft-12:rgba(64,156,255,.16);
@@ -144,7 +146,7 @@
   --bg-raised:#3A3A3C; --line:rgba(255,255,255,.10);
   --bg-base:#1C1C1E; --bg-card:#2C2C2E; --bg-hover:#48484A;
   --text-1:#F5F5F7;
-  --primary:#409CFF; --primary-btn:#0071E3; --primary-btn-hover:#0A7CF0; --primary-btn-active:#0062C4;
+  --primary:#409CFF; --primary-btn:#0071E3; --primary-btn-hover:#0068D6; --primary-btn-active:#0058B0;
   --primary-soft:rgba(64,156,255,.20);
   --ai:#FFD60A; --ai-soft:rgba(255,214,10,.12); --ai-brd:rgba(255,214,10,.45);
   --danger:#FF6961; --unread:#FF453A; --danger-bg-min:rgba(255,105,97,.08); --primary-soft-12:rgba(64,156,255,.16);
@@ -189,7 +191,7 @@
 @media print{
   :root{
     --bg:#FFFFFF; --bg-base:#FFFFFF; --bg-card:#FFFFFF; --card:#FFFFFF; --card-solid:#FFFFFF; --bg-raised:#FFFFFF;
-    --text:#10233F; --text-1:#10233F; --text-2:rgba(16,35,63,.64); --text-3:rgba(16,35,63,.44);
+    --text:#10233F; --text-1:#10233F; --text-2:rgba(16,35,63,.68); --text-3:rgba(16,35,63,.44);
     --line:rgba(16,60,130,.16); --field-brd:rgba(16,60,130,.14); --separator:rgba(60,60,90,.14);
     --glass:#FFFFFF; --field:#FFFFFF; --track:rgba(16,60,130,.12); --hover:rgba(0,122,255,.08); --sel:rgba(0,122,255,.14);
     --shadow:none; --shadow-lift:none; --shadow-card:none; --shadow-card-soft:none; --shadow-card-sm:none;

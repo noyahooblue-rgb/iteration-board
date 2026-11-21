@@ -73,7 +73,7 @@ import AppShell from '../components/AppShell.vue'; import ItemDrawer from '../co
 import { useBusy } from '../utils/busy'
 import AvatarStack from '../components/AvatarStack.vue'; import ProgressBar from '../components/ProgressBar.vue'; import SegmentedControl from '../components/SegmentedControl.vue'
 import { api, ApiError } from '../api/http'; import { TYPE_META, STORY_CAT_META, itemColor, estimateUnitLabel, type Item, type ItemStatus } from '../api/types'
-import { localToday } from '../utils/datetime'
+import { localToday, overdueDays } from '../utils/datetime'
 import { isPromptDismissed } from '../utils/progressPrompt'
 import { useTeam } from '../stores/team'; import { useAuth } from '../stores/auth'; import { useToast } from '../stores/toast'
 const team = useTeam(), auth = useAuth(), toast = useToast(), busy = useBusy()
@@ -118,7 +118,7 @@ function laneCol(lane:Lane, s:ItemStatus){ return lane.items.filter(i=>i.status=
 function sortedLane(lane:Lane, s:ItemStatus){ return [...laneCol(lane,s)].sort((a,b)=> Number(b.blocked)-Number(a.blocked) || a.id-b.id) }
 function estSum(list:Item[]){ return list.reduce((n,i)=>n+(i.estimate??0),0) }
 function fmtDue(d:string){ const m = d.match(/^(\d+)-(\d+)-(\d+)$/); return m ? `${Number(m[2])}月${Number(m[3])}日` : d }
-function dueSuffix(it:Item){ const c = dueClass(it); return c==='over' ? ' · 已逾期' : c==='today' ? ' · 今天' : '' }
+function dueSuffix(it:Item){ const c = dueClass(it); return c==='over' ? ` · 已逾期 ${overdueDays(it.dueDate)} 天` : c==='today' ? ' · 今天' : '' }
 function showBar(it:Item){ return it.status==='IN_PROGRESS' || it.status==='IN_REVIEW' || it.status==='DONE' }
 function barPct(it:Item){ return it.progressPercent }
 // 修订五 B：卡片小标记——「可提交验收」= 进度 100% 且进行中且用户已选过「暂不」（dismiss 存本地，见 utils/progressPrompt）

@@ -24,3 +24,14 @@ export function localToday(): string {
 export function localDateStr(d: Date): string {
   return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`
 }
+// 已逾期天数（1.1.0-rc2 裁定 hsa43amn 二.1）：dueDate（'YYYY-MM-DD'）距本地今天的日历天数；
+// 未逾期（到期日为今天或更晚）或无日期返回 0。用 UTC 午夜差避免夏令时跨日误差。
+export function overdueDays(dueDate?: string | null): number {
+  if (!dueDate) return 0
+  const m = dueDate.match(/^(\d+)-(\d+)-(\d+)$/)
+  if (!m) return 0
+  const now = new Date()
+  const due = Date.UTC(Number(m[1]), Number(m[2]) - 1, Number(m[3]))
+  const today = Date.UTC(now.getFullYear(), now.getMonth(), now.getDate())
+  return Math.max(0, Math.round((today - due) / 86400000))
+}

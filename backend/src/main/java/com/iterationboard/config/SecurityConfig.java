@@ -6,9 +6,12 @@ import com.iterationboard.repo.*;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
 import org.springframework.http.HttpStatus;
+import org.springframework.security.authorization.AuthorizationDecision;
+import org.springframework.security.authorization.AuthorizationManager;
 import org.springframework.security.config.annotation.web.builders.HttpSecurity;
 import org.springframework.security.config.http.SessionCreationPolicy;
 import org.springframework.security.core.userdetails.User;
+import org.springframework.security.web.access.intercept.RequestAuthorizationContext;
 import org.springframework.security.core.userdetails.UserDetailsService;
 import org.springframework.security.core.userdetails.UsernameNotFoundException;
 import org.springframework.security.crypto.bcrypt.BCryptPasswordEncoder;
@@ -61,8 +64,27 @@ public class SecurityConfig {
         };
     }
 
+    /**
+     * 平台管理员授权（按库中当前标记判定，不用登录时的会话权限快照）：
+     * 授予/撤销平台管理员对已登录会话立即生效——与各管理接口内 requirePlatformAdmin 的
+     * 数据库校验同口径。若用 hasRole（会话快照），被撤销者的旧会话会残留管理员权限、
+     * 新授予者又要重登才生效，两头都不对。
+     */
+    static AuthorizationManager<RequestAuthorizationContext> platformAdminFromDb(UserRepo userRepo) {
+        return (authSupplier, ctx) -> {
+            var auth = authSupplier.get();
+            if (auth == null || !auth.isAuthenticated() || "anonymousUser".equals(String.valueOf(auth.getPrincipal()))) {
+                return new AuthorizationDecision(false);
+            }
+            boolean admin = userRepo.findByLoginName(auth.getName())
+                    .map(u -> u.isPlatformAdmin() && "ACTIVE".equals(u.getStatus()) && u.getDeletedAt() == null)
+                    .orElse(false);
+            return new AuthorizationDecision(admin);
+        };
+    }
+
     @Bean
-    public SecurityFilterChain filterChain(HttpSecurity http, ObjectMapper objectMapper) throws Exception {
+    public SecurityFilterChain filterChain(HttpSecurity http, ObjectMapper objectMapper, UserRepo userRepo) throws Exception {
         http
             // SPA 口径（契约 0.2.0）：前端把 XSRF-TOKEN Cookie 原值放进 X-XSRF-TOKEN 请求头。
             // 必须配 plain 的 CsrfTokenRequestAttributeHandler——Spring Security 默认的 XOR 掩码处理器
@@ -75,9 +97,14 @@ public class SecurityConfig {
             .addFilterAfter(new CsrfTokenMaterializationFilter(), CsrfFilter.class)
             .sessionManagement(sm -> sm.sessionCreationPolicy(SessionCreationPolicy.IF_REQUIRED))
             .authorizeHttpRequests(auth -> auth
-                    .requestMatchers("/api/v1/meta", "/api/v1/auth/captcha", "/api/v1/auth/register", "/api/v1/auth/login",
-                            "/api/v1/admin/bootstrap", "/api/v1/admin/bootstrap/status", "/api/v1/admin/reset-admin").permitAll()
-                    .requestMatchers("/v3/api-docs/**", "/v3/api-docs.yaml", "/swagger-ui/**", "/swagger-ui.html", "/openapi.yaml").permitAll()
+                    // 免登录白名单（严格四项，新增须先改 AdminEndpointSecurityTest 的白名单断言——相当于强制评审）。
+                    // 1.1.0-rc2 安全裁定（hsa43amn）：原 /api/v1/admin/bootstrap、bootstrap/status、reset-admin
+                    // 三个免登录管理员接口已删除（建号走 AdminBootstrapRunner、重置走 --ib.ops=reset-admin 运维命令）。
+                    .requestMatchers("/api/v1/meta", "/api/v1/auth/captcha", "/api/v1/auth/register", "/api/v1/auth/login").permitAll()
+                    // 平台管理接口一律要求平台管理员（按库判定，见 platformAdminFromDb；接口内另有二次校验）。
+                    .requestMatchers("/api/v1/admin/**").access(platformAdminFromDb(userRepo))
+                    // 接口文档默认关闭（springdoc 开关，见 application.yml）；开启时也仅平台管理员可访问。
+                    .requestMatchers("/v3/api-docs/**", "/v3/api-docs.yaml", "/swagger-ui/**", "/swagger-ui.html", "/openapi.yaml").access(platformAdminFromDb(userRepo))
                     // 1.0.3 修复（实测第四轮）：只对 /api/** 要求认证；/api/** 以外是
                     // 前端静态资源与 SPA 路由，全部放行（否则未登录打开首页直接 401
                     // JSON，永远看不到登录页）。SPA 路由的 index.html 回退见 SpaController。

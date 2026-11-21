@@ -27,7 +27,7 @@
           <p v-if="it.blocked" class="kblock"><OctagonAlert :size="14"/> 阻塞：{{it.blockReason}}</p>
           <p v-if="it.rejected || readyMark(it) || (it.estimate==null && it.status==='IN_PROGRESS')" class="kmarks"><span v-if="it.rejected" class="mark red">已退回</span><span v-if="readyMark(it)" class="mark green">可提交验收</span><span v-if="it.estimate==null && it.status==='IN_PROGRESS'" class="mark amber">未估算</span></p>
           <ProgressBar v-if="it.status==='IN_PROGRESS'||it.status==='IN_REVIEW'" :value="it.progressPercent" style="margin:6px 0"/>
-          <p class="tiny">上次更新：{{it.lastProgressAt ? fmt(it.lastProgressAt) : '暂无'}}<span v-if="it.dueDate"> · 截止 {{fmtDue(it.dueDate)}}</span></p>
+          <p class="tiny">上次更新：{{it.lastProgressAt ? fmt(it.lastProgressAt) : '暂无'}}<span v-if="it.dueDate"> · 截止 {{fmtDue(it.dueDate)}}</span><span v-if="isOver(it)" class="over"> · 已逾期 {{overdueDays(it.dueDate)}} 天</span></p>
           <div class="acts">
             <template v-if="g.key==='doing'">
               <AppButton variant="ghost" @click="openProgress(it)">更新</AppButton>
@@ -60,7 +60,7 @@
         <h3><CalendarDays :size="16"/>近期关键日期</h3>
         <p v-if="team.iteration" class="srow"><span class="grow">{{team.iteration.name}} 结束</span><span class="tiny">{{team.iteration.endDate}}</span></p>
         <p v-for="kd in keyDates" :key="kd.id" class="srow"><span class="grow">{{kd.title}}（{{ {FREEZE:'封版',RELEASE:'投产',REVIEW:'评审',OTHER:'关键日期'}[kd.category] }}）</span><span class="tiny">{{kd.date}}</span></p>
-        <button v-for="it in dueSoon" :key="it.id" class="srow press" @click="openId=it.id;drawerOpen=true"><span class="grow">{{it.code}} {{it.title}}</span><span class="tiny" :class="{over: isOver(it)}">{{fmtDue(it.dueDate!)}}</span></button>
+        <button v-for="it in dueSoon" :key="it.id" class="srow press" @click="openId=it.id;drawerOpen=true"><span class="grow">{{it.code}} {{it.title}}</span><span class="tiny" :class="{over: isOver(it)}">{{fmtDue(it.dueDate!)}}<template v-if="isOver(it)"> · 已逾期 {{overdueDays(it.dueDate)}} 天</template></span></button>
         <p v-if="!dueSoon.length && !keyDates.length" class="small">近期没有关键日期与我负责事项的截止日期。</p>
         <RouterLink to="/iterations" class="tiny" style="color:var(--theme)">迭代关键日期在「迭代」页登记 →</RouterLink>
       </GlassPanel>
@@ -81,7 +81,7 @@ import { Zap, OctagonAlert, BellRing, CalendarDays, MailPlus } from 'lucide-vue-
 import AppShell from '../components/AppShell.vue'; import GlassPanel from '../components/GlassPanel.vue'; import AppButton from '../components/AppButton.vue'; import ProgressBar from '../components/ProgressBar.vue'; import ProgressRing from '../components/ProgressRing.vue'; import ItemDrawer from '../components/ItemDrawer.vue'
 import QuickUpdateBox from '../components/QuickUpdateBox.vue'
 import { api, ApiError, apiMode } from '../api/http'; import { itemColor, type Item } from '../api/types'
-import { fmtDateTime, localToday } from '../utils/datetime'
+import { fmtDateTime, localToday, overdueDays } from '../utils/datetime'
 import { isPromptDismissed } from '../utils/progressPrompt'
 function readyMark(it:Item){ return it.status==='IN_PROGRESS' && it.progressPercent>=100 && isPromptDismissed(it.id) }
 import { useTeam } from '../stores/team'; import { useAuth } from '../stores/auth'; import { useToast } from '../stores/toast'

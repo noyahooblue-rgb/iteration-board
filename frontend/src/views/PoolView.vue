@@ -23,7 +23,7 @@
         <div class="krow foot">
           <span class="meta-ico"><User :size="13"/>发布人 {{team.memberName(it.creatorId)}}</span>
           <span v-if="it.estimate!=null" class="meta-ico">{{it.estimate}} {{unit}}</span>
-          <span v-if="it.dueDate" class="meta-ico"><Calendar :size="13"/>{{fmtDue(it.dueDate)}}</span>
+          <span v-if="it.dueDate" class="meta-ico" :class="{over: overdueDays(it.dueDate)>0}"><Calendar :size="13"/>{{fmtDue(it.dueDate)}}<template v-if="overdueDays(it.dueDate)>0"> · 已逾期 {{overdueDays(it.dueDate)}} 天</template></span>
           <span class="meta-ico"><Clock :size="13"/>已等待 {{waitDays(it)}} 天</span>
         </div>
         <div class="krow" style="margin-top:10px"><AppButton @click="claim(it)"><Check :size="15"/>认领</AppButton><AppButton variant="ghost" @click="openId=it.id;drawerOpen=true">详情</AppButton></div>
@@ -43,6 +43,7 @@ import AppShell from '../components/AppShell.vue'; import AppButton from '../com
 import ImportWizard from '../components/ImportWizard.vue'
 import { api, ApiError } from '../api/http'; import { TYPE_META, itemColor, estimateUnitLabel, type Item, type Planning } from '../api/types'
 import { useTeam } from '../stores/team'; import { useAuth } from '../stores/auth'; import { useUi } from '../stores/ui'; import { useToast } from '../stores/toast'
+import { overdueDays } from '../utils/datetime'
 const team = useTeam(), auth = useAuth(), ui = useUi(), toast = useToast()
 const items = ref<Item[]>([]), tasks = ref<Item[]>([]), planning = ref<Planning|null>(null), loading = ref(false)
 const sort = ref('new'), fType = ref(''), loadErr = ref('')
@@ -89,6 +90,6 @@ async function claim(it:Item){
 .krow{display:flex;align-items:center;gap:6px;flex-wrap:wrap}.krow.foot{margin-top:8px}
 .ktitle{font-size:15px;font-weight:600;line-height:1.4;margin:7px 0}
 .desc{display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden}
-.prio{font-size:13px;font-weight:700}.meta-ico{display:inline-flex;gap:4px;align-items:center;font-size:12px;color:var(--text-2)}
+.prio{font-size:13px;font-weight:700}.meta-ico{display:inline-flex;gap:4px;align-items:center;font-size:12px;color:var(--text-2)}.meta-ico.over{color:var(--c-red);font-weight:700}
 .btag{font-size:11px;font-weight:600;color:var(--violet-deep);background:var(--violet-soft);border-radius:6px;padding:1px 6px}
 </style>

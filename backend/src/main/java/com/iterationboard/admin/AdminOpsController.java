@@ -8,7 +8,6 @@ import com.iterationboard.domain.AppUser;
 import com.iterationboard.repo.TeamMemberRepo;
 import com.iterationboard.repo.UserRepo;
 import com.iterationboard.team.HandoverService;
-import jakarta.servlet.http.HttpServletRequest;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
 import org.springframework.transaction.annotation.Transactional;
@@ -18,14 +17,20 @@ import java.util.LinkedHashMap;
 import java.util.Map;
 
 /**
- * 平台管理写接口（1.1.0）：脚本引导/应急重置、授予/撤销平台管理员、停用/启用/删除账号。
+ * 平台管理接口（1.1.0）：授予/撤销平台管理员、停用/启用/删除账号、备份状态。
+ * 全部接口要求平台管理员会话（SecurityConfig 对 /api/v1/admin/** 按库中标记授权，
+ * 本类再以 requirePlatformAdmin 二次校验）。
  * 保护规则：最后一名「启用中」的平台管理员不可被撤销、停用或删除；admin 账号不可删除；
  * 停用账号前必须完成其在每个所在小组的离组交接（P05 强校验）。
+ *
+ * 1.1.0-rc2 安全裁定（hsa43amn）：原免登录的 POST /bootstrap、GET /bootstrap/status、
+ * POST /reset-admin 三接口已删除——它们是「脚本调 HTTP」旧方案的遗留，局域网内任何人
+ * 可借此改密/自建管理员接管平台。建号改由 AdminBootstrapRunner 在应用内完成，
+ * 应急重置改走 `java -jar app.jar --ib.ops=reset-admin` 运维命令（ResetAdminOpsRunner）。
  */
 @RestController
 @RequestMapping("/api/v1/admin")
 public class AdminOpsController {
-    private final AdminBootstrapService bootstrapService;
     private final UserRepo userRepo;
     private final TeamMemberRepo memberRepo;
     private final HandoverService handoverService;
@@ -33,11 +38,10 @@ public class AdminOpsController {
     private final CurrentUser currentUser;
     private final BackupStatusService backupStatusService;
 
-    public AdminOpsController(AdminBootstrapService bootstrapService, UserRepo userRepo,
+    public AdminOpsController(UserRepo userRepo,
                               TeamMemberRepo memberRepo, HandoverService handoverService,
                               AuditService auditService, CurrentUser currentUser,
                               BackupStatusService backupStatusService) {
-        this.bootstrapService = bootstrapService;
         this.userRepo = userRepo;
         this.memberRepo = memberRepo;
         this.handoverService = handoverService;
@@ -46,33 +50,8 @@ public class AdminOpsController {
         this.backupStatusService = backupStatusService;
     }
 
-    public record BootstrapRequest(String loginName, String password) {}
-    public record ResetAdminRequest(String loginName, String temporaryPassword) {}
     public record PlatformAdminRequest(boolean platformAdmin) {}
     public record StatusRequest(String status) {}
-
-    // ---------- 脚本调用（无会话；口令校验见 AdminBootstrapService） ----------
-
-    @PostMapping("/bootstrap")
-    public ResponseEntity<Dtos.UserDto> bootstrap(@RequestBody BootstrapRequest req, HttpServletRequest request) {
-        bootstrapService.checkToken(request);
-        AppUser u = bootstrapService.bootstrap(req.loginName(), req.password());
-        return ResponseEntity.status(HttpStatus.CREATED).body(Dtos.UserDto.of(u));
-    }
-
-    @GetMapping("/bootstrap/status")
-    public Map<String, Object> bootstrapStatus(@RequestParam(required = false) String loginName,
-                                               HttpServletRequest request) {
-        bootstrapService.checkToken(request);
-        return bootstrapService.status(loginName);
-    }
-
-    @PostMapping("/reset-admin")
-    @Transactional
-    public Dtos.UserDto resetAdmin(@RequestBody ResetAdminRequest req, HttpServletRequest request) {
-        bootstrapService.checkToken(request);
-        return Dtos.UserDto.of(bootstrapService.resetAdmin(req.loginName(), req.temporaryPassword()));
-    }
 
     // ---------- 管理员会话操作 ----------
 

@@ -29,13 +29,20 @@ spring:
     enabled: true
     locations: classpath:db/migration
 
+# 接口文档（Swagger UI / OpenAPI）：生产默认关闭（1.1.0-rc2 安全裁定 hsa43amn）。
+# 需要时把 IB_API_DOCS_ENABLED / IB_SWAGGER_UI_ENABLED 改为 true 后重启应用；
+# 开启后也仅限已登录的平台管理员访问（见 SecurityConfig）。
+springdoc:
+  api-docs:
+    enabled: ${IB_API_DOCS_ENABLED:false}
+  swagger-ui:
+    enabled: ${IB_SWAGGER_UI_ENABLED:false}
+
 app:
-  # 程序版本（1.1.0）：与 pom 版本一致；构建日期由 spring-boot build-info 注入（见 VersionInfo）。
-  version: 1.1.0
+  # 程序版本（1.1.0-rc2）：与 pom 版本一致；构建日期由 spring-boot build-info 注入（见 VersionInfo）。
+  version: 1.1.0-rc2
   # 数据目录（贴图等运行期文件与 backup-status.json 所在目录；脚本侧约定，见 BackupStatusService）
   data-dir: ${APP_DATA_DIR:data}
-  # 安装/升级脚本调用管理员引导与 reset-admin 的共享口令（可选）：设置后脚本须带 X-Bootstrap-Token 头。
-  bootstrap-token: ${APP_BOOTSTRAP_TOKEN:}
   # 管理员启动初始化（1.1.0 裁定第一步）：AdminBootstrapRunner 建 admin 后把初始密码写到此文件
   # （相对路径按进程工作目录解析，安装布局下即安装根目录的 config\admin-initial-password.txt）；
   # admin 首次改密成功后应用自动删除该文件。reset-admin 运维命令也把新密码写到此文件。

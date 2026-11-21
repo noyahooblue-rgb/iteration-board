@@ -41,6 +41,10 @@ class V110IntegrationTest {
     @Autowired TeamRepo teamRepo;
     @Autowired JdbcTemplate jdbc;
     @Autowired com.iterationboard.reminder.LeaveReminderService leaveReminderService;
+    @Autowired com.iterationboard.reminder.ReminderService reminderService;
+    @Autowired com.iterationboard.admin.AdminBootstrapTxService bootstrapTxService;
+    @Autowired com.iterationboard.admin.ResetAdminOpsService resetAdminOpsService;
+    @Autowired org.springframework.security.crypto.password.PasswordEncoder passwordEncoder;
     @Autowired PlatformTime platformTime;
     @jakarta.persistence.PersistenceContext jakarta.persistence.EntityManager entityManager;
 
@@ -146,12 +150,12 @@ class V110IntegrationTest {
         return r.getResponse().getContentAsString();
     }
 
-    /** 引导创建 admin 并完成首次改密，返回可用会话。 */
+    /** 在库中种入 admin 并完成首次改密，返回可用会话（rc2 起 HTTP 引导接口已删除，建号走应用内 Runner）。 */
     private MockHttpSession bootstrapAdmin() throws Exception {
-        mvc.perform(post("/api/v1/admin/bootstrap").with(csrf())
-                        .contentType(MediaType.APPLICATION_JSON)
-                        .content("{\"password\":\"InitPass1234\"}"))
-                .andExpect(status().isCreated());
+        jdbc.update("insert into app_user (login_name, display_name, password_hash, avatar_color, platform_admin, status,"
+                        + " must_change_password, failed_attempts, password_version, created_at, updated_at)"
+                        + " values ('admin', '平台管理员', ?, 'indigo', true, 'ACTIVE', true, 0, 0, now(), now())",
+                passwordEncoder.encode("InitPass1234"));
         MockHttpSession admin = login("admin", "InitPass1234");
         mvc.perform(post("/api/v1/auth/change-password").session(admin).with(csrf())
                         .contentType(MediaType.APPLICATION_JSON)
@@ -163,39 +167,38 @@ class V110IntegrationTest {
     // ---------- P01 ----------
 
     @Test
-    void p01_bootstrap_createsAdmin_forceChangePassword_oneShot() throws Exception {
-        MvcResult created = mvc.perform(post("/api/v1/admin/bootstrap").with(csrf())
-                        .contentType(MediaType.APPLICATION_JSON)
-                        .content("{\"password\":\"InitPass1234\"}"))
-                .andExpect(status().isCreated()).andReturn();
-        String body = created.getResponse().getContentAsString();
-        assertThat((String) JsonPath.read(body, "$.loginName")).isEqualTo("admin");
-        assertThat((Boolean) JsonPath.read(body, "$.platformAdmin")).isTrue();
-        assertThat((Boolean) JsonPath.read(body, "$.mustChangePassword")).isTrue();
+    void p01_bootstrapRunner_createsAdmin_forceChangePassword_oneShot() throws Exception {
+        // rc2（hsa43amn）：建号走应用内 AdminBootstrapTxService（AdminBootstrapRunner 的事务部分），
+        // HTTP 引导接口已删除（其不可达由 AdminEndpointSecurityTest 断言）。
+        var result = bootstrapTxService.bootstrapAdmin();
+        assertThat(result.outcome())
+                .isEqualTo(com.iterationboard.admin.AdminBootstrapTxService.Outcome.CREATED);
+        String initPw = result.generatedPassword();
+        assertThat(initPw).isNotBlank();
+        Long adminRow = jdbc.queryForObject(
+                "select count(*) from app_user where login_name='admin' and platform_admin and must_change_password",
+                Long.class);
+        assertThat(adminRow).isEqualTo(1L);
 
-        // 一次性：admin 已存在时再次引导 → 409
-        mvc.perform(post("/api/v1/admin/bootstrap").with(csrf())
-                        .contentType(MediaType.APPLICATION_JSON)
-                        .content("{\"password\":\"InitPass1234\"}"))
-                .andExpect(status().isConflict());
+        // 一次性：admin 已是平台管理员时再次初始化 → ALREADY_ADMIN，不改动账号
+        var again = bootstrapTxService.bootstrapAdmin();
+        assertThat(again.outcome())
+                .isEqualTo(com.iterationboard.admin.AdminBootstrapTxService.Outcome.ALREADY_ADMIN);
 
         // 未改密前只能调改密类接口
-        MockHttpSession admin = login("admin", "InitPass1234");
+        MockHttpSession admin = login("admin", initPw);
         mvc.perform(get("/api/v1/teams/mine").session(admin))
                 .andExpect(status().isForbidden())
                 .andExpect(jsonPath("$.code").value("MUST_CHANGE_PASSWORD"));
 
-        // 脚本轮询口径：改密前标记为 true
-        MvcResult st = mvc.perform(get("/api/v1/admin/bootstrap/status")).andExpect(status().isOk()).andReturn();
-        assertThat((Boolean) JsonPath.read(st.getResponse().getContentAsString(), "$.mustChangePassword")).isTrue();
-
         mvc.perform(post("/api/v1/auth/change-password").session(admin).with(csrf())
                         .contentType(MediaType.APPLICATION_JSON)
-                        .content("{\"oldPassword\":\"InitPass1234\",\"newPassword\":\"NewPass1234\"}"))
+                        .content("{\"oldPassword\":\"" + initPw + "\",\"newPassword\":\"NewPass1234\"}"))
                 .andExpect(status().isNoContent());
         mvc.perform(get("/api/v1/teams/mine").session(admin)).andExpect(status().isOk());
-        MvcResult st2 = mvc.perform(get("/api/v1/admin/bootstrap/status")).andExpect(status().isOk()).andReturn();
-        assertThat((Boolean) JsonPath.read(st2.getResponse().getContentAsString(), "$.mustChangePassword")).isFalse();
+        Boolean flag = jdbc.queryForObject(
+                "select must_change_password from app_user where login_name='admin'", Boolean.class);
+        assertThat(flag).isFalse();
     }
 
     @Test
@@ -204,19 +207,23 @@ class V110IntegrationTest {
         MvcResult me = mvc.perform(get("/api/v1/auth/me").session(first)).andExpect(status().isOk()).andReturn();
         assertThat((Boolean) JsonPath.read(me.getResponse().getContentAsString(), "$.platformAdmin")).isFalse();
 
-        // reset-admin：设为平台管理员 + 临时密码 + 强制改密，并写审计
-        mvc.perform(post("/api/v1/admin/reset-admin").with(csrf())
-                        .contentType(MediaType.APPLICATION_JSON)
-                        .content("{\"loginName\":\"v110first\",\"temporaryPassword\":\"TempPass1234\"}"))
-                .andExpect(status().isOk())
-                .andExpect(jsonPath("$.platformAdmin").value(true))
-                .andExpect(jsonPath("$.mustChangePassword").value(true));
+        // rc2：应急重置走运维命令的服务层 ResetAdminOpsService（--ib.ops=reset-admin），
+        // 设为平台管理员 + 生成新密码 + 强制改密，并写审计 ADMIN_RESET_VIA_OPS
+        String generated = resetAdminOpsService.resetAdmin("v110first");
+        assertThat(generated).isNotBlank();
         Long auditCount = jdbc.queryForObject(
-                "select count(*) from audit_log where action='RESET_ADMIN'", Long.class);
+                "select count(*) from audit_log where action='ADMIN_RESET_VIA_OPS'", Long.class);
         assertThat(auditCount).isGreaterThanOrEqualTo(1L);
-        // 旧密码失效、临时密码可登录
-        MockHttpSession s = login("v110first", "TempPass1234");
-        assertThat(s).isNotNull();
+        // 旧密码失效
+        mvc.perform(post("/api/v1/auth/login").with(csrf())
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"loginName\":\"v110first\",\"password\":\"passw0rd1\"}"))
+                .andExpect(status().isUnauthorized());
+        // 新生成密码可登录，且为平台管理员 + 强制改密
+        MockHttpSession s = login("v110first", generated);
+        MvcResult me2 = mvc.perform(get("/api/v1/auth/me").session(s)).andExpect(status().isOk()).andReturn();
+        assertThat((Boolean) JsonPath.read(me2.getResponse().getContentAsString(), "$.platformAdmin")).isTrue();
+        assertThat((Boolean) JsonPath.read(me2.getResponse().getContentAsString(), "$.mustChangePassword")).isTrue();
     }
 
     @Test
@@ -373,7 +380,7 @@ class V110IntegrationTest {
         String cb = created.getResponse().getContentAsString();
         long fid = ((Number) JsonPath.read(cb, "$.id")).longValue();
         assertThat((String) JsonPath.read(cb, "$.status")).isEqualTo("NEW");
-        assertThat((String) JsonPath.read(cb, "$.appVersion")).isEqualTo("1.1.0");
+        assertThat((String) JsonPath.read(cb, "$.appVersion")).isEqualTo("1.1.0-rc2");
         assertThat(((Number) JsonPath.read(cb, "$.images.length()")).intValue()).isEqualTo(1);
 
         // +1 防重复：点两次只计一次
@@ -911,9 +918,9 @@ class V110IntegrationTest {
         MvcResult info = mvc.perform(get("/api/v1/admin/system-info").session(admin))
                 .andExpect(status().isOk()).andReturn();
         String ib = info.getResponse().getContentAsString();
-        assertThat((String) JsonPath.read(ib, "$.appVersion")).isEqualTo("1.1.0");
+        assertThat((String) JsonPath.read(ib, "$.appVersion")).isEqualTo("1.1.0-rc2");
         assertThat((String) JsonPath.read(ib, "$.databaseVersion")).contains("PostgreSQL");
-        assertThat((String) JsonPath.read(ib, "$.flywayVersion")).isEqualTo("9");
+        assertThat((String) JsonPath.read(ib, "$.flywayVersion")).isEqualTo("10");
         assertThat((String) JsonPath.read(ib, "$.serviceStartType")).isEqualTo("未知");
         assertThat(ib).contains("\"lanAddresses\"");
         assertThat(ib).contains("\"installDir\"");
@@ -927,7 +934,7 @@ class V110IntegrationTest {
         // 更新说明：未读 → 标记已读 → 已读
         mvc.perform(get("/api/v1/release-notes").session(plain))
                 .andExpect(status().isOk())
-                .andExpect(jsonPath("$.version").value("1.1.0"))
+                .andExpect(jsonPath("$.version").value("1.1.0-rc2"))
                 .andExpect(jsonPath("$.read").value(false))
                 .andExpect(jsonPath("$.content").value(org.hamcrest.Matchers.containsString("意见反馈")));
         mvc.perform(post("/api/v1/release-notes/read").session(plain).with(csrf()))
@@ -938,6 +945,82 @@ class V110IntegrationTest {
         // /meta 版本
         mvc.perform(get("/api/v1/meta"))
                 .andExpect(status().isOk())
-                .andExpect(jsonPath("$.version").value("1.1.0"));
+                .andExpect(jsonPath("$.version").value("1.1.0-rc2"));
+    }
+
+    // ---------- rc2 裁定（hsa43amn 二.1 / 二.2） ----------
+
+    @Test
+    void rc2_unstart_restoresProgressBeforeStart_notZero() throws Exception {
+        Trio t = trio("rc2u", "RCU");
+        long itemId = createItem(t.leader(), t.team().teamId(),
+                "{\"type\":\"ADHOC\",\"title\":\"虚构撤销开始事项\",\"destination\":\"ASSIGN\",\"ownerIds\":[" + t.memberId() + "]}");
+        // 模拟开始前已有进度值（如历史/导入数据）：直接置 30
+        com.iterationboard.domain.Item it = entityManager.find(com.iterationboard.domain.Item.class, itemId);
+        it.setProgressPercent(30);
+        entityManager.flush();
+
+        // 登记进展到 65 → 自动开始（快照开始前进度 30），状态进行中、进度 65
+        mvc.perform(post("/api/v1/teams/" + t.team().teamId() + "/items/" + itemId + "/progress")
+                        .session(t.member()).with(csrf())
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"text\":\"虚构进展\",\"percent\":65}"))
+                .andExpect(status().isCreated());
+        String started = getItemJson(t.member(), t.team().teamId(), itemId);
+        assertThat((String) JsonPath.read(started, "$.status")).isEqualTo("IN_PROGRESS");
+        assertThat(((Number) JsonPath.read(started, "$.progressPercent")).intValue()).isEqualTo(65);
+
+        // 撤销开始 → 回到待开始，进度恢复为开始前的 30（不是清零），流转历史保留
+        MvcResult un = transition(t.member(), t.team().teamId(), itemId, "UNSTART",
+                itemVersion(t.member(), t.team().teamId(), itemId), null);
+        assertThat(un.getResponse().getStatus()).isEqualTo(200);
+        String unstarted = getItemJson(t.member(), t.team().teamId(), itemId);
+        assertThat((String) JsonPath.read(unstarted, "$.status")).isEqualTo("NOT_STARTED");
+        assertThat(((Number) JsonPath.read(unstarted, "$.progressPercent")).intValue()).isEqualTo(30);
+        Long hist = jdbc.queryForObject(
+                "select count(*) from activity where item_id = ? and action = 'UNSTART'", Long.class, itemId);
+        assertThat(hist).isGreaterThanOrEqualTo(1L);
+    }
+
+    @Test
+    void rc2_overdueReminders_twoStageOnceOnly() throws Exception {
+        Trio t = trio("rc2o", "RCO");
+        com.iterationboard.domain.Team team = teamRepo.findById(t.team().teamId()).orElseThrow();
+        LocalDate today = platformTime.today();
+        // 事项 A：昨天到期（逾期初期）→ 只发第一段（负责人一次），不抄送组长
+        long aId = createItem(t.leader(), t.team().teamId(),
+                "{\"type\":\"ADHOC\",\"title\":\"虚构刚逾期事项\",\"destination\":\"ASSIGN\",\"ownerIds\":[" + t.memberId()
+                        + "],\"dueDate\":\"" + today.minusDays(1) + "\"}");
+        // 事项 B：10 天前到期（已过第 3 个工作日）→ 第一段 + 第二段（负责人 + 抄送组长）
+        long bId = createItem(t.leader(), t.team().teamId(),
+                "{\"type\":\"ADHOC\",\"title\":\"虚构久逾期事项\",\"destination\":\"ASSIGN\",\"ownerIds\":[" + t.memberId()
+                        + "],\"dueDate\":\"" + today.minusDays(10) + "\"}");
+
+        reminderService.scanTeam(team, today);
+        assertThat(overdueCount(t.memberId(), "REMINDER_OVERDUE", aId)).isEqualTo(1);
+        assertThat(overdueCount(t.memberId(), "REMINDER_OVERDUE_ESCALATED", aId)).isZero();
+        assertThat(overdueCount(t.leaderId(), "REMINDER_OVERDUE_ESCALATED", aId)).isZero();
+        assertThat(overdueCount(t.memberId(), "REMINDER_OVERDUE", bId)).isEqualTo(1);
+        assertThat(overdueCount(t.memberId(), "REMINDER_OVERDUE_ESCALATED", bId)).isEqualTo(1);
+        assertThat(overdueCount(t.leaderId(), "REMINDER_OVERDUE_ESCALATED", bId)).isEqualTo(1);
+
+        // 同日重复扫描：两段都不得重复推送
+        reminderService.scanTeam(team, today);
+        assertThat(overdueCount(t.memberId(), "REMINDER_OVERDUE", aId)).isEqualTo(1);
+        assertThat(overdueCount(t.memberId(), "REMINDER_OVERDUE", bId)).isEqualTo(1);
+        assertThat(overdueCount(t.memberId(), "REMINDER_OVERDUE_ESCALATED", bId)).isEqualTo(1);
+        assertThat(overdueCount(t.leaderId(), "REMINDER_OVERDUE_ESCALATED", bId)).isEqualTo(1);
+
+        // 一周后再扫：A 到达第 3 个工作日 → 补发第二段（负责人 + 组长各一次）；B 不再新增
+        reminderService.scanTeam(team, today.plusDays(7));
+        assertThat(overdueCount(t.memberId(), "REMINDER_OVERDUE", aId)).isEqualTo(1);
+        assertThat(overdueCount(t.memberId(), "REMINDER_OVERDUE_ESCALATED", aId)).isEqualTo(1);
+        assertThat(overdueCount(t.leaderId(), "REMINDER_OVERDUE_ESCALATED", aId)).isEqualTo(1);
+        assertThat(overdueCount(t.memberId(), "REMINDER_OVERDUE_ESCALATED", bId)).isEqualTo(1);
+        assertThat(overdueCount(t.leaderId(), "REMINDER_OVERDUE_ESCALATED", bId)).isEqualTo(1);
+    }
+
+    private int overdueCount(long recipientId, String type, long itemId) {
+        return notificationRepo.findRecent(recipientId, type, itemId, java.time.Instant.EPOCH).size();
     }
 }

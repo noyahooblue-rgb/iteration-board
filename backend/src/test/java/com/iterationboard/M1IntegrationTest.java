@@ -113,10 +113,10 @@ class M1IntegrationTest {
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.registrationOpen").value(true))
                 .andExpect(jsonPath("$.demoMode").value(false));
-        // springdoc 生成的 OpenAPI（Boot 4 兼容版 3.2.0）
-        mvc.perform(get("/v3/api-docs.yaml")).andExpect(status().isOk());
-        // 契约原文静态文件
-        mvc.perform(get("/openapi.yaml")).andExpect(status().isOk());
+        // rc2 安全裁定（hsa43amn）：接口文档生产默认关闭且仅平台管理员可访问，未登录一律 401
+        mvc.perform(get("/v3/api-docs.yaml")).andExpect(status().isUnauthorized());
+        // 契约原文静态文件同口径
+        mvc.perform(get("/openapi.yaml")).andExpect(status().isUnauthorized());
         // 未登录访问受保护接口 → 401 统一错误格式
         mvc.perform(get("/api/v1/auth/me"))
                 .andExpect(status().isUnauthorized())

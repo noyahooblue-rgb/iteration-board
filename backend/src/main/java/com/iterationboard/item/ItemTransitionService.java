@@ -246,14 +246,17 @@ notifyService.notify(item.getCreator(), "CLAIM", item, actor, "你发布的事�
 case START -> {
 if (from!= ItemStatus.NOT_STARTED) throw illegal(item, action);
 if (!isOwner(item, actor)) throw ApiException.forbidden("仅负责人可开始事项");
+// 裁定（hsa43amn 二.2）：开始前先快照当前进度，UNSTART 时据此恢复（不再清零）。
+item.setProgressBeforeStart(item.getProgressPercent());
 item.setStatus(ItemStatus.IN_PROGRESS);
 }
 case UNSTART -> {
-// 修订五：自动开始（进展登记/拖动进度触发 START）的撤销动作——回到待开始，进度清零，留痕在动态里。
+// 修订五：自动开始（进展登记/拖动进度触发 START）的撤销动作——回到待开始，留痕在动态里。
+// 进度口径经裁定（hsa43amn 二.2）修订：回到开始前的值（progress_before_start 快照），无快照回落 0。
 if (from!= ItemStatus.IN_PROGRESS) throw illegal(item, action);
 if (!isOwner(item, actor)) throw ApiException.forbidden("仅负责人可撤销开始");
 item.setStatus(ItemStatus.NOT_STARTED);
-item.setProgressPercent(0);
+item.setProgressPercent(item.getProgressBeforeStart() != null ? item.getProgressBeforeStart() : 0);
 }
 case SUBMIT -> {
 if (from!= ItemStatus.IN_PROGRESS) throw illegal(item, action);

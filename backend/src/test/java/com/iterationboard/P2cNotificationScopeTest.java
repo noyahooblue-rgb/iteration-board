@@ -48,6 +48,7 @@ class P2cNotificationScopeTest {
     @Autowired NotificationRepo notificationRepo;
     @Autowired UserRepo userRepo;
     @Autowired TeamRepo teamRepo;
+    @Autowired org.springframework.security.crypto.password.PasswordEncoder passwordEncoder;
 
     // ---------- helpers ----------
 
@@ -98,10 +99,16 @@ class P2cNotificationScopeTest {
     }
 
     private MockHttpSession bootstrapAdmin() throws Exception {
-        mvc.perform(post("/api/v1/admin/bootstrap").with(csrf())
-                        .contentType(MediaType.APPLICATION_JSON)
-                        .content("{\"password\":\"InitPass1234\"}"))
-                .andExpect(status().isCreated());
+        // rc2 起 HTTP 引导接口已删除：直接在库中种入 admin（建号走应用内 Runner）
+        AppUser adminUser = new AppUser();
+        adminUser.setLoginName("admin");
+        adminUser.setDisplayName("平台管理员");
+        adminUser.setPasswordHash(passwordEncoder.encode("InitPass1234"));
+        adminUser.setAvatarColor("indigo");
+        adminUser.setPlatformAdmin(true);
+        adminUser.setStatus("ACTIVE");
+        adminUser.setMustChangePassword(true);
+        userRepo.save(adminUser);
         MockHttpSession admin = login("admin", "InitPass1234");
         mvc.perform(post("/api/v1/auth/change-password").session(admin).with(csrf())
                         .contentType(MediaType.APPLICATION_JSON)

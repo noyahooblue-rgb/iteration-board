@@ -7,7 +7,7 @@ import org.springframework.stereotype.Component;
 import java.util.Optional;
 
 /**
- * 程序版本与构建日期的单一来源（1.1.0）：版本取 app.version（与 pom 一致），
+ * 程序版本与构建日期的单一来源（1.1.0-rc2）：版本取 app.version（与 pom 一致），
  * 构建日期取 spring-boot build-info 生成的 BuildProperties（构建时间），缺失时如实返回「未知」。
  */
 @Component
@@ -15,7 +15,7 @@ public class VersionInfo {
     private final String version;
     private final BuildProperties buildProperties;
 
-    public VersionInfo(@Value("${app.version:1.1.0}") String version,
+    public VersionInfo(@Value("${app.version:1.1.0-rc2}") String version,
                        Optional<BuildProperties> buildProperties) {
         this.version = version;
         this.buildProperties = buildProperties.orElse(null);

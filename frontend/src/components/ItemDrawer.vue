@@ -40,7 +40,7 @@
       <div class="attr"><span>验收人</span><b class="avaline"><Avatar v-if="item.acceptorId" :name="team.memberName(item.acceptorId)" :color="team.member(item.acceptorId)?.avatarColor" :size="22"/>{{item.acceptorId ? team.memberName(item.acceptorId) : '未设置'}}</b><span v-if="item.acceptorAutoTransferred" class="tiny" style="display:block;color:var(--c-adhoc)">原默认验收人是负责人本人，已按规则自动转交（不能验收自己的事项）</span></div>
       <div class="attr rel"><span>优先级</span><b :class="{editable:canInlineEdit}" @click="toggleEdit('priority', $event)"><span class="prio" :class="item.priority">{{item.priority}}</span><Pencil v-if="canInlineEdit" :size="13" class="pen"/></b>
         <OverlayMenu :open="editField==='priority'" :anchor="editAnchor" @close="editField=null"><div class="pop-in"><div class="poprow" style="gap:8px"><button v-for="p in ['P0','P1','P2','P3']" :key="p" class="prio press" :class="p" @click="savePriority(p)">{{p}}</button></div></div></OverlayMenu></div>
-      <div class="attr rel"><span>截止日期</span><b :class="{editable:canInlineEdit}" @click="toggleEdit('due', $event)">{{item.dueDate ? fmtDue(item.dueDate) : '未设置'}}<span v-if="dueState==='over'" class="overdue"> 已逾期</span><span v-else-if="dueState==='today'" class="overdue"> 今天到期</span><Pencil v-if="canInlineEdit" :size="13" class="pen"/></b>
+      <div class="attr rel"><span>截止日期</span><b :class="{editable:canInlineEdit}" @click="toggleEdit('due', $event)">{{item.dueDate ? fmtDue(item.dueDate) : '未设置'}}<span v-if="dueState==='over'" class="overdue"> 已逾期 {{overdueDays(item.dueDate)}} 天</span><span v-else-if="dueState==='today'" class="overdue"> 今天到期</span><Pencil v-if="canInlineEdit" :size="13" class="pen"/></b>
         <OverlayMenu :open="editField==='due'" :anchor="editAnchor" @close="editField=null"><div class="pop-in"><input type="date" v-model="dueDraft" class="flexin"/><div class="popfoot"><AppButton variant="ghost" @click="saveDue(null)">清除</AppButton><AppButton @click="saveDue(dueDraft)">保存</AppButton></div></div></OverlayMenu></div>
       <div class="attr rel"><span>估算</span><b :class="{editable:canInlineEdit}" @click="toggleEdit('estimate', $event)">{{item.estimate ?? '—'}} 点<Pencil v-if="canInlineEdit" :size="13" class="pen"/></b>
         <OverlayMenu :open="editField==='estimate'" :anchor="editAnchor" @close="editField=null"><div class="pop-in"><input type="number" min="0" step="0.5" v-model="estimateDraft" class="flexin" placeholder="故事点"/><div class="popfoot"><AppButton variant="ghost" @click="editField=null">取消</AppButton><AppButton @click="saveEstimate">保存</AppButton></div></div></OverlayMenu></div>
@@ -174,7 +174,7 @@ import { X, OctagonAlert, Zap, ChevronDown, FileText, Layers, ClipboardList, Che
 import Drawer from './Drawer.vue'; import Modal from './Modal.vue'; import AppButton from './AppButton.vue'; import AppInput from './AppInput.vue'
 import OverlayMenu from './OverlayMenu.vue'; import { isPromptDismissed, dismissPrompt, clearDismissOnDrop } from '../utils/progressPrompt'
 import StatusPill from './StatusPill.vue'; import EditItemModal from './EditItemModal.vue'; import { STATUS_META, TYPE_META, STORY_CAT_META, TASK_STATUS_META } from '../api/types'; import TypeBadge from './TypeBadge.vue'; import Avatar from './Avatar.vue'; import ProgressBar from './ProgressBar.vue'
-import MentionInput from './MentionInput.vue'; import { mentionSegments } from '../utils/mention'; import { fmtDateTime, localToday } from '../utils/datetime'
+import MentionInput from './MentionInput.vue'; import { mentionSegments } from '../utils/mention'; import { fmtDateTime, localToday, overdueDays } from '../utils/datetime'
 import { api, ApiError } from '../api/http'; import type { Item, ProgressUpdate, Comment, Activity } from '../api/types'
 import { useTeam } from '../stores/team'; import { useAuth } from '../stores/auth'; import { memberLabel } from '../utils/memberLabel'
 import { useToast } from '../stores/toast'; import { useBusy } from '../utils/busy'
@@ -290,7 +290,7 @@ const canApproveTask = computed(()=> { const it = item.value; if (!it || !auth.u
   return team.current?.myRole==='PO' || team.current?.myRole==='LEADER' || it.poId===auth.user.id })
 function dismissPromptNow(){ if (!item.value) return; dismissPrompt(item.value.id); promptDismissed.value = true }
 async function doPromptAction(){ await runTransition('SUBMIT') }
-// 待开始拖到 >0：提交一条进展（后端自动转进行中），顶部提示条带 5 秒撤销（UNSTART 回待开始且进度清零）
+// 待开始拖到 >0：提交一条进展（后端自动转进行中），顶部提示条带 5 秒撤销（UNSTART 回待开始，进度回到开始前的值——裁定 hsa43amn 二.2）
 async function onSliderRelease(e: Event){
   const it = item.value; if (!it) return
   const v = Number((e.target as HTMLInputElement).value)

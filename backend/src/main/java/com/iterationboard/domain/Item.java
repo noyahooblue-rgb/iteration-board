@@ -53,6 +53,9 @@ public class Item {
     private BigDecimal estimate;
     @Column(name = "progress_percent", nullable = false)
     private int progressPercent;
+    /** 开始（START）那一刻的进度快照：撤销开始（UNSTART）时进度回到这个值（裁定 hsa43amn 二.2）。 */
+    @Column(name = "progress_before_start")
+    private Integer progressBeforeStart;
     @Column(nullable = false)
     private boolean blocked;
     @Column(name = "block_reason", length = 500)
@@ -155,6 +158,8 @@ public class Item {
     public void setEstimate(BigDecimal v) { estimate = v; }
     public int getProgressPercent() { return progressPercent; }
     public void setProgressPercent(int v) { progressPercent = v; }
+    public Integer getProgressBeforeStart() { return progressBeforeStart; }
+    public void setProgressBeforeStart(Integer v) { progressBeforeStart = v; }
     public boolean isBlocked() { return blocked; }
     public void setBlocked(boolean v) { blocked = v; }
     public String getBlockReason() { return blockReason; }

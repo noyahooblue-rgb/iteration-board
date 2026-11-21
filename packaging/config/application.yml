@@ -37,6 +37,15 @@ app:
   registration-open: true
   demo-mode: false
 
+# API docs (Swagger UI / OpenAPI): OFF by default (security ruling,
+# 1.1.0-rc2). Set both to true and restart to enable; even then the
+# docs require a signed-in platform admin account.
+springdoc:
+  api-docs:
+    enabled: false
+  swagger-ui:
+    enabled: false
+
 # ------------------------------------------------------------
 # AI features (optional). Leave blank to run without AI:
 # the six AI features stay disabled and everything else works.

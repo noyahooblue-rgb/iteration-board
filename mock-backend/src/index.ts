@@ -21,6 +21,8 @@ const extraTeams: Team[] = []
 const allTeams = () => [teamRow, auroraTeam, ...extraTeams]
 let members = [...seedMembers.map(m => ({ teamId: 1, userId: m.userId, role: m.role as string, memberStatus: m.memberStatus, memberStatusStart: m.userId === 9 ? '2026-11-16' : null as string|null, memberStatusEnd: m.userId === 9 ? '2026-11-20' : null as string|null })), { teamId: 999, userId: 11, role: 'MEMBER', memberStatus: 'NORMAL', memberStatusStart: null as string|null, memberStatusEnd: null as string|null }, { teamId: 999, userId: 12, role: 'MEMBER', memberStatus: 'NORMAL', memberStatusStart: null as string|null, memberStatusEnd: null as string|null }]
 let items: Item[] = buildItems()
+// rc2 裁定（hsa43amn 二.2，与真实后端同口径）：START 时快照开始前进度，UNSTART 时恢复该值（不进 view 输出，故独立存放）
+const progressBeforeStart = new Map<number, number>()
 let progressList = buildProgress(items)
 let comments = buildComments(items)
 let activities = buildActivities(items)
@@ -1115,7 +1117,7 @@ function itemsRoute(method: string, teamId: number, seg: string[], body: any, q:
     if (!body.text && body.kind !== 'KEEP_GOING') throw err(400, 'VALIDATION', '进展文字必填')
     if (body.kind === 'KEEP_GOING' && !body.text) body = { ...body, text: '照常推进' }
     if (it.type === 'TASK') throw err(422, 'ILLEGAL_TRANSITION', '任务不登记进展，进展登记在故事上')
-    if (it.status === 'NOT_STARTED') { it.status = 'IN_PROGRESS'; act(it.id, u.id, 'START', 'NOT_STARTED', 'IN_PROGRESS', '登记进展时自动开始') }
+    if (it.status === 'NOT_STARTED') { progressBeforeStart.set(it.id, it.progressPercent); it.status = 'IN_PROGRESS'; act(it.id, u.id, 'START', 'NOT_STARTED', 'IN_PROGRESS', '登记进展时自动开始') }
     if (it.status !== 'IN_PROGRESS') throw err(422, 'ILLEGAL_TRANSITION', '当前状态不能登记进展')
     // 进展 @提及（1.0.4 J）：接受 mentionIds 并回显在进展记录上，被 @ 者收 MENTION 通知（与评论口径一致）。
     const p = { id: nextId++, itemId: it.id, authorId: u.id, text: body.text, percent: body.percent ?? null, blocked: !!body.blocked, blockReason: body.blockReason ?? null, nextStep: body.nextStep ?? null, kind: body.kind ?? 'NORMAL', createdAt: new Date().toISOString(), mentionIds: Array.isArray(body.mentionIds) ? body.mentionIds : [] }
@@ -1194,8 +1196,8 @@ function transition(teamId: number, it: Item, body: any) {
   const from = it.status; const isOwner = it.ownerIds.includes(u.id)
   switch (body.action) {
     case 'CLAIM': if (from !== 'UNCLAIMED') throw illegal(); it.ownerIds = [u.id]; it.assignedDirectly = false; it.inviteeIds = []; it.status = 'NOT_STARTED'; break
-    case 'START': if (from !== 'NOT_STARTED') throw illegal(); if (!isOwner) throw err(403, 'FORBIDDEN', '只有负责人可以开始'); it.status = 'IN_PROGRESS'; break
-    case 'UNSTART': if (from !== 'IN_PROGRESS') throw illegal(); if (!isOwner) throw err(403, 'FORBIDDEN', '只有负责人可以撤销开始'); it.status = 'NOT_STARTED'; it.progressPercent = 0; break
+    case 'START': if (from !== 'NOT_STARTED') throw illegal(); if (!isOwner) throw err(403, 'FORBIDDEN', '只有负责人可以开始'); progressBeforeStart.set(it.id, it.progressPercent); it.status = 'IN_PROGRESS'; break
+    case 'UNSTART': if (from !== 'IN_PROGRESS') throw illegal(); if (!isOwner) throw err(403, 'FORBIDDEN', '只有负责人可以撤销开始'); it.status = 'NOT_STARTED'; it.progressPercent = progressBeforeStart.get(it.id) ?? 0; break
     case 'SUBMIT': if (from !== 'IN_PROGRESS') throw illegal(); if (!isOwner) throw err(403, 'FORBIDDEN', '只有负责人可以提交验收'); it.status = it.acceptorId === u.id ? 'DONE' : 'IN_REVIEW'; it.progressPercent = 100; if (it.blocked) { it.blocked = false; it.blockReason = null; act(it.id, u.id, 'UNBLOCK', from, it.status, '提交验收/完成时自动清除阻塞标记') } break
     case 'APPROVE': if (from !== 'IN_REVIEW') throw illegal(); if (!(it.acceptorId === u.id || m.role === 'LEADER')) throw err(403, 'FORBIDDEN', '只有验收人或组长可以通过'); it.status = 'DONE'; it.progressPercent = 100; if (it.blocked) { it.blocked = false; it.blockReason = null; act(it.id, u.id, 'UNBLOCK', from, it.status, '提交验收/完成时自动清除阻塞标记') } break
     case 'REJECT': if (from !== 'IN_REVIEW') throw illegal(); if (!(it.acceptorId === u.id || m.role === 'LEADER')) throw err(403, 'FORBIDDEN', '只有验收人或组长可以打回'); needReason(); it.status = 'IN_PROGRESS'; break
