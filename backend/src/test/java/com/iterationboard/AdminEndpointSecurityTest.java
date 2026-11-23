@@ -59,7 +59,7 @@ class AdminEndpointSecurityTest {
         mvc.perform(post("/api/v1/auth/register").session(session).with(csrf())
                         .contentType(MediaType.APPLICATION_JSON)
                         .content("{\"loginName\":\"" + loginName + "\",\"displayName\":\"" + displayName
-                                + "\",\"password\":\"passw0rd1\",\"captchaId\":\"" + c[0]
+                                + "\",\"password\":\"passw0rd1!\",\"captchaId\":\"" + c[0]
                                 + "\",\"captchaCode\":\"" + c[1] + "\"}"))
                 .andExpect(status().isCreated());
         return session;

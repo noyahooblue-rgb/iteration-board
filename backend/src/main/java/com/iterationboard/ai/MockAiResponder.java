@@ -124,6 +124,9 @@ public class MockAiResponder {
             a.put("kind", "UPDATE_ITEM");
             a.put("itemId", items.get(0).path("id").asLong());
             a.put("itemCode", items.get(0).path("code").asText(""));
+            // rc3（契约 4）：透传事项类型与小组（服务层最终以事项实体为准回填）
+            if (!items.get(0).path("type").isNull()) a.put("itemType", items.get(0).path("type").asText());
+            if (!items.get(0).path("teamId").isNull()) a.put("teamId", items.get(0).path("teamId").asLong());
             a.put("text", sentence);
             if (percent != null) a.put("percent", percent);
             a.put("submitReview", sentence.contains("做完") || sentence.contains("完成") || (percent != null && percent == 100));

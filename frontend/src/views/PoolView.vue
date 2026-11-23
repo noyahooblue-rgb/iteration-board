@@ -31,20 +31,23 @@
     </div>
   </div>
   <p v-if="!items.length && !loading" class="small">认领池是空的，大家手头都排满了。</p>
-  <ItemDrawer :open="drawerOpen" :item-id="openId" @close="drawerOpen=false" @changed="load" @open-item="(id:number)=>{openId=id}"/>
+  <ItemDrawer :open="drawerOpen" :item-id="openId" :highlight-comment-id="hlComment" :highlight-progress-id="hlProgress" @close="drawerOpen=false" @changed="load" @open-item="(id:number)=>{openId=id}"/>
   <ImportWizard :open="importOpen" @close="importOpen=false" @done="load"/>
 </AppShell>
 </template>
 <script setup lang="ts">
 import { ref, computed, onMounted } from 'vue'
-import { RouterLink } from 'vue-router'
+import { RouterLink, useRoute } from 'vue-router'
 import { Import, Plus, Check, User, Calendar, Clock } from 'lucide-vue-next'
 import AppShell from '../components/AppShell.vue'; import AppButton from '../components/AppButton.vue'; import ItemDrawer from '../components/ItemDrawer.vue'
 import ImportWizard from '../components/ImportWizard.vue'
 import { api, ApiError } from '../api/http'; import { TYPE_META, itemColor, estimateUnitLabel, type Item, type Planning } from '../api/types'
 import { useTeam } from '../stores/team'; import { useAuth } from '../stores/auth'; import { useUi } from '../stores/ui'; import { useToast } from '../stores/toast'
 import { overdueDays } from '../utils/datetime'
-const team = useTeam(), auth = useAuth(), ui = useUi(), toast = useToast()
+const team = useTeam(), auth = useAuth(), ui = useUi(), toast = useToast(), route = useRoute()
+// 修订六契约 4：/i/:id 独立事项落地待办池时以 ?open= 开抽屉，comment/progress 透传高亮。
+const hlComment = route.query.comment ? Number(route.query.comment) : null
+const hlProgress = route.query.progress ? Number(route.query.progress) : null
 const items = ref<Item[]>([]), tasks = ref<Item[]>([]), planning = ref<Planning|null>(null), loading = ref(false)
 const sort = ref('new'), fType = ref(''), loadErr = ref('')
 const importOpen = ref(false)
@@ -60,7 +63,7 @@ async function load(){ if(!team.currentId) return; loading.value = true; loadErr
     tasks.value = await api.get(`/teams/${team.currentId}/items?scope=all&type=TASK`).catch(()=>[])
     if (team.iteration) planning.value = await api.get(`/teams/${team.currentId}/iterations/${team.iteration.id}/planning`).catch(()=>null)
   } catch(e){ loadErr.value = e instanceof ApiError ? e.message : '加载失败' } finally { loading.value = false } }
-onMounted(load)
+onMounted(async () => { await load(); const open = route.query.open; if (open) { openId.value = Number(open); drawerOpen.value = true } })
 const groups = computed(()=>{ let l = items.value; if (fType.value) l = l.filter(i=>i.type===fType.value)
   const srt = (a:Item,b:Item)=> sort.value==='due' ? (a.dueDate ?? '9999').localeCompare(b.dueDate ?? '9999') : sort.value==='wait' ? a.createdAt.localeCompare(b.createdAt) : b.id - a.id
   const out: {key:string;task?:Item;items:Item[]}[] = []

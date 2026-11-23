@@ -29,7 +29,8 @@
     <template v-else>
       <AppInput v-model="r.loginName" label="登录名（3–32 位，注册后不可改）" :error="e.rLogin"/>
       <AppInput v-model="r.displayName" label="显示姓名" style="margin-top:10px"/>
-      <AppInput v-model="r.password" label="密码（至少 8 位，含字母和数字）" type="password" style="margin-top:10px"/>
+      <AppInput v-model="r.password" label="密码（至少 8 位，需同时包含字母、数字和特殊字符）" type="password" style="margin-top:10px"/>
+      <PasswordRules :password="r.password" :login-name="r.loginName"/>
       <div class="strength"><div :style="{width:strength*25+'%',background:strengthColor}"/><span class="tiny">{{['','弱','一般','较强','强'][strength]}}</span></div>
       <div class="caprow"><AppInput v-model="r.captchaCode" label="图形验证码"/><button class="cap press" @click="loadCaptcha" title="点击刷新" v-html="captchaSvg"/></div>
       <p v-if="err" class="errbox">{{err}}</p>
@@ -44,7 +45,7 @@
 import { reactive, ref, computed, onMounted } from 'vue'
 import { useRouter } from 'vue-router'
 import { UserRoundX } from 'lucide-vue-next'
-import GlassPanel from '../components/GlassPanel.vue'; import AppButton from '../components/AppButton.vue'; import AppInput from '../components/AppInput.vue'; import SegmentedControl from '../components/SegmentedControl.vue'
+import GlassPanel from '../components/GlassPanel.vue'; import AppButton from '../components/AppButton.vue'; import AppInput from '../components/AppInput.vue'; import SegmentedControl from '../components/SegmentedControl.vue'; import PasswordRules from '../components/PasswordRules.vue'
 import { api, ApiError, DEMO_ACCOUNTS, DEMO_SUBTITLE, DEMO_FILL_HINT, DEMO_REG_CLOSED_TEXT, DEMO_PASSWORD_FILL } from '../api/http'; import { useAuth } from '../stores/auth'; import { useTeam } from '../stores/team'; import { useToast } from '../stores/toast'
 const router = useRouter(), auth = useAuth(), team = useTeam(), toast = useToast()
 import { APP_VERSION, BUILD_DATE } from '../utils/appMeta'

@@ -87,6 +87,7 @@ import FeedbackDrawer from './FeedbackDrawer.vue'; import OnboardingGuide from '
 import { api } from '../api/http'
 import type { BackupStatus, ReleaseNotes } from '../api/types'
 import { tryDesktopNotify, playBeep } from '../utils/browserNotify'
+import { openItem, notifHighlightOpts } from '../utils/openItem'
 import { onboardingSeen } from '../utils/onboarding'
 import { onMounted, onUnmounted } from 'vue'
 import { useAi } from '../stores/ai'; import { useTeam } from '../stores/team'; import { useAuth } from '../stores/auth'; import { useUi } from '../stores/ui'; import { useToast } from '../stores/toast'; import { useShell } from '../stores/shell'
@@ -127,16 +128,18 @@ function onKey(e: KeyboardEvent){
 // ---------- 通知中心（M3）：未读数/列表/已读在 shell store（1.0.4 并入全局计数），SSE 实时推送也在 store ----------
 const bellOpen = ref(false)
 function toggleBell(){ bellOpen.value = !bellOpen.value; if (bellOpen.value) { shell.loadNotifs(); shell.loadUnread() } }
-// 通知点击跳转（P2c 裁定规则 5）：事项 → 事项详情；反馈类（平台通知，带 refId）→ 反馈详情定位；
-// 账号安全类 → 个人设置（改密区）；公告类暂无独立详情页（平台无公告功能），仅标已读不跳转。
-function notifTarget(n: NotificationItem): string | null {
-  if (n.itemId) return `/task/${n.itemId}`
-  if (n.type.startsWith('FEEDBACK') && n.refId) return `/feedback?focus=${n.refId}`
-  if (/PASSWORD|SECURITY/.test(n.type)) return '/me/settings'
-  return null
+// 通知点击跳转（修订六契约 4 重写）：带 itemId 的一律走统一直达 openItem（按事项类型实时解析，
+// @ 类按 refId 映射 comment/progress 高亮，映射规则见 utils/openItem.ts 的 notifHighlightOpts）；
+// 反馈类（平台通知，带 refId）→ 反馈详情定位；账号安全类（含 PASSWORD_RESET）→ 个人设置（改密区）；
+// 公告类暂无独立详情页（平台无公告功能），仅标已读不跳转。
+function navigateNotif(n: any){
+  if (!n) return
+  const item = n as NotificationItem
+  if (item.itemId) { openItem(router, item.itemId, notifHighlightOpts(item)); return }
+  if (item.type?.startsWith('FEEDBACK') && item.refId) { router.push(`/feedback?focus=${item.refId}`); return }
+  if (/PASSWORD|SECURITY/.test(item.type ?? '')) { router.push('/me/settings') }
 }
-async function openNotif(n: NotificationItem){ await shell.markRead(n); bellOpen.value = false; const t = notifTarget(n); if (t) router.push(t) }
-function navigateNotif(n: any){ const t = n ? notifTarget(n as NotificationItem) : null; if (t) router.push(t) }
+async function openNotif(n: NotificationItem){ await shell.markRead(n); bellOpen.value = false; navigateNotif(n) }
 async function markAllRead(){ const ok = await shell.markAllRead(); toast.show(ok ? '已全部标为已读' : '操作失败') }
 // 路由变化刷新一次计数（1.0.4 A）：进入相应页面/处理后角标随之减少。
 watch(() => route.path, () => { shell.refresh() })

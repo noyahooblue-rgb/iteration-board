@@ -54,12 +54,9 @@ public class AuthService {
         this.bootstrapPasswordFile = bootstrapPasswordFile;
     }
 
+    /** 委托 PasswordPolicy（修订六契约 1）：无 loginName 时只校验长度/三类。 */
     public static void validatePassword(String password) {
-        if (password == null || password.length() < 8
-                || !password.chars().anyMatch(Character::isLetter)
-                || !password.chars().anyMatch(Character::isDigit)) {
-            throw ApiException.validation("密码至少 8 位且同时含字母和数字");
-        }
+        PasswordPolicy.validate(password);
     }
 
     @Transactional
@@ -75,7 +72,7 @@ public class AuthService {
         if (displayName == null || displayName.isBlank() || displayName.length() > 32) {
             throw ApiException.validation("显示姓名不能为空且不超过 32 位");
         }
-        validatePassword(password);
+        PasswordPolicy.validate(password, loginName);
         HttpSession session = request.getSession(true);
         if (!captchaService.verify(session, captchaId, captchaCode)) {
             throw new ApiException(HttpStatus.BAD_REQUEST, "CAPTCHA_INVALID", "验证码不正确");
@@ -133,6 +130,11 @@ public class AuthService {
         }
         u.setFailedAttempts(0);
         u.setLockedUntil(null);
+        u.setLastLoginAt(now);
+        // 修订六 §4 老账号平滑过渡：明文不合规（旧规则弱密码）照常登录，但置强制改密
+        if (!PasswordPolicy.complies(password, u.getLoginName()) && !u.isMustChangePassword()) {
+            u.setMustChangePassword(true);
+        }
         userRepo.save(u);
         establishSession(u, request, response);
         return u;
@@ -158,7 +160,7 @@ public class AuthService {
         if (!encoder.matches(oldPassword == null ? "" : oldPassword, u.getPasswordHash())) {
             throw new ApiException(HttpStatus.BAD_REQUEST, "INVALID_OLD_PASSWORD", "旧密码不正确");
         }
-        validatePassword(newPassword);
+        PasswordPolicy.validate(newPassword, u.getLoginName());
         // 改密前是否处于「强制改密」状态：是 → 本次是初始密码的首次改密，成功后删除初始密码文件
         boolean wasMustChangePassword = u.isMustChangePassword();
         u.setPasswordHash(encoder.encode(newPassword));

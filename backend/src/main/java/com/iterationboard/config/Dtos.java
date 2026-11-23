@@ -65,7 +65,7 @@ public final class Dtos {
                           int sortOrder, String taskStatus, List<Long> inviteeIds,
                           String source, String externalSystem, String externalId, String externalUrl,
                           boolean externalClosed, List<String> allowedActions, String acceptorNote,
-                          boolean rejected, String rejectReason) {}
+                          boolean rejected, String rejectReason, Long teamId) {}
 
     public record BatchMemberDto(Long userId, Long itemId, String status) {}
 

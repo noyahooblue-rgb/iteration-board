@@ -26,6 +26,8 @@ public class AppUser {
     private int failedAttempts;
     @Column(name = "locked_until")
     private Instant lockedUntil;
+    @Column(name = "last_login_at")
+    private Instant lastLoginAt;
     @Column(name = "password_version", nullable = false)
     private int passwordVersion;
     @Column(name = "preferences_json")
@@ -58,6 +60,8 @@ public class AppUser {
     public void setFailedAttempts(int v) { failedAttempts = v; }
     public Instant getLockedUntil() { return lockedUntil; }
     public void setLockedUntil(Instant v) { lockedUntil = v; }
+    public Instant getLastLoginAt() { return lastLoginAt; }
+    public void setLastLoginAt(Instant v) { lastLoginAt = v; }
     public int getPasswordVersion() { return passwordVersion; }
     public void setPasswordVersion(int v) { passwordVersion = v; }
     public String getPreferencesJson() { return preferencesJson; }

@@ -68,7 +68,7 @@ class V110IntegrationTest {
         mvc.perform(post("/api/v1/auth/register").session(session).with(csrf())
                         .contentType(MediaType.APPLICATION_JSON)
                         .content("{\"loginName\":\"" + loginName + "\",\"displayName\":\"" + displayName
-                                + "\",\"password\":\"passw0rd1\",\"captchaId\":\"" + c[0]
+                                + "\",\"password\":\"passw0rd1!\",\"captchaId\":\"" + c[0]
                                 + "\",\"captchaCode\":\"" + c[1] + "\"}"))
                 .andExpect(status().isCreated());
         return session;
@@ -159,7 +159,7 @@ class V110IntegrationTest {
         MockHttpSession admin = login("admin", "InitPass1234");
         mvc.perform(post("/api/v1/auth/change-password").session(admin).with(csrf())
                         .contentType(MediaType.APPLICATION_JSON)
-                        .content("{\"oldPassword\":\"InitPass1234\",\"newPassword\":\"NewPass1234\"}"))
+                        .content("{\"oldPassword\":\"InitPass1234\",\"newPassword\":\"NewPass1234!\"}"))
                 .andExpect(status().isNoContent());
         return admin;
     }
@@ -193,7 +193,7 @@ class V110IntegrationTest {
 
         mvc.perform(post("/api/v1/auth/change-password").session(admin).with(csrf())
                         .contentType(MediaType.APPLICATION_JSON)
-                        .content("{\"oldPassword\":\"" + initPw + "\",\"newPassword\":\"NewPass1234\"}"))
+                        .content("{\"oldPassword\":\"" + initPw + "\",\"newPassword\":\"NewPass1234!\"}"))
                 .andExpect(status().isNoContent());
         mvc.perform(get("/api/v1/teams/mine").session(admin)).andExpect(status().isOk());
         Boolean flag = jdbc.queryForObject(
@@ -217,7 +217,7 @@ class V110IntegrationTest {
         // 旧密码失效
         mvc.perform(post("/api/v1/auth/login").with(csrf())
                         .contentType(MediaType.APPLICATION_JSON)
-                        .content("{\"loginName\":\"v110first\",\"password\":\"passw0rd1\"}"))
+                        .content("{\"loginName\":\"v110first\",\"password\":\"passw0rd1!\"}"))
                 .andExpect(status().isUnauthorized());
         // 新生成密码可登录，且为平台管理员 + 强制改密
         MockHttpSession s = login("v110first", generated);
@@ -358,7 +358,7 @@ class V110IntegrationTest {
         MockHttpSession s = new MockHttpSession();
         mvc.perform(post("/api/v1/auth/login").session(s).with(csrf())
                         .contentType(MediaType.APPLICATION_JSON)
-                        .content("{\"loginName\":\"v110dmem\",\"password\":\"passw0rd1\"}"))
+                        .content("{\"loginName\":\"v110dmem\",\"password\":\"passw0rd1!\"}"))
                 .andExpect(status().isForbidden());
     }
 
@@ -370,7 +370,9 @@ class V110IntegrationTest {
         MockHttpSession author = register("v110fauthor", "虚构反馈人");
         MockHttpSession other = register("v110fother", "虚构围观人");
 
-        String png = Base64.getEncoder().encodeToString(new byte[]{1, 2, 3, 4});
+        // rc3（契约 3）：服务端按魔数判定图片格式，测试数据须带真实 PNG 文件头
+        String png = Base64.getEncoder().encodeToString(new byte[]{
+                (byte) 0x89, 0x50, 0x4E, 0x47, 0x0D, 0x0A, 0x1A, 0x0A, 1, 2, 3, 4});
         MvcResult created = mvc.perform(post("/api/v1/feedback").session(author).with(csrf())
                         .contentType(MediaType.APPLICATION_JSON)
                         .content("{\"type\":\"SUGGESTION\",\"title\":\"虚构建议标题\",\"description\":\"虚构描述内容\","
@@ -380,7 +382,7 @@ class V110IntegrationTest {
         String cb = created.getResponse().getContentAsString();
         long fid = ((Number) JsonPath.read(cb, "$.id")).longValue();
         assertThat((String) JsonPath.read(cb, "$.status")).isEqualTo("NEW");
-        assertThat((String) JsonPath.read(cb, "$.appVersion")).isEqualTo("1.1.0-rc2");
+        assertThat((String) JsonPath.read(cb, "$.appVersion")).isEqualTo("1.1.0-rc3");
         assertThat(((Number) JsonPath.read(cb, "$.images.length()")).intValue()).isEqualTo(1);
 
         // +1 防重复：点两次只计一次
@@ -918,9 +920,10 @@ class V110IntegrationTest {
         MvcResult info = mvc.perform(get("/api/v1/admin/system-info").session(admin))
                 .andExpect(status().isOk()).andReturn();
         String ib = info.getResponse().getContentAsString();
-        assertThat((String) JsonPath.read(ib, "$.appVersion")).isEqualTo("1.1.0-rc2");
+        assertThat((String) JsonPath.read(ib, "$.appVersion")).isEqualTo("1.1.0-rc3");
         assertThat((String) JsonPath.read(ib, "$.databaseVersion")).contains("PostgreSQL");
-        assertThat((String) JsonPath.read(ib, "$.flywayVersion")).isEqualTo("10");
+        // rc3：新增 V11 迁移后 flyway 版本为 11
+        assertThat((String) JsonPath.read(ib, "$.flywayVersion")).isEqualTo("11");
         assertThat((String) JsonPath.read(ib, "$.serviceStartType")).isEqualTo("未知");
         assertThat(ib).contains("\"lanAddresses\"");
         assertThat(ib).contains("\"installDir\"");
@@ -934,7 +937,7 @@ class V110IntegrationTest {
         // 更新说明：未读 → 标记已读 → 已读
         mvc.perform(get("/api/v1/release-notes").session(plain))
                 .andExpect(status().isOk())
-                .andExpect(jsonPath("$.version").value("1.1.0-rc2"))
+                .andExpect(jsonPath("$.version").value("1.1.0-rc3"))
                 .andExpect(jsonPath("$.read").value(false))
                 .andExpect(jsonPath("$.content").value(org.hamcrest.Matchers.containsString("意见反馈")));
         mvc.perform(post("/api/v1/release-notes/read").session(plain).with(csrf()))
@@ -945,7 +948,7 @@ class V110IntegrationTest {
         // /meta 版本
         mvc.perform(get("/api/v1/meta"))
                 .andExpect(status().isOk())
-                .andExpect(jsonPath("$.version").value("1.1.0-rc2"));
+                .andExpect(jsonPath("$.version").value("1.1.0-rc3"));
     }
 
     // ---------- rc2 裁定（hsa43amn 二.1 / 二.2） ----------

@@ -227,13 +227,13 @@ class AdminBootstrapRunnerTest {
         mvc.perform(post("/api/v1/auth/change-password").session(session).with(csrf())
                         .contentType(MediaType.APPLICATION_JSON)
                         .content("{\"oldPassword\":\"" + initialPassword
-                                + "\",\"newPassword\":\"Changed1234\"}"))
+                                + "\",\"newPassword\":\"Changed1234!\"}"))
                 .andExpect(status().isNoContent());
 
         assertThat(passwordFile).doesNotExist();
         AppUser admin = userRepo.findByLoginName("admin").orElseThrow();
         assertThat(admin.isMustChangePassword()).isFalse();
-        assertThat(encoder.matches("Changed1234", admin.getPasswordHash())).isTrue();
+        assertThat(encoder.matches("Changed1234!", admin.getPasswordHash())).isTrue();
     }
 
     // ---------- reset-admin 运维命令 ----------

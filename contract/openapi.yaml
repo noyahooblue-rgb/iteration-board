@@ -1,9 +1,17 @@
 openapi: 3.0.3
 info:
   title: 迭代小组平台 API（M4 契约）
-  version: 0.5.3
+  version: 0.5.4
   description: >
     真实后端（Spring Boot）与浏览器模拟后端共同遵循的唯一契约。
+    0.5.4（1.1.0-rc3，修订六）：①新增 GET /items/{id}/resolution（事项直达解析，含
+    deleted/hasAccess）；②Notification 补 itemType/refId（@ 提及通知 refId = 评论/进展 id），
+    Item 补 teamId；③新增 GET /feedback/{id}/images/{imageId}（仅提交人/平台管理员，
+    inline + nosniff + private），反馈图片上传改为服务端魔数判定（仅 PNG/JPEG/WEBP/GIF），
+    Feedback 补 imagesVisible；④新增平台管理员账号管理：GET /admin/users 补
+    mustChangePassword/locked/lastLoginAt，POST /admin/users/{userId}/reset-password
+    （二次确认，临时密码只返回一次）/unlock/force-logout；⑤密码规则改 8–64 位含
+    字母+数字+特殊字符且不含登录名，老弱密码登录后置 mustChangePassword。
     0.5.3（M5 验收结论落地）：①新增 GET /teams/{teamId}/iterations/planning-target
     （规划页默认迭代：有规划中迭代返回规划中，否则返回进行中，两者皆无 404）；
     规划页可对规划中与进行中迭代放入/移出故事（事项的 iterationId 目标迭代须为
@@ -2533,6 +2541,96 @@ paths:
             application/json:
               schema: { $ref: '#/components/schemas/AuditLogPage' }
         '403': { $ref: '#/components/responses/Error' }
+  /items/{id}/resolution:
+    get:
+      summary: 事项直达解析（rc3 修订六）：登录即可；不存在（含已硬删）404；软删事项仍返回且 deleted=true
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: integer, format: int64 } }
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ItemResolution' }
+        '401': { $ref: '#/components/responses/Error' }
+        '404': { $ref: '#/components/responses/Error' }
+  /feedback/{id}/images/{imageId}:
+    get:
+      summary: 读取反馈图片（rc3 修订六）：仅提交人与平台管理员；inline + X-Content-Type-Options nosniff + Cache-Control private, max-age=3600
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: integer, format: int64 } }
+        - { name: imageId, in: path, required: true, schema: { type: integer, format: int64 } }
+      responses:
+        '200':
+          description: OK，图片字节（Content-Type 为落库判定类型 image/png|image/jpeg|image/gif|image/webp）
+          content:
+            image/png: { schema: { type: string, format: binary } }
+            image/jpeg: { schema: { type: string, format: binary } }
+            image/gif: { schema: { type: string, format: binary } }
+            image/webp: { schema: { type: string, format: binary } }
+        '401': { $ref: '#/components/responses/Error' }
+        '403': { $ref: '#/components/responses/Error' }
+        '404': { $ref: '#/components/responses/Error' }
+  /admin/users:
+    get:
+      summary: 平台用户列表（rc3 补 mustChangePassword/locked/lastLoginAt）——仅平台管理员
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: array
+                items: { $ref: '#/components/schemas/AdminUser' }
+        '403': { $ref: '#/components/responses/Error' }
+  /admin/users/{userId}/reset-password:
+    post:
+      summary: 重置他人密码（rc3 修订六）：须二次确认调用者本人密码；生成 16 位临时密码仅此一次返回；目标强制改密、会话失效、解除锁定；写审计 RESET_USER_PASSWORD 并通知目标（PASSWORD_RESET）；不能重置自己
+      parameters:
+        - { name: userId, in: path, required: true, schema: { type: integer, format: int64 } }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/ResetPasswordRequest' }
+      responses:
+        '200':
+          description: OK（temporaryPassword 只此一次可见）
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  temporaryPassword: { type: string }
+        '400': { $ref: '#/components/responses/Error', description: 管理员密码不正确 INVALID_ADMIN_PASSWORD / 不能重置自己 CANNOT_RESET_SELF }
+        '403': { $ref: '#/components/responses/Error' }
+        '404': { $ref: '#/components/responses/Error' }
+  /admin/users/{userId}/unlock:
+    post:
+      summary: 解除账号锁定（rc3 修订六）——仅平台管理员；写审计 UNLOCK_USER；返回更新后的 AdminUser
+      parameters:
+        - { name: userId, in: path, required: true, schema: { type: integer, format: int64 } }
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/AdminUser' }
+        '403': { $ref: '#/components/responses/Error' }
+        '404': { $ref: '#/components/responses/Error' }
+  /admin/users/{userId}/force-logout:
+    post:
+      summary: 强制下线（rc3 修订六）：passwordVersion+1 使目标全部会话失效，不改密码——仅平台管理员；写审计 FORCE_LOGOUT；返回更新后的 AdminUser
+      parameters:
+        - { name: userId, in: path, required: true, schema: { type: integer, format: int64 } }
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/AdminUser' }
+        '403': { $ref: '#/components/responses/Error' }
+        '404': { $ref: '#/components/responses/Error' }
 components:
   parameters:
     TeamId:
@@ -2677,6 +2775,7 @@ components:
       type: object
       properties:
         id: { type: integer, format: int64 }
+        teamId: { type: integer, format: int64, description: 所属小组（rc3 补，搜索结果定位用） }
         code: { type: string, description: 显示编号，如 SKY-128 }
         type: { $ref: '#/components/schemas/ItemType' }
         title: { type: string }
@@ -2898,6 +2997,8 @@ components:
         category: { type: string, enum: [ASSIGNMENT, NUDGE, MENTION, ITEM_UPDATE, REMINDER, SYSTEM], description: 通知类别（偏好开关与筛选口径） }
         itemId: { type: integer, format: int64, nullable: true }
         itemCode: { type: string, nullable: true }
+        itemType: { type: string, nullable: true, description: 事项类型（rc3 补，item 非空时为 TASK/STORY/DEFECT/ANALYSIS/ADHOC） }
+        refId: { type: integer, format: int64, nullable: true, description: 引用对象 id（rc3：MENTION 通知为评论/进展 id；反馈类为反馈 id） }
         actorId: { type: integer, format: int64, nullable: true }
         content: { type: string }
         readAt: { type: string, format: date-time, nullable: true }
@@ -2906,6 +3007,39 @@ components:
       type: object
       description: 类别 → 是否接收。ASSIGNMENT（被指派）与 NUDGE（被催）不可关闭
       additionalProperties: { type: boolean }
+    AdminUser:
+      type: object
+      description: 平台管理用户行（rc3 补 mustChangePassword/locked/lastLoginAt）
+      properties:
+        id: { type: integer, format: int64 }
+        loginName: { type: string }
+        displayName: { type: string }
+        platformAdmin: { type: boolean }
+        status: { type: string }
+        createdAt: { type: string, format: date-time }
+        mustChangePassword: { type: boolean }
+        locked: { type: boolean, description: lockedUntil 在未来 }
+        lastLoginAt: { type: string, format: date-time, nullable: true }
+    ResetPasswordRequest:
+      type: object
+      required: [adminPassword]
+      properties:
+        adminPassword: { type: string, description: 调用者（平台管理员）本人密码，二次确认用 }
+    ItemResolution:
+      type: object
+      description: 事项直达解析结果（rc3）
+      properties:
+        id: { type: integer, format: int64 }
+        code: { type: string }
+        type: { $ref: '#/components/schemas/ItemType' }
+        title: { type: string }
+        status: { $ref: '#/components/schemas/ItemStatus' }
+        teamId: { type: integer, format: int64 }
+        teamName: { type: string }
+        parentId: { type: integer, format: int64, nullable: true, description: 故事的所属任务 id }
+        iterationId: { type: integer, format: int64, nullable: true, description: 独立事项定位看板/待办池用 }
+        deleted: { type: boolean, description: item.deletedAt 非空（回收站中） }
+        hasAccess: { type: boolean, description: 当前用户是该组小组成员或平台管理员 }
     NudgeResult:
       type: object
       properties:

@@ -88,7 +88,7 @@ class CsrfCookieFlowTest {
                         .header("X-XSRF-TOKEN", xsrf.getValue())
                         .contentType(MediaType.APPLICATION_JSON)
                         .content("{\"loginName\":\"csrf_cookie_user\",\"displayName\":\"CSRF Cookie\","
-                                + "\"password\":\"Test1234\",\"captchaId\":\"" + captchaId
+                                + "\"password\":\"Test1234!\",\"captchaId\":\"" + captchaId
                                 + "\",\"captchaCode\":\"" + code + "\"}"))
                 .andExpect(status().isCreated());
     }
@@ -100,7 +100,7 @@ class CsrfCookieFlowTest {
                         .cookie(xsrf)
                         .contentType(MediaType.APPLICATION_JSON)
                         .content("{\"loginName\":\"csrf_no_header\",\"displayName\":\"X\","
-                                + "\"password\":\"Test1234\",\"captchaId\":\"x\",\"captchaCode\":\"y\"}"))
+                                + "\"password\":\"Test1234!\",\"captchaId\":\"x\",\"captchaCode\":\"y\"}"))
                 .andExpect(status().isForbidden());
     }
 }

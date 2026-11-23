@@ -60,7 +60,7 @@ class JoinRequestProductionPathTest {
         String[] c = captcha(s);
         mvc.perform(post("/api/v1/auth/register").session(s).with(csrf())
                         .contentType(MediaType.APPLICATION_JSON)
-                        .content("{\"loginName\":\"" + login + "\",\"displayName\":\"" + login + "\",\"password\":\"passw0rd1\",\"captchaId\":\"" + c[0] + "\",\"captchaCode\":\"" + c[1] + "\"}"))
+                        .content("{\"loginName\":\"" + login + "\",\"displayName\":\"" + login + "\",\"password\":\"passw0rd1!\",\"captchaId\":\"" + c[0] + "\",\"captchaCode\":\"" + c[1] + "\"}"))
                 .andExpect(status().isCreated());
         return s;
     }

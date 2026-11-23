@@ -22,13 +22,14 @@ import { useRouter } from 'vue-router'
 import { Search, Bookmark } from 'lucide-vue-next'
 import { api } from '../api/http'; import { TYPE_META, STATUS_META, itemColor, type Item, type SavedFilter } from '../api/types'
 import { useUi } from '../stores/ui'; import { useTeam } from '../stores/team'
+import { openItem } from '../utils/openItem'
 const ui = useUi(), team = useTeam(), router = useRouter()
 const q = ref(''), results = ref<Item[]>([]), filters = ref<SavedFilter[]>([]), loading = ref(false), inp = ref<HTMLInputElement|null>(null)
 let timer: any = null
 watch(()=> ui.searchOpen, async (open)=>{ if (!open) return; q.value=''; results.value=[]; await nextTick(); inp.value?.focus(); if (team.currentId) filters.value = await api.get(`/teams/${team.currentId}/saved-filters`).catch(()=>[]) })
 function onInput(){ clearTimeout(timer); timer = setTimeout(run, 220) }
 async function run(){ const kw = q.value.trim(); if (!kw || !team.currentId) { results.value = []; return } loading.value = true; try { results.value = (await api.get(`/teams/${team.currentId}/search?q=${encodeURIComponent(kw)}`)).slice(0, 8) } catch { results.value = [] } finally { loading.value = false } }
-function open(it: Item){ ui.searchOpen = false; router.push({ path: '/search', query: { q: q.value.trim() || it.code, open: String(it.id) } }) }
+function open(it: Item){ ui.searchOpen = false; openItem(router, it.id) }
 function goAll(){ if (!q.value.trim()) return; ui.searchOpen = false; router.push({ path: '/search', query: { q: q.value.trim() } }) }
 function critLabel(f: SavedFilter){ const c = f.criteria ?? {}; return [c.q, c.type].filter(Boolean).join(' · ') }
 function applyFilter(f: SavedFilter){ ui.searchOpen = false; router.push({ path: '/search', query: { filter: String(f.id) } }) }

@@ -62,13 +62,13 @@
     </div>
   </div>
   <p v-if="!lanes.length && !loading" class="small">当前范围没有事项。</p>
-  <ItemDrawer :open="drawerOpen" :item-id="openId" @close="drawerOpen=false" @changed="load" @open-item="(id:number)=>{openId=id}"/>
+  <ItemDrawer :open="drawerOpen" :item-id="openId" :highlight-comment-id="hlComment" :highlight-progress-id="hlProgress" @close="drawerOpen=false" @changed="load" @open-item="(id:number)=>{openId=id}"/>
 </AppShell>
 </template>
 <script setup lang="ts">
 import { ref, computed, onMounted, watch } from 'vue'
 import { Zap, OctagonAlert, MessageSquare, Users, Calendar, ChevronDown, Package } from 'lucide-vue-next'
-import { RouterLink } from 'vue-router'
+import { RouterLink, useRoute } from 'vue-router'
 import AppShell from '../components/AppShell.vue'; import ItemDrawer from '../components/ItemDrawer.vue'; import QuickUpdateBox from '../components/QuickUpdateBox.vue'
 import { useBusy } from '../utils/busy'
 import AvatarStack from '../components/AvatarStack.vue'; import ProgressBar from '../components/ProgressBar.vue'; import SegmentedControl from '../components/SegmentedControl.vue'
@@ -76,7 +76,10 @@ import { api, ApiError } from '../api/http'; import { TYPE_META, STORY_CAT_META,
 import { localToday, overdueDays } from '../utils/datetime'
 import { isPromptDismissed } from '../utils/progressPrompt'
 import { useTeam } from '../stores/team'; import { useAuth } from '../stores/auth'; import { useToast } from '../stores/toast'
-const team = useTeam(), auth = useAuth(), toast = useToast(), busy = useBusy()
+const team = useTeam(), auth = useAuth(), toast = useToast(), busy = useBusy(), route = useRoute()
+// 修订六契约 4：/i/:id 独立事项落地看板时以 ?open= 开抽屉，comment/progress 透传高亮。
+const hlComment = route.query.comment ? Number(route.query.comment) : null
+const hlProgress = route.query.progress ? Number(route.query.progress) : null
 const items = ref<Item[]>([]), tasks = ref<Item[]>([]), loading = ref(false), loadErr = ref('')
 const scope = ref('current'), onlyMine = ref(false), fType = ref(''), onlyBlocked = ref(false), showCancelled = ref(false)
 const laneMode = ref<'task'|'owner'|'type'|'none'>('task'), collapsed = ref(new Set<string>())
@@ -91,7 +94,7 @@ async function load(){ if(!team.currentId) return; loading.value=true; loadErr.v
   try{ const q = new URLSearchParams({scope: scope.value}); const list = await api.get<Item[]>(`/teams/${team.currentId}/items?${q}`)
     items.value = list.filter(i=>i.type!=='TASK'); tasks.value = await api.get<Item[]>(`/teams/${team.currentId}/items?scope=all&type=TASK`).catch(()=>[])
   }catch(e){ loadErr.value = e instanceof ApiError? e.message:'加载失败' } finally{ loading.value=false } }
-onMounted(async () => { if (!team.iteration) scope.value = 'all'; await load() }); watch(scope, load)
+onMounted(async () => { if (!team.iteration) scope.value = 'all'; if (route.query.open) scope.value = 'all'; await load(); const open = route.query.open; if (open) { openId.value = Number(open); drawerOpen.value = true } }); watch(scope, load)
 function filtered(){ let l = items.value
   if (onlyMine.value && auth.user) l = l.filter(i=>i.ownerIds.includes(auth.user!.id))
   if (fType.value) l = l.filter(i=>i.type===fType.value)

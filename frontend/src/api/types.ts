@@ -21,7 +21,11 @@ export interface SavedFilter{id:number;name:string;criteria:Record<string,any>;c
 export interface PlanningGroup{task:Item|null;items:Item[]}
 export interface Planning{iteration:Iteration;groups:PlanningGroup[];loads:{userId:number;points:number;itemCount:number}[];capacities:{userId:number;availableDays:number;claimedPoints:number;remainingDays:number;capacityPoints:number;overCapacity:boolean}[]}
 // M3 协同类型（契约 0.3.0）
-export interface NotificationItem{id:number;teamId:number|null;type:string;category:string;itemId:number|null;itemCode:string|null;refId:number|null;actorId:number|null;content:string;readAt:string|null;createdAt:string}
+export interface NotificationItem{id:number;teamId:number|null;type:string;category:string;itemId:number|null;itemCode:string|null;itemType:string|null;refId:number|null;actorId:number|null;content:string;readAt:string|null;createdAt:string}
+// 修订六契约 4：GET /items/{id}/resolution 的解析结果（事项直达 /i/:id 用）
+export interface ItemResolution{id:number;code:string;type:ItemType;title:string;status:string;teamId:number;teamName:string;parentId:number|null;iterationId:number|null;deleted:boolean;hasAccess:boolean}
+// 修订六契约 2：平台管理用户行（AdminUserDto 扩展 mustChangePassword/locked/lastLoginAt）
+export interface AdminUser{id:number;loginName:string;displayName:string;platformAdmin:boolean;status?:string;createdAt:string;mustChangePassword:boolean;locked:boolean;lastLoginAt:string|null}
 export interface NudgeResult{itemId:number;nudgedUserIds:number[];redirectedToLeader:boolean;nudgeCount:number}
 export interface KeyDate{id:number;iterationId:number;title:string;date:string;category:string}
 export interface BurndownPoint{date:string;remainingEstimate:number;remainingCount:number|null;doneCount:number|null;live?:boolean}
@@ -81,7 +85,7 @@ export const FEEDBACK_TYPE_LABELS: Record<FeedbackType, string> = { ISSUE: '问�
 export const FEEDBACK_STATUS_LABELS: Record<FeedbackStatus, string> = { NEW: '新提交', ANALYZING: '分析中', ACCEPTED: '已采纳', REJECTED: '不采纳', RELEASED: '已上线' }
 export interface FeedbackCommentItem { id: number; feedbackId: number; authorId: number; authorName: string; content: string; createdAt: string }
 export interface FeedbackImage { id: number; fileName: string; contentType: string; sizeBytes: number }
-export interface FeedbackItem { id: number; submitterId: number; submitterName: string; submitterLoginName: string; type: FeedbackType; title: string; description: string; status: FeedbackStatus; plannedVersion: string | null; rejectReason: string | null; releasedVersion: string | null; officialReply: string | null; pageUrl: string | null; appVersion: string | null; browserInfo: string | null; images: FeedbackImage[]; plusOneCount: number; myPlusOne: boolean; commentCount: number; createdAt: string; updatedAt: string }
+export interface FeedbackItem { id: number; submitterId: number; submitterName: string; submitterLoginName: string; type: FeedbackType; title: string; description: string; status: FeedbackStatus; plannedVersion: string | null; rejectReason: string | null; releasedVersion: string | null; officialReply: string | null; pageUrl: string | null; appVersion: string | null; browserInfo: string | null; images: FeedbackImage[]; imagesVisible: boolean; plusOneCount: number; myPlusOne: boolean; commentCount: number; createdAt: string; updatedAt: string }
 export interface SystemInfo { appVersion: string; buildDate: string; databaseVersion: string; flywayVersion: string; installDir: string; dataDir: string; dataDirSizeBytes: number; lastBackupAt: string | null; lastBackupResult: string | null; backupStale: boolean; serviceStartType: string; serviceStartTypeNote?: string; ai: { mode: string; platformEnabled: boolean; configured: boolean; status: string }; lanAddresses: string[]; serverPort: number }
 export interface BackupStatus { statusFilePresent: boolean; lastBackupAt: string | null; lastBackupResult: string | null; lastBackupDetail: string | null; backupStale: boolean; backupStaleMessage: string | null }
 export interface ReleaseNotes { version: string; title: string; content: string; read: boolean }

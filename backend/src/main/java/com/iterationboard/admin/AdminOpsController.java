@@ -37,21 +37,28 @@ public class AdminOpsController {
     private final AuditService auditService;
     private final CurrentUser currentUser;
     private final BackupStatusService backupStatusService;
+    private final org.springframework.security.crypto.password.PasswordEncoder passwordEncoder;
+    private final com.iterationboard.item.NotifyService notifyService;
 
     public AdminOpsController(UserRepo userRepo,
                               TeamMemberRepo memberRepo, HandoverService handoverService,
                               AuditService auditService, CurrentUser currentUser,
-                              BackupStatusService backupStatusService) {
+                              BackupStatusService backupStatusService,
+                              org.springframework.security.crypto.password.PasswordEncoder passwordEncoder,
+                              com.iterationboard.item.NotifyService notifyService) {
         this.userRepo = userRepo;
         this.memberRepo = memberRepo;
         this.handoverService = handoverService;
         this.auditService = auditService;
         this.currentUser = currentUser;
         this.backupStatusService = backupStatusService;
+        this.passwordEncoder = passwordEncoder;
+        this.notifyService = notifyService;
     }
 
     public record PlatformAdminRequest(boolean platformAdmin) {}
     public record StatusRequest(String status) {}
+    public record ResetPasswordRequest(String adminPassword) {}
 
     // ---------- 管理员会话操作 ----------
 
@@ -131,6 +138,62 @@ public class AdminOpsController {
         userRepo.save(target);
         auditService.log(null, me, "DELETE_USER", "USER", userId, "删除账号：" + target.getLoginName());
         return ResponseEntity.noContent().build();
+    }
+
+    // ---------- rc3（修订六契约 2）：重置密码 / 解除锁定 / 强制下线 ----------
+
+    /**
+     * 重置他人密码：二次确认调用者本人密码后，生成 16 位合规临时密码（只在本次响应返回一次）；
+     * 目标强制改密、passwordVersion+1（旧会话失效）、解除锁定；审计不记密码；给目标发 PASSWORD_RESET 通知。
+     * 不能重置自己。仅平台管理员（组长亦 403）。
+     */
+    @PostMapping("/users/{userId}/reset-password")
+    @Transactional
+    public Map<String, Object> resetPassword(@PathVariable Long userId, @RequestBody ResetPasswordRequest req) {
+        AppUser me = requirePlatformAdmin();
+        if (req.adminPassword() == null || !passwordEncoder.matches(req.adminPassword(), me.getPasswordHash())) {
+            throw new ApiException(HttpStatus.BAD_REQUEST, "INVALID_ADMIN_PASSWORD", "管理员密码不正确");
+        }
+        AppUser target = userRepo.findById(userId).orElseThrow(() -> ApiException.notFound("账号不存在"));
+        if (target.getId().equals(me.getId())) {
+            throw new ApiException(HttpStatus.BAD_REQUEST, "CANNOT_RESET_SELF", "不能重置自己的密码，请到个人设置修改");
+        }
+        String temp = AdminPasswordSupport.generatePassword(16);
+        target.setPasswordHash(passwordEncoder.encode(temp));
+        target.setMustChangePassword(true);
+        target.setPasswordVersion(target.getPasswordVersion() + 1);
+        target.setFailedAttempts(0);
+        target.setLockedUntil(null);
+        userRepo.save(target);
+        auditService.log(null, me, "RESET_USER_PASSWORD", "USER", userId, "重置密码：" + target.getLoginName());
+        notifyService.notifyInTeam(target, "PASSWORD_RESET", null, null, me,
+                "你的密码已由管理员重置，请使用管理员告知的临时密码登录并修改", false, null);
+        return Map.of("temporaryPassword", temp);
+    }
+
+    /** 解除锁定：清 lockedUntil 与失败次数，返回更新后的用户行。 */
+    @PostMapping("/users/{userId}/unlock")
+    @Transactional
+    public AdminController.AdminUserDto unlock(@PathVariable Long userId) {
+        AppUser me = requirePlatformAdmin();
+        AppUser target = userRepo.findById(userId).orElseThrow(() -> ApiException.notFound("账号不存在"));
+        target.setLockedUntil(null);
+        target.setFailedAttempts(0);
+        userRepo.save(target);
+        auditService.log(null, me, "UNLOCK_USER", "USER", userId, "解除锁定：" + target.getLoginName());
+        return AdminController.AdminUserDto.of(target);
+    }
+
+    /** 强制下线：passwordVersion+1 使其全部会话失效，不改密码，返回更新后的用户行。 */
+    @PostMapping("/users/{userId}/force-logout")
+    @Transactional
+    public AdminController.AdminUserDto forceLogout(@PathVariable Long userId) {
+        AppUser me = requirePlatformAdmin();
+        AppUser target = userRepo.findById(userId).orElseThrow(() -> ApiException.notFound("账号不存在"));
+        target.setPasswordVersion(target.getPasswordVersion() + 1);
+        userRepo.save(target);
+        auditService.log(null, me, "FORCE_LOGOUT", "USER", userId, "强制下线：" + target.getLoginName());
+        return AdminController.AdminUserDto.of(target);
     }
 
     /** P23：备份状态（管理员顶部「超 3 天未备份」提示与系统信息共用）。 */

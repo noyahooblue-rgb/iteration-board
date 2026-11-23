@@ -23,7 +23,7 @@
         <article v-for="it in g.items" :key="it.id" class="kcard" :style="{borderLeftColor:itemColor(it)}">
           <span v-if="it.nudgeCount>=2" class="nudge"><Zap :size="12"/>被催 {{it.nudgeCount}} 次</span>
           <div class="krow"><span class="small">{{it.code}}</span><span v-if="it.batchId" class="btag">批次</span><span style="flex:1"/><span class="prio">{{it.priority}}</span></div>
-          <button class="ktitle press" @click="openId=it.id;drawerOpen=true">{{it.title}}</button>
+          <button class="ktitle press" @click="openItem(router, it.id)">{{it.title}}</button>
           <p v-if="it.blocked" class="kblock"><OctagonAlert :size="14"/> 阻塞：{{it.blockReason}}</p>
           <p v-if="it.rejected || readyMark(it) || (it.estimate==null && it.status==='IN_PROGRESS')" class="kmarks"><span v-if="it.rejected" class="mark red">已退回</span><span v-if="readyMark(it)" class="mark green">可提交验收</span><span v-if="it.estimate==null && it.status==='IN_PROGRESS'" class="mark amber">未估算</span></p>
           <ProgressBar v-if="it.status==='IN_PROGRESS'||it.status==='IN_REVIEW'" :value="it.progressPercent" style="margin:6px 0"/>
@@ -44,7 +44,7 @@
             </template>
             <template v-else>
               <AppButton variant="ghost" @click="nudge(it)"><BellRing :size="14"/>催一下</AppButton>
-              <AppButton variant="ghost" @click="openId=it.id;drawerOpen=true">查看</AppButton>
+              <AppButton variant="ghost" @click="openItem(router, it.id)">查看</AppButton>
             </template>
           </div>
         </article>
@@ -54,19 +54,19 @@
     <aside class="side">
       <GlassPanel class="spanel warn" v-if="nudgedMine.length">
         <h3><Zap :size="16"/>被催提醒</h3>
-        <button v-for="it in nudgedMine" :key="it.id" class="srow press" @click="openId=it.id;drawerOpen=true"><span class="grow">{{it.code}} {{it.title}}</span><span class="tiny">被催 {{it.nudgeCount}} 次</span></button>
+        <button v-for="it in nudgedMine" :key="it.id" class="srow press" @click="openItem(router, it.id)"><span class="grow">{{it.code}} {{it.title}}</span><span class="tiny">被催 {{it.nudgeCount}} 次</span></button>
       </GlassPanel>
       <GlassPanel class="spanel">
         <h3><CalendarDays :size="16"/>近期关键日期</h3>
         <p v-if="team.iteration" class="srow"><span class="grow">{{team.iteration.name}} 结束</span><span class="tiny">{{team.iteration.endDate}}</span></p>
         <p v-for="kd in keyDates" :key="kd.id" class="srow"><span class="grow">{{kd.title}}（{{ {FREEZE:'封版',RELEASE:'投产',REVIEW:'评审',OTHER:'关键日期'}[kd.category] }}）</span><span class="tiny">{{kd.date}}</span></p>
-        <button v-for="it in dueSoon" :key="it.id" class="srow press" @click="openId=it.id;drawerOpen=true"><span class="grow">{{it.code}} {{it.title}}</span><span class="tiny" :class="{over: isOver(it)}">{{fmtDue(it.dueDate!)}}<template v-if="isOver(it)"> · 已逾期 {{overdueDays(it.dueDate)}} 天</template></span></button>
+        <button v-for="it in dueSoon" :key="it.id" class="srow press" @click="openItem(router, it.id)"><span class="grow">{{it.code}} {{it.title}}</span><span class="tiny" :class="{over: isOver(it)}">{{fmtDue(it.dueDate!)}}<template v-if="isOver(it)"> · 已逾期 {{overdueDays(it.dueDate)}} 天</template></span></button>
         <p v-if="!dueSoon.length && !keyDates.length" class="small">近期没有关键日期与我负责事项的截止日期。</p>
         <RouterLink to="/iterations" class="tiny" style="color:var(--theme)">迭代关键日期在「迭代」页登记 →</RouterLink>
       </GlassPanel>
       <GlassPanel class="spanel">
         <h3><MailPlus :size="16"/>邀请我认领</h3>
-        <button v-for="it in invited" :key="it.id" class="srow press" @click="openId=it.id;drawerOpen=true"><span class="grow">{{it.code}} {{it.title}}</span><span class="tiny">去看看 →</span></button>
+        <button v-for="it in invited" :key="it.id" class="srow press" @click="openItem(router, it.id)"><span class="grow">{{it.code}} {{it.title}}</span><span class="tiny">去看看 →</span></button>
         <p v-if="!invited.length" class="small">暂无邀请。</p>
       </GlassPanel>
     </aside>
@@ -76,7 +76,8 @@
 </template>
 <script setup lang="ts">
 import { ref, computed, onMounted } from 'vue'
-import { RouterLink } from 'vue-router'
+import { RouterLink, useRouter } from 'vue-router'
+import { openItem } from '../utils/openItem'
 import { Zap, OctagonAlert, BellRing, CalendarDays, MailPlus } from 'lucide-vue-next'
 import AppShell from '../components/AppShell.vue'; import GlassPanel from '../components/GlassPanel.vue'; import AppButton from '../components/AppButton.vue'; import ProgressBar from '../components/ProgressBar.vue'; import ProgressRing from '../components/ProgressRing.vue'; import ItemDrawer from '../components/ItemDrawer.vue'
 import QuickUpdateBox from '../components/QuickUpdateBox.vue'
@@ -85,7 +86,7 @@ import { fmtDateTime, localToday, overdueDays } from '../utils/datetime'
 import { isPromptDismissed } from '../utils/progressPrompt'
 function readyMark(it:Item){ return it.status==='IN_PROGRESS' && it.progressPercent>=100 && isPromptDismissed(it.id) }
 import { useTeam } from '../stores/team'; import { useAuth } from '../stores/auth'; import { useToast } from '../stores/toast'
-const team = useTeam(), auth = useAuth(), toast = useToast()
+const team = useTeam(), auth = useAuth(), toast = useToast(), router = useRouter()
 const items = ref<Item[]>([]), quickText = ref(''), quickNote = ref('')
 const keyDates = ref<import('../api/types').KeyDate[]>([])
 const drawerOpen = ref(false), openId = ref<number|null>(null)
@@ -113,7 +114,7 @@ function isOver(it:Item){ return !!it.dueDate && it.dueDate < localToday() }
 function canDecline(it:Item){ return it.assignedDirectly && it.status==='NOT_STARTED' }
 async function act(it:Item, action:string){ try { await api.post(`/teams/${team.currentId}/items/${it.id}/transitions`, { action, version: it.version }); toast.show('已更新'); load() } catch(e){ toast.show(e instanceof ApiError ? e.message : '操作失败'); load() } }
 async function keepGoing(it:Item){ try { await api.post(`/teams/${team.currentId}/items/${it.id}/progress`, { text: '无新情况，继续推进', kind: 'KEEP_GOING' }); toast.show('已登记照常推进'); load() } catch(e){ toast.show(e instanceof ApiError ? e.message : '登记失败') } }
-function openProgress(it:Item){ openId.value = it.id; drawerOpen.value = true }
+function openProgress(it:Item){ openItem(router, it.id) }
 function reject(it:Item){ const r = prompt('打回原因（必填）'); if (!r?.trim()) return; runReason(it, 'REJECT', r.trim()) }
 function decline(it:Item){ const r = prompt('婉拒原因（必填）'); if (!r?.trim()) return; runReason(it, 'DECLINE', r.trim()) }
 async function runReason(it:Item, action:string, reason:string){ try { await api.post(`/teams/${team.currentId}/items/${it.id}/transitions`, { action, version: it.version, reason }); toast.show('已处理'); load() } catch(e){ toast.show(e instanceof ApiError ? e.message : '操作失败'); load() } }

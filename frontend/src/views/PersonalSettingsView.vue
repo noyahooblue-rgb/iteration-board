@@ -4,10 +4,11 @@
     <h2>账号</h2>
     <div class="mrow"><Avatar v-if="auth.user" :name="auth.user.displayName" :color="auth.user.avatarColor" :size="38"/><span class="grow"><b>{{auth.user?.displayName}}</b><br/><span class="small">登录名 @{{auth.user?.loginName}}（注册后不可修改）· 当前小组角色：{{roleName}} · 平台角色：{{ auth.user?.platformAdmin ? '平台管理员' : '普通用户' }}</span></span></div>
     <h2 style="margin-top:22px">修改密码</h2>
-    <p class="small">新密码至少 8 位且同时含字母和数字。修改成功后，其他设备的登录会话会失效。</p>
+    <p class="small">新密码至少 8 位，需同时包含字母、数字和特殊字符。修改成功后，其他设备的登录会话会失效。</p>
     <form @submit.prevent="submit" style="max-width:420px;margin-top:12px">
       <AppInput v-model="f.old" type="password" label="当前密码" placeholder="请输入当前密码"/>
-      <AppInput v-model="f.next" type="password" label="新密码" placeholder="至少 8 位，含字母和数字" style="margin-top:10px"/>
+      <AppInput v-model="f.next" type="password" label="新密码" placeholder="至少 8 位，含字母、数字和特殊字符" style="margin-top:10px"/>
+      <PasswordRules :password="f.next" :login-name="auth.user?.loginName"/>
       <AppInput v-model="f.confirm" type="password" label="确认新密码" placeholder="再输入一次新密码" style="margin-top:10px"/>
       <p v-if="err" class="err">{{err}}</p>
       <AppButton style="margin-top:14px" @click="submit">保存新密码</AppButton>
@@ -71,7 +72,7 @@
 </template>
 <script setup lang="ts">
 import { reactive, ref, computed, onMounted } from 'vue'
-import AppShell from '../components/AppShell.vue'; import GlassPanel from '../components/GlassPanel.vue'; import AppButton from '../components/AppButton.vue'; import AppInput from '../components/AppInput.vue'; import Avatar from '../components/Avatar.vue'
+import AppShell from '../components/AppShell.vue'; import GlassPanel from '../components/GlassPanel.vue'; import AppButton from '../components/AppButton.vue'; import AppInput from '../components/AppInput.vue'; import Avatar from '../components/Avatar.vue'; import PasswordRules from '../components/PasswordRules.vue'
 import { api, ApiError } from '../api/http'; import { useAuth } from '../stores/auth'; import { useTeam } from '../stores/team'; import { useToast } from '../stores/toast'
 const auth = useAuth(), team = useTeam(), toast = useToast()
 // 外观：主题选择同步保存到服务端个人设置（/auth/appearance-settings），本地缓存用于首屏；玻璃/动效为本地偏好。改动即时生效。
@@ -131,7 +132,8 @@ const roleName = computed(()=> { const r = team.current?.myRole; return r==='LEA
 async function submit(){
   err.value = ''
   if (!f.old) { err.value = '请输入当前密码'; return }
-  if (!(f.next.length >= 8 && /[A-Za-z]/.test(f.next) && /\d/.test(f.next))) { err.value = '新密码至少 8 位且同时含字母和数字'; return }
+  const login = auth.user?.loginName ?? ''
+  if (!(f.next.length >= 8 && f.next.length <= 64 && /[A-Za-z]/.test(f.next) && /\d/.test(f.next) && /[^A-Za-z0-9\s]/.test(f.next) && (!login || !f.next.toLowerCase().includes(login.toLowerCase())))) { err.value = '新密码不合规：至少 8 位，需同时包含字母、数字和特殊字符，且不能包含登录名'; return }
   if (f.next !== f.confirm) { err.value = '两次输入的新密码不一致'; return }
   try { await api.post('/auth/change-password', { oldPassword: f.old, newPassword: f.next }); toast.show('密码已修改'); f.old = f.next = f.confirm = ''; if (auth.user) auth.user.mustChangePassword = false }
   catch(e){ err.value = e instanceof ApiError ? e.message : '修改失败' }

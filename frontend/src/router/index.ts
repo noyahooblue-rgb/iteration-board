@@ -3,6 +3,9 @@ import { useAuth } from '../stores/auth'; import { useTeam } from '../stores/tea
 const router = createRouter({ history: createWebHistory(), routes: [
   { path: '/', redirect: '/workbench' },
   { path: '/login', component: () => import('../views/LoginView.vue') },
+  // 修订六契约 5：强制改密页（auth、无 team）；契约 4：事项直达 /i/:id（auth、无 team，落地页自行处理跨组）。
+  { path: '/change-password', component: () => import('../views/ChangePasswordView.vue'), meta: { auth: true } },
+  { path: '/i/:id', component: () => import('../views/ItemLinkView.vue'), meta: { auth: true } },
   { path: '/teams/new', component: () => import('../views/TeamsNewView.vue'), meta: { auth: true } },
   { path: '/teams/pending', component: () => import('../views/TeamsPendingView.vue'), meta: { auth: true } },
   { path: '/settings', component: () => import('../views/TeamSettingsView.vue'), meta: { auth: true, team: true } },
@@ -37,6 +40,8 @@ router.beforeEach(async (to) => {
   if (!to.meta.auth) return true
   const user = auth.user ?? await auth.loadMe()
   if (!user) return '/login'
+  // 修订六契约 5：必须改密的用户先去改密页（置于 team/admin 守卫之前；改密页与登录页本身放行）。
+  if (user.mustChangePassword && to.path !== '/change-password' && to.path !== '/login') return '/change-password'
   // 平台管理（1.0.4 I）：非平台管理员直接跳走。
   if ((to.meta as any).admin && !user.platformAdmin) return '/workbench'
   if (to.meta.team) { const team = useTeam(); if (!team.teams.length) { try { await team.loadTeams() } catch {} } if (!team.teams.length) return '/teams/new' }

@@ -143,6 +143,8 @@ public class AiFeatureService {
             ObjectNode n = itemsArr.addObject();
             n.put("id", i.getId());
             n.put("code", i.getCode());
+            n.put("type", i.getType().name());
+            n.put("teamId", i.getTeam().getId());
             n.put("title", i.getTitle());
             n.put("status", i.getStatus().name());
             n.put("progressPercent", i.getProgressPercent());
@@ -166,6 +168,9 @@ public class AiFeatureService {
                 if (item == null) continue; // 模型给出的事项不在「我负责的未完成」范围内，丢弃不猜
                 a.put("itemId", item.getId());
                 a.put("itemCode", item.getCode());
+                // rc3（契约 4）：AI 引用补 itemType/teamId，前端经 /i/:id 打开
+                a.put("itemType", item.getType().name());
+                a.put("teamId", item.getTeam().getId());
                 a.put("text", an.path("text").asText(""));
                 a.put("percent", an.path("percent").isNull() ? null : an.path("percent").asInt());
                 a.put("submitReview", an.path("submitReview").asBoolean(false));
@@ -331,6 +336,13 @@ public class AiFeatureService {
                     Map<String, Object> t = new LinkedHashMap<>();
                     t.put("itemId", tn.path("itemId").isNull() ? null : tn.path("itemId").asLong());
                     t.put("itemCode", code);
+                    // rc3（契约 4）：按 code 回查规则信号对应的事项，补 itemType/teamId（取不到则 null）
+                    RiskService.RiskSignal sig = code == null ? null : signals.stream()
+                            .filter(s -> code.equals(s.itemCode())).findFirst().orElse(null);
+                    Item refItem = sig == null || sig.itemId() == null ? null
+                            : itemRepo.findById(sig.itemId()).orElse(null);
+                    t.put("itemType", refItem == null ? null : refItem.getType().name());
+                    t.put("teamId", refItem == null ? null : refItem.getTeam().getId());
                     t.put("reason", tn.path("reason").asText(""));
                     t.put("action", tn.path("action").asText(""));
                     tops.add(t);
@@ -422,6 +434,20 @@ public class AiFeatureService {
         out.put("found", found);
         out.put("answer", answer);
         out.put("refs", refs);
+        // rc3（契约 4）：refs 保持 code 字符串数组（历史记录 refsJson 同格式）；
+        // 另加结构化 refItems 供前端经 /i/:id 打开引用事项
+        List<Map<String, Object>> refItems = new ArrayList<>();
+        for (String c : refs) {
+            matched.stream().filter(i -> i.getCode().equals(c)).findFirst().ifPresent(i -> {
+                Map<String, Object> ri = new LinkedHashMap<>();
+                ri.put("itemId", i.getId());
+                ri.put("itemCode", i.getCode());
+                ri.put("itemType", i.getType().name());
+                ri.put("teamId", i.getTeam().getId());
+                refItems.add(ri);
+            });
+        }
+        out.put("refItems", refItems);
         return out;
     }
 

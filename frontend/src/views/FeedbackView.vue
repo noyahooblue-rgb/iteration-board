@@ -22,7 +22,7 @@
         <button class="up press" :class="{on: f.myPlusOne}" @click="toggleUp(f)" title="+1（再点取消）"><ThumbsUp :size="14"/>{{f.plusOneCount}}</button>
       </div>
       <p class="small desc">{{f.description}}</p>
-      <p v-if="f.images.length" class="tiny">附件图片：{{f.images.map(i=>i.fileName).join('、')}}</p>
+      <FeedbackImages :feedback-id="f.id" :images="f.images" :visible="f.imagesVisible ?? (f.submitterId===auth.user?.id || isAdmin)"/>
       <p v-if="f.plannedVersion" class="tiny">计划版本：{{f.plannedVersion}}</p>
       <p v-if="f.rejectReason" class="tiny">不采纳原因：{{f.rejectReason}}</p>
       <p v-if="f.releasedVersion" class="tiny">上线版本：{{f.releasedVersion}}</p>
@@ -60,7 +60,7 @@
 import { ref, reactive, computed, onMounted, nextTick } from 'vue'
 import { useRoute } from 'vue-router'
 import { Plus, ThumbsUp } from 'lucide-vue-next'
-import AppShell from '../components/AppShell.vue'; import GlassPanel from '../components/GlassPanel.vue'; import AppButton from '../components/AppButton.vue'; import AppInput from '../components/AppInput.vue'
+import AppShell from '../components/AppShell.vue'; import GlassPanel from '../components/GlassPanel.vue'; import AppButton from '../components/AppButton.vue'; import AppInput from '../components/AppInput.vue'; import FeedbackImages from '../components/FeedbackImages.vue'
 import { api, apiMode, ApiError } from '../api/http'
 import { FEEDBACK_TYPE_LABELS, FEEDBACK_STATUS_LABELS, type FeedbackItem, type FeedbackCommentItem } from '../api/types'
 import { fmtDateTime } from '../utils/datetime'

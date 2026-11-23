@@ -574,7 +574,9 @@ public class ItemService {
             for (Long uid : mentionIds) {
                 userRepo.findById(uid)
                         .filter(x -> memberRepo.findByTeamIdAndUserId(teamId, x.getId()).isPresent())
-                        .ifPresent(x -> notifyService.notify(x, "MENTION", item, user, "有人在进展里 @ 了你"));
+                        // rc3（契约 4 追加）：refId = 进展 id，前端据此滚动高亮到该条进展
+                        .ifPresent(x -> notifyService.notifyInTeam(x, "MENTION", item, item.getTeam(), user,
+                                "有人在进展里 @ 了你", false, p.getId()));
             }
         }
         if (percent != null) item.setProgressPercent(percent);
@@ -622,7 +624,9 @@ public class ItemService {
             for (Long uid : mentionIds) {
                 userRepo.findById(uid)
                         .filter(x -> memberRepo.findByTeamIdAndUserId(teamId, x.getId()).isPresent())
-                        .ifPresent(x -> notifyService.notify(x, "MENTION", item, user, "有人在评论里 @ 了你"));
+                        // rc3（契约 4 追加）：refId = 评论 id，前端据此滚动高亮到该条评论
+                        .ifPresent(x -> notifyService.notifyInTeam(x, "MENTION", item, item.getTeam(), user,
+                                "有人在评论里 @ 了你", false, c.getId()));
             }
         }
         // 关注或负责事项有新评论 → 通知负责人与关注者（设计 §3.7，此前缺失）；
@@ -850,7 +854,9 @@ public class ItemService {
                 inviteeRepo.findByItemId(item.getId()).stream().map(iv -> iv.getUser().getId()).toList(),
                 item.getSource(), item.getExternalSystem(), item.getExternalId(), item.getExternalUrl(),
                 item.isExternalClosed(), allowedActions(item, user), item.getAcceptorNote(),
-                rejected(item), rejectReason(item));
+                rejected(item), rejectReason(item),
+                // rc3（契约 4）：团队搜索结果须带 teamId（type/code 本已在 DTO 中）
+                item.getTeam().getId());
     }
 
     /**

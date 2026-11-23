@@ -73,13 +73,13 @@
     </GlassPanel>
   </template>
   <p v-else-if="!loading" class="small">任务不存在或已删除。</p>
-  <ItemDrawer :open="drawerOpen" :item-id="openId" @close="drawerOpen=false" @changed="load" @open-item="(id:number)=>{openId=id}"/>
+  <ItemDrawer :open="drawerOpen" :item-id="openId" :highlight-comment-id="hlComment" :highlight-progress-id="hlProgress" @close="drawerOpen=false" @changed="load" @open-item="(id:number)=>{openId=id}"/>
   <EditItemModal :item="editOpen && task ? task : null" :tasks="[]" @close="editOpen=false" @saved="load"/>
 </AppShell>
 </template>
 <script setup lang="ts">
 import { ref, computed, onMounted } from 'vue'
-import { useRoute, RouterLink } from 'vue-router'
+import { useRoute, useRouter, RouterLink } from 'vue-router'
 import { marked } from 'marked'; import DOMPurify from 'dompurify'
 import { Plus, GripVertical } from 'lucide-vue-next'
 import AiSpark from '../components/AiSpark.vue'
@@ -89,7 +89,10 @@ import AiBadge from '../components/AiBadge.vue'
 import { useBusy } from '../utils/busy'; import { useAi } from '../stores/ai'
 import { clampPct } from '../utils/progress'
 import { useTeam } from '../stores/team'; import { useUi } from '../stores/ui'; import { useToast } from '../stores/toast'
-const route = useRoute(), team = useTeam(), ui = useUi(), toast = useToast(), busy = useBusy(), ai = useAi()
+const route = useRoute(), router = useRouter(), team = useTeam(), ui = useUi(), toast = useToast(), busy = useBusy(), ai = useAi()
+// 修订六契约 4：/i/:id 落地时以 ?open=<故事id> 开抽屉，comment/progress 透传高亮。
+const hlComment = route.query.comment ? Number(route.query.comment) : null
+const hlProgress = route.query.progress ? Number(route.query.progress) : null
 const taskId = Number(route.params.id)
 const task = ref<Item|null>(null), stories = ref<Item[]>([]), iterNames = ref<Record<number,string>>({}), loading = ref(false)
 const drawerOpen = ref(false), openId = ref<number|null>(null), editOpen = ref(false)
@@ -105,11 +108,13 @@ const distribution = computed(()=> { const map = new Map<string, Item[]>()
   return [...map.entries()].map(([k, list]) => ({ key: k, label: k === 'daily' ? '未排入迭代' : (iterNames.value[Number(k.slice(1))] ?? `迭代 #${k.slice(1)}`), items: list, totalPts: list.reduce((n,i)=>n+(i.estimate??0),0), donePts: list.filter(i=>i.status==='DONE').reduce((n,i)=>n+(i.estimate??0),0) })) })
 async function load(){ if(!team.currentId) return; loading.value = true
   try { task.value = await api.get(`/teams/${team.currentId}/items/${taskId}`)
+    // 修订六契约 4 类型守卫：取到的不是任务时立即转统一直达，绝不按任务布局渲染。
+    if (task.value && task.value.type !== 'TASK') { router.replace(`/i/${taskId}`); return }
     stories.value = await api.get(`/teams/${team.currentId}/items/${taskId}/stories`)
     const ids = [...new Set(stories.value.map(s=>s.iterationId).filter(Boolean))] as number[]
     for (const id of ids) { if (iterNames.value[id]) continue; const p = await api.get<Planning>(`/teams/${team.currentId}/iterations/${id}/planning`).catch(()=>null); if (p) iterNames.value[id] = p.iteration.name }
   } catch(e){ toast.show(e instanceof ApiError ? e.message : '加载失败') } finally { loading.value = false } }
-onMounted(load)
+onMounted(async () => { await load(); const open = route.query.open; if (open) { openId.value = Number(open); drawerOpen.value = true } })
 async function dropStory(i:number){ if (dragIdx.value === null || dragIdx.value === i) { dragIdx.value = null; return }
   const list = [...stories.value]; const [mv] = list.splice(dragIdx.value, 1); list.splice(i, 0, mv); dragIdx.value = null; stories.value = list
   try { stories.value = await api.post(`/teams/${team.currentId}/items/${taskId}/stories/reorder`, { orderedIds: list.map(s=>s.id) }); toast.show('顺序已保存') } catch(e){ toast.show(e instanceof ApiError ? e.message : '排序失败'); load() } }

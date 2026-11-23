@@ -35,7 +35,7 @@
     <h3><AiSpark :size="16"/> AI 风险摘要 <AiBadge v-if="aiRisk" :ai-generated="aiGen"/></h3>
     <template v-if="aiRisk">
       <div v-for="r in aiRisk" :key="r.itemId ?? r.itemCode ?? r.reason" class="airisk">
-        <button class="press grow" :disabled="!r.itemId" @click="r.itemId && (openId=r.itemId, drawerOpen=true)"><b>{{r.itemCode}}</b> {{r.reason}}</button>
+        <button class="press grow" :disabled="!r.itemId" @click="r.itemId && openItem(router, r.itemId)"><b>{{r.itemCode}}</b> {{r.reason}}</button>
         <span class="tiny sug">建议：{{r.action}}</span>
       </div>
       <p class="tiny">今日最需关注（最多 3 件）。AI 不可用时自动退回下方规则清单。</p>
@@ -47,7 +47,7 @@
     <h3>风险提醒 <span class="tiny">（仅组长与 PO 可见）</span></h3>
     <div v-for="sev in ['HIGH','MEDIUM','LOW']" :key="sev">
       <p v-if="risksBy(sev).length" class="sev" :class="sev">{{sev==='HIGH' ? '高' : sev==='MEDIUM' ? '中' : '低'}}风险 · {{risksBy(sev).length}} 条</p>
-      <button v-for="r in risksBy(sev)" :key="(r.itemId ?? r.userId ?? 0) + r.rule" class="risk press" :disabled="!r.itemId" @click="r.itemId && (openId=r.itemId, drawerOpen=true)">
+      <button v-for="r in risksBy(sev)" :key="(r.itemId ?? r.userId ?? 0) + r.rule" class="risk press" :disabled="!r.itemId" @click="r.itemId && openItem(router, r.itemId)">
         <span class="rcat">{{ruleLabel(r.rule)}}</span><span class="grow">{{r.itemCode ? r.itemCode+' · ' : ''}}{{r.message}}</span>
       </button>
     </div>
@@ -62,8 +62,10 @@ import AppShell from '../components/AppShell.vue'; import GlassPanel from '../co
 import AiSpark from '../components/AiSpark.vue'; import AiBadge from '../components/AiBadge.vue'
 import { api, ApiError } from '../api/http'; import { MEMBER_STATUS_META, type OverviewData, type RiskSignal } from '../api/types'
 import { useTeam } from '../stores/team'; import { useToast } from '../stores/toast'
+import { useRouter } from 'vue-router'
+import { openItem } from '../utils/openItem'
 import { clampPct } from '../utils/progress'
-const team = useTeam(), toast = useToast()
+const team = useTeam(), toast = useToast(), router = useRouter()
 const data = ref<OverviewData|null>(null), loading = ref(false), loadErr = ref('')
 const drawerOpen = ref(false), openId = ref<number|null>(null)
 const aiRisk = ref<{itemId:number|null;itemCode:string|null;reason:string;action:string}[]|null>(null), aiGen = ref(false)

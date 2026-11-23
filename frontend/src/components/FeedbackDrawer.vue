@@ -2,7 +2,7 @@
 <Drawer :open="ui.feedbackOpen" @close="ui.feedbackOpen=false">
   <div class="fhead"><h2>意见反馈</h2><span style="flex:1"/><RouterLink to="/feedback" class="small link" @click="ui.feedbackOpen=false">查看全部反馈 →</RouterLink>
     <button class="icon press" aria-label="关闭" @click="ui.feedbackOpen=false"><X :size="18"/></button></div>
-  <p class="warn">截图中不要包含客户信息、生产数据和密码。</p>
+  <p class="warn">截图会被管理员看到，请先遮挡客户信息、密码等敏感内容；截图中不要包含生产数据和密钥。</p>
   <div class="fld">类型
     <div class="types"><button v-for="t in typeOpts" :key="t.v" class="tp press" :class="{on:form.type===t.v}" @click="form.type=t.v">{{t.label}}</button></div>
   </div>
@@ -13,7 +13,7 @@
   <div class="fld">图片（最多 5 张，每张 ≤5MB）
     <div class="imgs">
       <span v-for="(im, i) in images" :key="i" class="imchip"><img v-if="im.preview" :src="im.preview" :alt="im.name"/><span class="imname">{{im.name}}</span><button class="press" aria-label="移除图片" @click="images.splice(i,1)"><X :size="13"/></button></span>
-      <label v-if="images.length < 5" class="addimg press">＋ 选择图片<input type="file" accept="image/*" multiple hidden @change="onFiles"/></label>
+      <label v-if="images.length < 5" class="addimg press">＋ 选择图片<input type="file" accept=".png,.jpg,.jpeg,.webp,.gif" multiple hidden @change="onFiles"/></label>
     </div>
     <p v-if="imgErr" class="err">{{imgErr}}</p>
   </div>
@@ -41,7 +41,7 @@ watch(() => ui.feedbackOpen, (open) => { if (open) { idemKey = newIdempotencyKey
 function addFiles(files: File[]) {
   imgErr.value = ''
   for (const f of files) {
-    if (!f.type.startsWith('image/')) { imgErr.value = '只能添加图片文件'; continue }
+    if (!['image/png', 'image/jpeg', 'image/webp', 'image/gif'].includes(f.type)) { imgErr.value = '只支持 PNG / JPEG / WEBP / GIF 图片'; continue }
     if (f.size > 5 * 1024 * 1024) { imgErr.value = `「${f.name}」超过 5MB，已跳过`; continue }
     if (images.value.length >= 5) { imgErr.value = '图片最多 5 张'; break }
     const im = { name: f.name || '粘贴截图.png', size: f.size, preview: '', file: f }

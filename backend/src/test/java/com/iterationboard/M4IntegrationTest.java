@@ -55,7 +55,7 @@ class M4IntegrationTest {
         mvc.perform(post("/api/v1/auth/register").session(session).with(csrf())
                         .contentType(MediaType.APPLICATION_JSON)
                         .content("{\"loginName\":\"" + loginName + "\",\"displayName\":\"" + displayName
-                                + "\",\"password\":\"passw0rd1\",\"captchaId\":\"" + c[0]
+                                + "\",\"password\":\"passw0rd1!\",\"captchaId\":\"" + c[0]
                                 + "\",\"captchaCode\":\"" + c[1] + "\"}"))
                 .andExpect(status().isCreated());
         return session;
@@ -699,7 +699,7 @@ class M4IntegrationTest {
         String[] c = captchaCode(session).split("\\|");
         mvc.perform(post("/api/v1/auth/register").session(session).cookie(xsrf)
                         .header("X-XSRF-TOKEN", xsrf.getValue()).contentType(MediaType.APPLICATION_JSON)
-                        .content("{\"loginName\":\"m4csrf\",\"displayName\":\"M4CSRF\",\"password\":\"passw0rd1\",\"captchaId\":\""
+                        .content("{\"loginName\":\"m4csrf\",\"displayName\":\"M4CSRF\",\"password\":\"passw0rd1!\",\"captchaId\":\""
                                 + c[0] + "\",\"captchaCode\":\"" + c[1] + "\"}"))
                 .andExpect(status().isCreated());
         MvcResult team = mvc.perform(post("/api/v1/teams").session(session).cookie(xsrf)

@@ -47,7 +47,7 @@
 #; P1 asserted DEMAND_START for the default mode
 # ============================================================
 $ErrorActionPreference = 'Continue'
-$PkgVersion = '1.1.0-rc2'
+$PkgVersion = '1.1.0-rc3'
 $Zip = "C:\ibdl\iteration-board-offline-$PkgVersion.zip"
 $PkgDirName = "iteration-board-offline-$PkgVersion"
 $Work = 'C:\ibwork'

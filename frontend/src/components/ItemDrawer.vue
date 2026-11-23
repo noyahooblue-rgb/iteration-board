@@ -9,6 +9,7 @@
       <button class="qr press" :disabled="busy.is('respond')" @click="openBlocked">卡住了</button></span></span></div>
 
     <div class="head"><TypeBadge :type="item.type" :story-category="item.storyCategory"/><span v-if="item.batchId" class="btag">批次 #{{item.batchId}}</span><span class="small">{{item.code}}</span><span style="flex:1"/>
+      <button class="icon press" aria-label="复制链接" title="复制链接" @click="copyLink"><Link2 :size="17"/></button>
       <button class="icon press" aria-label="关闭" @click="$emit('close')"><X :size="18"/></button>
     </div>
 
@@ -47,7 +48,7 @@
       <div class="attr"><span>所属迭代</span><b>{{item.iterationId ? (team.iteration?.name ?? '当前迭代') : '日常事项'}}</b></div>
       <div class="attr rel"><span>标签</span><b :class="{editable:canInlineEdit && canManageLabels}" @click="toggleEdit('labels', $event)"><span v-for="l in item.labels" :key="l" class="tag">{{l}}</span><span v-if="!item.labels.length">无</span><Pencil v-if="canInlineEdit && canManageLabels" :size="13" class="pen"/></b>
         <OverlayMenu :open="editField==='labels'" :anchor="editAnchor" @close="editField=null"><div class="pop-in"><input v-model="labelsDraft" class="flexin" placeholder="多个标签用逗号分隔"/><div class="popfoot"><AppButton variant="ghost" @click="editField=null">取消</AppButton><AppButton @click="saveLabels">保存</AppButton></div></div></OverlayMenu></div>
-      <div class="attr" v-if="item.parentId"><span>所属任务</span><b class="parentlink press" @click="$emit('open-item', item.parentId)">{{parentTitle}}</b></div>
+      <div class="attr" v-if="item.parentId"><span>所属任务</span><b class="parentlink press" @click="openItem(router, item.parentId)">{{parentTitle}}</b></div>
       <div class="attr" v-if="item.type==='STORY' && item.storyCategory"><span>故事类别</span><b><span class="catpill" :style="{background:STORY_CAT_META[item.storyCategory].color}">{{STORY_CAT_META[item.storyCategory].label}}</span></b></div>
       <div class="attr" v-if="item.type==='TASK'"><span>所属 PO</span><b class="avaline"><Avatar v-if="item.poId" :name="team.memberName(item.poId)" :color="team.member(item.poId)?.avatarColor" :size="22"/>{{item.poId ? team.memberName(item.poId) : '未设置'}}</b></div>
       <div class="attr" v-if="item.type==='TASK' && item.taskStatus"><span>任务状态</span><b>{{TASK_STATUS_META[item.taskStatus].label}} · 进度 {{item.progressPercent}}%（由故事推算）</b></div>
@@ -79,7 +80,7 @@
 
     <div v-if="children.length" class="sec"><h2 class="sec-title"><Layers :size="16"/>{{item.type==='TASK' ? '故事' : '子事项'}}<span class="tiny">{{item.childDoneCount}}/{{item.childCount}} 已完成</span></h2>
       <ProgressBar :value="item.childCount? item.childDoneCount/item.childCount*100:0" style="margin:8px 0"/>
-      <button v-for="c in children" :key="c.id" class="child press" @click="$emit('open-item',c.id)"><span class="st-ico" :style="{background:c.status==='DONE' ? 'var(--c-green)' : typeColor(c.type)}"><Check v-if="c.status==='DONE'" :size="12"/><Clock v-else :size="12"/></span><span class="sid">{{c.code}}</span><span class="ct">{{c.title}}</span><span class="tiny">{{STATUS_META[c.status].label}}</span><Avatar v-if="c.ownerIds.length" :name="team.memberName(c.ownerIds[0])" :color="team.member(c.ownerIds[0])?.avatarColor" :size="22"/></button>
+      <button v-for="c in children" :key="c.id" class="child press" @click="openItem(router, c.id)"><span class="st-ico" :style="{background:c.status==='DONE' ? 'var(--c-green)' : typeColor(c.type)}"><Check v-if="c.status==='DONE'" :size="12"/><Clock v-else :size="12"/></span><span class="sid">{{c.code}}</span><span class="ct">{{c.title}}</span><span class="tiny">{{STATUS_META[c.status].label}}</span><Avatar v-if="c.ownerIds.length" :name="team.memberName(c.ownerIds[0])" :color="team.member(c.ownerIds[0])?.avatarColor" :size="22"/></button>
     </div>
 
     <div class="sec"><h2 class="sec-title"><ClipboardList :size="16"/>检查清单<span class="tiny">{{checklist.filter(c=>c.done).length}}/{{checklist.length}} 已完成</span></h2>
@@ -89,14 +90,14 @@
     <div class="sec">
       <div class="dtabs"><button :class="{on:tab==='progress'}" @click="tab='progress'">进展</button><button :class="{on:tab==='comments'}" @click="tab='comments'">评论{{comments.length ? `（${comments.length}）` : ''}}</button><button :class="{on:tab==='activities'}" @click="tab='activities'">动态</button></div>
       <div v-if="tab==='progress'" class="tl">
-        <div v-for="p in progress" :key="p.id" class="tl-item"><Avatar :name="team.memberName(p.authorId)" :color="team.member(p.authorId)?.avatarColor"/><div>
+        <div v-for="p in progress" :key="p.id" class="tl-item" :data-hl-progress="p.id" :class="{hl: hlProgressId===p.id}"><Avatar :name="team.memberName(p.authorId)" :color="team.member(p.authorId)?.avatarColor"/><div>
           <b>{{team.memberName(p.authorId)}}</b> <span class="tiny">{{fmt(p.createdAt)}}</span>
           <p><template v-for="(seg,si) in mentionSegments(p.text, p.mentionIds)" :key="si"><span v-if="seg.mention" class="mention">{{seg.text}}</span><template v-else>{{seg.text}}</template></template></p><p v-if="p.percent!=null"><span class="tl-pct">进度 {{p.percent}}%</span></p>
           <p v-if="p.blocked" class="blocked-txt">阻塞：{{p.blockReason}}</p><p v-if="p.nextStep" class="small">下一步：{{p.nextStep}}</p></div></div>
         <p v-if="!progress.length" class="small">暂无进展记录，在下方输入框里将提交第一条进展。</p>
       </div>
       <div v-else-if="tab==='comments'" class="tl">
-        <div v-for="c in comments" :key="c.id" class="tl-item"><Avatar :name="team.memberName(c.authorId)" :color="team.member(c.authorId)?.avatarColor"/><div><b>{{team.memberName(c.authorId)}}</b> <span class="tiny">{{fmt(c.createdAt)}}</span>
+        <div v-for="c in comments" :key="c.id" class="tl-item" :data-hl-comment="c.id" :class="{hl: hlCommentId===c.id}"><Avatar :name="team.memberName(c.authorId)" :color="team.member(c.authorId)?.avatarColor"/><div><b>{{team.memberName(c.authorId)}}</b> <span class="tiny">{{fmt(c.createdAt)}}</span>
           <template v-if="editCommentId===c.id"><textarea v-model="editCommentText" rows="2" style="width:100%"/><span style="display:flex;gap:6px;margin-top:4px"><AppButton variant="ghost" @click="editCommentId=null">取消</AppButton><AppButton :disabled="commentBusy" @click="saveComment(c)">{{ commentBusy ? '保存中…' : '保存' }}</AppButton></span></template>
           <p v-else><template v-for="(seg,si) in mentionSegments(c.content, c.mentionIds)" :key="si"><span v-if="seg.mention" class="mention">{{seg.text}}</span><template v-else>{{seg.text}}</template></template></p>
           <span v-if="editCommentId!==c.id" style="display:flex;gap:8px"><button v-if="canEditComment(c)" class="press tiny" style="color:var(--theme)" @click="editCommentId=c.id;editCommentText=c.content">编辑</button><button v-if="canDeleteComment(c)" class="press tiny" style="color:var(--c-red)" @click="removeComment(c)">删除</button></span></div></div>
@@ -168,9 +169,11 @@
 </Drawer>
 </template>
 <script setup lang="ts">
-import { ref, computed, watch } from 'vue'
+import { ref, computed, watch, nextTick } from 'vue'
+import { useRouter } from 'vue-router'
 import { marked } from 'marked'; import DOMPurify from 'dompurify'
-import { X, OctagonAlert, Zap, ChevronDown, FileText, Layers, ClipboardList, Check, Clock, Send, Pencil, Gauge } from 'lucide-vue-next'
+import { X, OctagonAlert, Zap, ChevronDown, FileText, Layers, ClipboardList, Check, Clock, Send, Pencil, Gauge, Link2 } from 'lucide-vue-next'
+import { openItem } from '../utils/openItem'
 import Drawer from './Drawer.vue'; import Modal from './Modal.vue'; import AppButton from './AppButton.vue'; import AppInput from './AppInput.vue'
 import OverlayMenu from './OverlayMenu.vue'; import { isPromptDismissed, dismissPrompt, clearDismissOnDrop } from '../utils/progressPrompt'
 import StatusPill from './StatusPill.vue'; import EditItemModal from './EditItemModal.vue'; import { STATUS_META, TYPE_META, STORY_CAT_META, TASK_STATUS_META } from '../api/types'; import TypeBadge from './TypeBadge.vue'; import Avatar from './Avatar.vue'; import ProgressBar from './ProgressBar.vue'
@@ -178,9 +181,28 @@ import MentionInput from './MentionInput.vue'; import { mentionSegments } from '
 import { api, ApiError } from '../api/http'; import type { Item, ProgressUpdate, Comment, Activity } from '../api/types'
 import { useTeam } from '../stores/team'; import { useAuth } from '../stores/auth'; import { memberLabel } from '../utils/memberLabel'
 import { useToast } from '../stores/toast'; import { useBusy } from '../utils/busy'
-const props = defineProps<{open:boolean; itemId:number|null}>()
+const props = defineProps<{open:boolean; itemId:number|null; highlightCommentId?:number|null; highlightProgressId?:number|null}>()
 const emit = defineEmits(['close','changed','open-item'])
+const router = useRouter()
 const team = useTeam(), auth = useAuth(), toast = useToast(), busy = useBusy()
+// 修订六契约 4：复制链接（统一直达地址 /i/:id）+ 打开时滚动高亮目标评论/进展 2.8 秒。
+async function copyLink(){ if (!item.value) return
+  try { await navigator.clipboard.writeText(`${location.origin}/i/${item.value.id}`); toast.show('链接已复制') } catch { toast.show('复制失败，请手动复制地址栏链接') } }
+const hlCommentId = ref<number|null>(null), hlProgressId = ref<number|null>(null)
+let hlTimer: any = null
+async function applyHighlight(){
+  hlCommentId.value = null; hlProgressId.value = null
+  const cid = props.highlightCommentId ?? null, pid = props.highlightProgressId ?? null
+  if (cid == null && pid == null) return
+  tab.value = cid != null ? 'comments' : 'progress'
+  await nextTick()
+  const sel = cid != null ? `[data-hl-comment="${cid}"]` : `[data-hl-progress="${pid}"]`
+  const el = document.querySelector(sel) as HTMLElement | null
+  if (!el) return
+  if (cid != null) hlCommentId.value = cid; else hlProgressId.value = pid
+  el.scrollIntoView({ behavior: 'smooth', block: 'center' })
+  clearTimeout(hlTimer); hlTimer = setTimeout(() => { hlCommentId.value = null; hlProgressId.value = null }, 2800)
+}
 const item = ref<Item|null>(null), loading = ref(false), titleDraft = ref(''), tab = ref('progress')
 const progress = ref<ProgressUpdate[]>([]), comments = ref<Comment[]>([]), activities = ref<Activity[]>([]), allItems = ref<Item[]>([])
 const showActions = ref(false), showTransfer = ref(false), reasonAction = ref<string|null>(null), reason = ref(''), editOpen = ref(false)
@@ -316,6 +338,7 @@ async function load(){
     activities.value = await api.get(`/teams/${tid}/items/${props.itemId}/activities`).catch(()=>[])
     allItems.value = await api.get(`/teams/${tid}/items?scope=all`).catch(()=>[])
     checklist.value = await api.get(`/teams/${tid}/items/${props.itemId}/checklist`).catch(()=> item.value?.checklist ?? [])
+    applyHighlight()
   } catch(e){ toast.show(e instanceof ApiError ? e.message : '加载失败') } finally { loading.value = false }
 }
 watch(()=> [props.open, props.itemId], ()=>{ if (props.open) load() })
@@ -392,6 +415,7 @@ async function submitComment(){ if(!item.value || !cText.value.trim() || comment
 .mention{color:var(--theme);font-weight:600;background:var(--sel);border-radius:5px;padding:0 3px}
 .tl{margin-top:14px;display:flex;flex-direction:column;gap:14px}
 .tl-item{display:flex;gap:10px}.tl-item p{margin:2px 0}.blocked-txt{color:var(--c-red);font-size:12px}
+.tl-item.hl{background:var(--theme-soft);border-radius:12px;box-shadow:0 0 0 6px var(--theme-soft);transition:background .3s}
 .prow{display:flex;gap:8px;align-items:center;flex-wrap:wrap}.num{width:96px;min-height:40px;border:1px solid var(--separator);border-radius:10px;background:var(--fill);padding:6px 10px}
 .flexin{flex:1;min-height:40px;border:1px solid var(--separator);border-radius:10px;background:var(--fill);padding:6px 10px;min-width:140px}
 .tlist{display:flex;flex-direction:column;gap:4px;margin-top:10px}

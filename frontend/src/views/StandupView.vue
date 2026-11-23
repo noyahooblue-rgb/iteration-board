@@ -19,7 +19,7 @@
         <p v-for="d in m.yesterdayDone" :key="'d'+d.id" class="tiny line done"><span class="cnum">{{d.code}}</span> 已完成：{{d.title}}</p>
         <p v-if="!m.yesterdayProgress.length && !m.yesterdayDone.length" class="tiny dim">昨日未登记进展</p></div>
       <div class="sec"><h4>今日计划</h4>
-        <button v-for="it in m.todayItems" :key="it.id" class="tiny line press tbtn" @click="openId=it.id;drawerOpen=true"><span class="cnum">{{it.code}}</span> {{it.title}}</button>
+        <button v-for="it in m.todayItems" :key="it.id" class="tiny line press tbtn" @click="openItem(router, it.id)"><span class="cnum">{{it.code}}</span> {{it.title}}</button>
         <p v-if="!m.todayItems.length" class="tiny dim">暂无在做事项</p></div>
       <div class="sec" v-if="m.blockedItems.length"><h4>阻塞</h4>
         <p v-for="b in m.blockedItems" :key="b.id" class="tiny line blocked"><span class="cnum">{{b.code}}</span> {{b.blockReason ?? '已标记阻塞'}}</p></div>
@@ -40,7 +40,9 @@ import { OctagonAlert } from 'lucide-vue-next'
 import AppShell from '../components/AppShell.vue'; import GlassPanel from '../components/GlassPanel.vue'; import Avatar from '../components/Avatar.vue'; import AppButton from '../components/AppButton.vue'; import ItemDrawer from '../components/ItemDrawer.vue'
 import { api, ApiError } from '../api/http'; import { MEMBER_STATUS_META, type StandupData, type Item } from '../api/types'
 import { useTeam } from '../stores/team'; import { useToast } from '../stores/toast'
-const team = useTeam(), toast = useToast()
+import { useRouter } from 'vue-router'
+import { openItem } from '../utils/openItem'
+const team = useTeam(), toast = useToast(), router = useRouter()
 const fmtTime = (isoStr: string) => { const d = new Date(isoStr); return isNaN(d.getTime()) ? isoStr : `${String(d.getHours()).padStart(2,'0')}:${String(d.getMinutes()).padStart(2,'0')}` }
 import { useAuth } from '../stores/auth'
 const auth = useAuth(); void auth

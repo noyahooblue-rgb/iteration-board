@@ -16,7 +16,7 @@
   <p v-if="searched" class="small" style="margin:10px 0">共 {{shown.length}} 条结果{{q ? `（关键词「${q}」）` : ''}}。含已完成与已归档事项，不含回收站已删除项。</p>
   <article v-for="it in shown" :key="it.id" class="kcard" :style="{borderLeftColor:itemColor(it)}">
     <div class="krow"><span class="small">{{it.code}}</span><TypeBadge :type="it.type" :story-category="it.storyCategory"/><span style="flex:1"/><StatusPill :status="it.status"/></div>
-    <button class="ktitle press" @click="openId=it.id;drawerOpen=true">{{it.title}}</button>
+    <button class="ktitle press" @click="openItem(router, it.id)">{{it.title}}</button>
     <p class="small desc">{{it.description}}</p>
     <div class="krow foot"><AvatarStack v-if="it.ownerIds.length" :ids="it.ownerIds" :size="20"/><span class="tiny">{{fmt(it.updatedAt)}} 更新</span></div>
   </article>
@@ -41,6 +41,7 @@ import { Search, BookmarkPlus, X } from 'lucide-vue-next'
 import AppShell from '../components/AppShell.vue'; import AppButton from '../components/AppButton.vue'; import TypeBadge from '../components/TypeBadge.vue'; import StatusPill from '../components/StatusPill.vue'; import AvatarStack from '../components/AvatarStack.vue'; import ItemDrawer from '../components/ItemDrawer.vue'
 import { api, ApiError } from '../api/http'; import { TYPE_META, itemColor, FEEDBACK_STATUS_LABELS, type Item, type SavedFilter, type FeedbackItem } from '../api/types'
 import { useTeam } from '../stores/team'; import { useToast } from '../stores/toast'
+import { openItem } from '../utils/openItem'
 import { fmtDateTime } from '../utils/datetime'
 const route = useRoute(), router = useRouter(), team = useTeam(), toast = useToast()
 const q = ref(''), fType = ref(''), results = ref<Item[]>([]), fbResults = ref<FeedbackItem[]>([]), filters = ref<SavedFilter[]>([]), searched = ref(false), searching = ref(false), loadErr = ref('')
@@ -61,7 +62,7 @@ async function removeFilter(f: SavedFilter){ try { await api.del(`/teams/${team.
 async function initFromRoute(){ await loadFilters()
   const fid = route.query.filter; if (fid) { const f = filters.value.find(x=>x.id===Number(fid)); if (f) { applyFilter(f); return } }
   const kw = route.query.q; if (kw) { q.value = String(kw); await run() }
-  const open = route.query.open; if (open) { openId.value = Number(open); drawerOpen.value = true } }
+  const open = route.query.open; if (open) { openItem(router, Number(open)) } }
 onMounted(initFromRoute)
 watch(()=> route.query, ()=>{ if (route.path === '/search') initFromRoute() })
 </script>

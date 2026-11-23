@@ -102,7 +102,7 @@ function notify(userId: number, teamId: number | null, category: string, item: I
     const prev = notifications.find(n => n.userId === userId && n.itemId === item.id && n.category === category && !n.readAt && Date.now() - new Date(n.createdAt).getTime() < 5 * 60 * 1000)
     if (prev) { prev.content = content; prev.createdAt = new Date().toISOString(); return }
   }
-  const n: Notification = { id: nextId++, userId, teamId, type: nType, category, itemId: item?.id ?? null, itemCode: item?.code ?? null, refId, actorId, content, readAt: null, createdAt: new Date().toISOString() }
+  const n: Notification = { id: nextId++, userId, teamId, type: nType, category, itemId: item?.id ?? null, itemCode: item?.code ?? null, itemType: item?.type ?? null, refId, actorId, content, readAt: null, createdAt: new Date().toISOString() }
   notifications.unshift(n)
   pushNotif(n)
 }
@@ -116,12 +116,12 @@ function pushNotif(n: Notification) {
   }
   try { const set = (globalThis as any).__ibMockEventListeners as Set<(x: any) => void> | undefined; set?.forEach(cb => { try { cb(payload) } catch {} }) } catch {}
 }
-const notifView = (n: Notification) => ({ id: n.id, teamId: n.teamId, type: n.type, category: n.category, itemId: n.itemId, itemCode: n.itemCode, refId: n.refId ?? null, actorId: n.actorId, content: n.content, readAt: n.readAt, createdAt: n.createdAt })
+const notifView = (n: Notification) => ({ id: n.id, teamId: n.teamId, type: n.type, category: n.category, itemId: n.itemId, itemCode: n.itemCode, itemType: n.itemType ?? (n.itemId != null ? items.find(i => i.id === n.itemId)?.type ?? null : null), refId: n.refId ?? null, actorId: n.actorId, content: n.content, readAt: n.readAt, createdAt: n.createdAt })
 // 同步连败通知（对齐真实后端 yefqkvf3 待问 1）：type=SYNC_FAILED、类别 ITEM_UPDATE（后端 NotificationView.categoryOf 的默认归口）；
 // 发给所有组长，包括触发者本人（此路径不跳过自己）；偏好层不变——关闭 ITEM_UPDATE 者不生成。
 function notifySyncFailed(userId: number, teamId: number, content: string, actorId: number) {
   if (prefsOf(userId)['ITEM_UPDATE'] === false) return
-  const n: Notification = { id: nextId++, userId, teamId, type: 'SYNC_FAILED', category: 'ITEM_UPDATE', itemId: null, itemCode: null, refId: null, actorId, content, readAt: null, createdAt: new Date().toISOString() }
+  const n: Notification = { id: nextId++, userId, teamId, type: 'SYNC_FAILED', category: 'ITEM_UPDATE', itemId: null, itemCode: null, itemType: null, refId: null, actorId, content, readAt: null, createdAt: new Date().toISOString() }
   notifications.unshift(n)
   pushNotif(n)
 }
@@ -247,6 +247,7 @@ function route(method: string, rawPath: string, body: any): { status: number; da
   if (seg[0] === 'admin') return adminRoute(method, seg, body, q)
   if (seg[0] === 'feedback') return feedbackRoute(method, seg, body, q)
   if (seg[0] === 'release-notes') return releaseNotesRoute(method, seg, body)
+  if (seg[0] === 'items') return itemResolutionRoute(method, seg)
   if (seg[0] === 'teams') return teams(method, seg, body, q)
   throw err(404, 'NOT_FOUND', '接口不存在')
 }
@@ -260,7 +261,7 @@ function backupStatusData() {
 }
 function systemInfoData() {
   const bs = backupStatusData()
-  return { appVersion: APP_VERSION, buildDate: BUILD_DATE, databaseVersion: 'PostgreSQL 16.x（演示值）', flywayVersion: 'V12（演示值）', installDir: 'C:\\IterationBoard（演示值）', dataDir: 'C:\\IterationBoard\\data（演示值）', dataDirSizeBytes: 128 * 1024 * 1024, lastBackupAt: bs.lastBackupAt, lastBackupResult: bs.lastBackupResult, backupStale: bs.backupStale, serviceStartType: '未知', serviceStartTypeNote: 'JVM 内无法判定 Windows 服务启动类型，请在服务器 services.msc 中查看', ai: { mode: 'mock', platformEnabled: false, configured: false, status: 'MOCK' }, lanAddresses: ['192.168.1.100'], serverPort: 8080 }
+  return { appVersion: APP_VERSION, buildDate: BUILD_DATE, databaseVersion: 'PostgreSQL 16.x（演示值）', flywayVersion: 'V12（演示值）', installDir: 'C:\\IterationBoard（演示值）', dataDir: 'C:\\IterationBoard\\data（演示值）', dataDirSizeBytes: 128 * 1024 * 1024, lastBackupAt: bs.lastBackupAt, lastBackupResult: bs.lastBackupResult, backupStale: bs.backupStale, serviceStartType: '未知', serviceStartTypeNote: 'JVM 内无法判定 Windows 服务启动类型，请在服务器 services.msc 中查看', ai: { mode: 'mock', platformEnabled: false, configured: false, status: 'MOCK' }, lanAddresses: ['http://192.168.1.100:8080'], serverPort: 8080 }
 }
 const RELEASE_NOTES = { version: APP_VERSION, title: '本次更新了什么', content: '## 本次更新（1.1.0）\n- 浏览器提醒三层：标签页标题未读数、favicon 红点角标、可选桌面通知与提示音\n- 新增「意见反馈」：可带截图提交、+1、评论，管理员可流转状态并导出\n- 成员离组前必须完成事项交接\n- 站会摘要显示数据截至时间，组长/PO 可刷新\n- 报告可导出 Word，也可复制为邮件正文\n- 平台管理新增系统信息与管理员授予/撤销' }
 const releaseReadBy = new Set<number>()
@@ -279,7 +280,7 @@ let feedbacks: Feedback[] = [
   { id: 2, submitterId: 5, submitterName: '李安然', submitterLoginName: 'lianran', type: 'ISSUE', title: '站会页备注保存后偶尔不刷新', description: '保存站会备注后页面偶尔还是旧内容，刷新浏览器后正常。', status: 'NEW', plannedVersion: null, rejectReason: null, releasedVersion: null, officialReply: null, pageUrl: '/standup', appVersion: APP_VERSION, browserInfo: 'Edge 130', images: [{ id: 1, fileName: '站会备注截图.png', contentType: 'image/png', sizeBytes: 204800 }], plusOneUserIds: [], comments: [], createdAt: '2026-11-19T14:20:00', updatedAt: '2026-11-19T14:20:00' },
 ]
 let feedbackSeq = 100, feedbackCommentSeq = 100, feedbackImageSeq = 100
-const feedbackView = (f: Feedback, uid: number) => { const { comments, plusOneUserIds, ...rest } = f; return { ...rest, plusOneCount: plusOneUserIds.length, myPlusOne: plusOneUserIds.includes(uid), commentCount: comments.length } }
+const feedbackView = (f: Feedback, uid: number) => { const { comments, plusOneUserIds, ...rest } = f; return { ...rest, imagesVisible: f.submitterId === uid || !!byId(uid)?.platformAdmin, plusOneCount: plusOneUserIds.length, myPlusOne: plusOneUserIds.includes(uid), commentCount: comments.length } }
 const FB_TRANSITIONS: Record<string, string[]> = { NEW: ['ANALYZING'], ANALYZING: ['ACCEPTED', 'REJECTED'], ACCEPTED: ['RELEASED'], REJECTED: [], RELEASED: [] }
 function feedbackRoute(method: string, seg: string[], body: any, q: URLSearchParams) {
   const u = me()
@@ -305,6 +306,9 @@ function feedbackRoute(method: string, seg: string[], body: any, q: URLSearchPar
   if (method === 'GET' && seg[1] === 'search') { const kw = (q.get('q') ?? '').trim().toLowerCase(); if (!kw) return { status: 200, data: [] }; return { status: 200, data: feedbacks.filter(f => f.submitterId === u.id && (f.title.toLowerCase().includes(kw) || f.description.toLowerCase().includes(kw))).slice(0, 20).map(f => feedbackView(f, u.id)) } }
   const f = feedbacks.find(x => x.id === Number(seg[1])); if (!f) throw err(404, 'NOT_FOUND', '反馈不存在')
   if (method === 'GET' && seg.length === 2) return { status: 200, data: feedbackView(f, u.id) }
+  if (method === 'GET' && seg[2] === 'images') { const im = f.images.find(x => x.id === Number(seg[3])); if (!im) throw err(404, 'NOT_FOUND', '图片不存在')
+    if (f.submitterId !== u.id && !u.platformAdmin) throw err(403, 'FORBIDDEN', '反馈图片仅提交人和管理员可见')
+    return { status: 200, data: { id: im.id, contentType: im.contentType, dataUrl: 'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNk+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg==' } } }
   if (method === 'PATCH' && seg.length === 2) { if (f.submitterId !== u.id) throw err(403, 'FORBIDDEN', '只能修改自己提交的反馈'); if (f.status !== 'NEW') throw err(409, 'FEEDBACK_LOCKED', '反馈已开始处理，不能再修改')
     if (body?.title?.trim()) f.title = body.title.trim(); if (body?.description?.trim()) f.description = body.description.trim(); if (body?.type && ['ISSUE', 'SUGGESTION', 'OTHER'].includes(body.type)) f.type = body.type
     f.updatedAt = new Date().toISOString(); return { status: 200, data: feedbackView(f, u.id) } }
@@ -329,13 +333,48 @@ function feedbackRoute(method: string, seg: string[], body: any, q: URLSearchPar
   throw err(404, 'NOT_FOUND', '接口不存在')
 }
 // ---------------- 平台管理（M5 Q6 审计日志） ----------------
+// 修订六契约 2：管理员用户 DTO（扩展 mustChangePassword / locked / lastLoginAt）。
+function adminUserDto(x: StoredUser) {
+  const f = failures.get(x.loginName)
+  return { id: x.id, loginName: x.loginName, displayName: x.displayName, platformAdmin: x.platformAdmin, status: (x as any).status ?? 'ACTIVE', createdAt: '2026-11-01T09:00:00', mustChangePassword: x.mustChangePassword, locked: !!f && f.lockedUntil > Date.now(), lastLoginAt: (x as any).lastLoginAt ?? null }
+}
+// 修订六契约 4/7：事项直达解析（演示事项均属云雀小组 teamId=1；含已删事项，deleted 标记区分）。
+function itemResolutionRoute(method: string, seg: string[]) {
+  const u = me()
+  if (method === 'GET' && seg[2] === 'resolution') {
+    const it = items.find(i => i.id === Number(seg[1])); if (!it) throw err(404, 'NOT_FOUND', '事项不存在')
+    const teamId = 1
+    return { status: 200, data: { id: it.id, code: it.code, type: it.type, title: it.title, status: it.status, teamId, teamName: teamRow.name, parentId: it.parentId, iterationId: it.iterationId, deleted: !!it.deletedAt, hasAccess: !!memberOf(teamId, u.id) || u.platformAdmin } }
+  }
+  throw err(404, 'NOT_FOUND', '接口不存在')
+}
+// 修订六契约 2：重置密码 / 解除锁定 / 强制下线（演示实现：改内存状态 + 审计 + 通知）。命中返回结果，未命中返回 null。
+function adminUserOps(method: string, seg: string[], body: any, caller: StoredUser) {
+  if (method !== 'POST' || seg[1] !== 'users') return null
+  const target = byId(Number(seg[2])); if (!target) throw err(404, 'NOT_FOUND', '账号不存在')
+  if (seg[3] === 'reset-password') {
+    if (target.id === caller.id) throw err(400, 'CANNOT_RESET_SELF', '不能重置自己的密码，请到个人设置修改')
+    if (caller.password !== body?.adminPassword) throw err(400, 'INVALID_ADMIN_PASSWORD', '管理员密码不正确')
+    const alpha = 'ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnpqrstuvwxyz23456789'; let rand = ''
+    for (let i = 0; i < 12; i++) rand += alpha[Math.floor(Math.random() * alpha.length)]
+    const temp = 'Aa1@' + rand // 保证含大小写/数字/特殊（特殊仅从 @#*-_=+.? 选），共 16 位
+    target.password = temp; target.mustChangePassword = true; (target as any).passwordVersion = ((target as any).passwordVersion ?? 0) + 1; failures.delete(target.loginName)
+    audit(0, caller, 'RESET_USER_PASSWORD', 'USER', target.id, target.loginName)
+    notify(target.id, null, 'SYSTEM', null, '你的密码已由管理员重置，请使用管理员告知的临时密码登录并修改', caller.id, 'PASSWORD_RESET')
+    return { status: 200, data: { temporaryPassword: temp } }
+  }
+  if (seg[3] === 'unlock') { failures.delete(target.loginName); audit(0, caller, 'UNLOCK_USER', 'USER', target.id, target.loginName); return { status: 200, data: adminUserDto(target) } }
+  if (seg[3] === 'force-logout') { (target as any).passwordVersion = ((target as any).passwordVersion ?? 0) + 1; audit(0, caller, 'FORCE_LOGOUT', 'USER', target.id, target.loginName); return { status: 200, data: adminUserDto(target) } }
+  return null
+}
 function adminRoute(method: string, seg: string[], body: any, q: URLSearchParams) {
   const u = me(); if (!u.platformAdmin) throw err(403, 'FORBIDDEN', '仅平台管理员可访问')
   // 平台管理新接口（1.0.4 J）：账号 / 小组列表，字段与前端 AdminView 约定一致；演示数据即种子虚构数据（云雀小组 SKY 等）。
   // StoredUser 无 createdAt 字段，演示口径统一回固定演示日期，不虚构逐个不同的注册时间。
   if (method === 'GET' && seg[1] === 'users') {
-    return { status: 200, data: users.map(x => ({ id: x.id, loginName: x.loginName, displayName: x.displayName, platformAdmin: x.platformAdmin, status: (x as any).status ?? 'ACTIVE', createdAt: '2026-11-01T09:00:00' })) }
+    return { status: 200, data: users.map(x => adminUserDto(x)) }
   }
+  const opsResult = adminUserOps(method, seg, body, u); if (opsResult) return opsResult
   if (method === 'GET' && seg[1] === 'teams') {
     return { status: 200, data: allTeams().map(t => ({ id: t.id, name: t.name, code: t.code, memberCount: members.filter(m => m.teamId === t.id).length, createdAt: '2026-11-01T09:00:00' })) }
   }
@@ -393,7 +432,7 @@ function auth(method: string, sub: string, body: any) {
       if (f.count >= 5) { f.lockedUntil = now + 15 * 60000; failures.set(body.loginName, f); throw err(423, 'ACCOUNT_LOCKED', '连续失败 5 次，账号锁定 15 分钟', { remainingMinutes: 15 }) }
       throw err(401, 'INVALID_CREDENTIALS', needCaptcha ? '登录名、密码或验证码不正确' : '登录名或密码不正确', { needCaptcha, failCount: f.count })
     }
-    failures.delete(body.loginName); setSession(u!.id); return { status: 200, data: pub(u!) }
+    failures.delete(body.loginName); (u as any).lastLoginAt = new Date().toISOString(); setSession(u!.id); return { status: 200, data: pub(u!) }
   }
   if (method === 'POST' && sub === 'logout') { setSession(null); return { status: 204, data: null } }
   if (method === 'GET' && sub === 'me') return { status: 200, data: pub(me()) }

@@ -33,7 +33,17 @@ public class AdminController {
         this.currentUser = currentUser;
     }
 
-    public record AdminUserDto(Long id, String loginName, String displayName, boolean platformAdmin, String status, Instant createdAt) { }
+    public record AdminUserDto(Long id, String loginName, String displayName, boolean platformAdmin, String status, Instant createdAt,
+                               boolean mustChangePassword, boolean locked, Instant lastLoginAt) {
+        /** rc3（契约 2）：locked = lockedUntil 在未来；供 AdminOpsController 的 unlock/force-logout 复用同一形状。 */
+        public static AdminUserDto of(AppUser u) {
+            return new AdminUserDto(u.getId(), u.getLoginName(), u.getDisplayName(),
+                    u.isPlatformAdmin(), u.getStatus(), u.getCreatedAt(),
+                    u.isMustChangePassword(),
+                    u.getLockedUntil() != null && u.getLockedUntil().isAfter(Instant.now()),
+                    u.getLastLoginAt());
+        }
+    }
     public record AdminTeamDto(Long id, String name, String code, long memberCount, Instant createdAt) { }
 
     private void requirePlatformAdmin() {
@@ -45,10 +55,7 @@ public class AdminController {
     @GetMapping("/users")
     public List<AdminUserDto> users() {
         requirePlatformAdmin();
-        return userRepo.findAll().stream()
-                .map(u -> new AdminUserDto(u.getId(), u.getLoginName(), u.getDisplayName(),
-                        u.isPlatformAdmin(), u.getStatus(), u.getCreatedAt()))
-                .toList();
+        return userRepo.findAll().stream().map(AdminUserDto::of).toList();
     }
 
     @Transactional(readOnly = true)

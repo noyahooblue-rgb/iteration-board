@@ -24,7 +24,7 @@
       <h2 class="ghead"><template v-if="g.task"><span class="lcode">{{g.task.code}}</span> {{g.task.title}} <RouterLink :to="`/task/${g.task.id}`" class="small link">任务详情 →</RouterLink></template><template v-else>独立事项</template></h2>
       <div class="prow glass" v-for="it in g.items" :key="it.id">
         <span class="tdot" :style="{background:itemColor(it)}"/>
-        <button class="grow press tbtn" @click="openId=it.id;drawerOpen=true"><span class="small">{{it.code}}</span> {{it.title}} <span class="tiny">{{STATUS_META[it.status].label}}</span></button>
+        <button class="grow press tbtn" @click="openItem(router, it.id)"><span class="small">{{it.code}}</span> {{it.title}} <span class="tiny">{{STATUS_META[it.status].label}}</span></button>
         <label class="est">估算<input type="number" min="0" step="0.5" :value="it.estimate ?? ''" @change="setEstimate(it, $event)" aria-label="估算"/> {{unit}}</label>
         <AvatarStack v-if="it.ownerIds.length" :ids="it.ownerIds" :size="22"/>
         <AppButton v-if="it.status==='UNCLAIMED'" :disabled="busy.is('claim'+it.id)" @click="claim(it)">认领</AppButton>
@@ -49,12 +49,13 @@
 </template>
 <script setup lang="ts">
 import { ref, computed, onMounted } from 'vue'
-import { RouterLink } from 'vue-router'
+import { RouterLink, useRouter } from 'vue-router'
+import { openItem } from '../utils/openItem'
 import AppShell from '../components/AppShell.vue'; import GlassPanel from '../components/GlassPanel.vue'; import AppButton from '../components/AppButton.vue'; import Avatar from '../components/Avatar.vue'; import AvatarStack from '../components/AvatarStack.vue'; import ProgressBar from '../components/ProgressBar.vue'; import ItemDrawer from '../components/ItemDrawer.vue'
 import { api, ApiError } from '../api/http'; import { STATUS_META, itemColor, estimateUnitLabel, type Item, type Iteration, type Planning } from '../api/types'
 import { useBusy } from '../utils/busy'
 import { useTeam } from '../stores/team'; import { useAuth } from '../stores/auth'; import { useToast } from '../stores/toast'
-const team = useTeam(), auth = useAuth(), toast = useToast(), busy = useBusy()
+const team = useTeam(), auth = useAuth(), toast = useToast(), busy = useBusy(), router = useRouter()
 const planning = ref<Planning|null>(null), loading = ref(false)
 // 0.5.3 结论 1：规划页顶部迭代选择器——可选规划中 + 进行中迭代，默认 planning-target（规划中优先）
 const iterations = ref<Iteration[]>([]), selectedId = ref<number|null>(null)

@@ -19,7 +19,7 @@ public final class NotificationView {
             case "SUBMIT", "APPROVE", "REJECT", "BLOCK", "DECLINE", "RELEASE", "PROGRESS",
                  "CLAIM", "CANCEL", "COMMENT" -> "ITEM_UPDATE";
             case "JOIN", "JOIN_REQUEST", "JOIN_APPROVED", "JOIN_REJECTED", "ITERATION_STARTED", "ITERATION_FINISHED", "SYSTEM",
-                 "FEEDBACK_STATUS", "FEEDBACK_COMMENT", "FEEDBACK_PLUS_ONE" -> "SYSTEM";
+                 "FEEDBACK_STATUS", "FEEDBACK_COMMENT", "FEEDBACK_PLUS_ONE", "PASSWORD_RESET" -> "SYSTEM";
             default -> type.startsWith("REMINDER") ? "REMINDER" : "ITEM_UPDATE";
         };
     }
@@ -37,6 +37,8 @@ public final class NotificationView {
         m.put("itemId", n.getItem() == null ? null : n.getItem().getId());
         m.put("refId", n.getRefId());
         m.put("itemCode", n.getItem() == null ? null : n.getItem().getCode());
+        // rc3（契约 4）：事项类型随通知带出，前端显示/预判用；跳转仍以 /i/:id 实时查询为准
+        m.put("itemType", n.getItem() == null ? null : n.getItem().getType().name());
         m.put("actorId", n.getActor() == null ? null : n.getActor().getId());
         m.put("content", n.getContent());
         m.put("readAt", n.getReadAt());

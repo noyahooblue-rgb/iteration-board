@@ -51,7 +51,7 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: ib-offline-package
-          path: packaging/dist/iteration-board-offline-1.1.0-rc2.zip
+          path: packaging/dist/iteration-board-offline-1.1.0-rc3.zip
           retention-days: 7
 
   # 档 2（Windows 冒烟，目标 ≤20 分钟）：中文+空格路径、中文 TEMP、chcp 936 下

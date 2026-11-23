@@ -70,7 +70,7 @@ class P2cNotificationScopeTest {
         mvc.perform(post("/api/v1/auth/register").session(session).with(csrf())
                         .contentType(MediaType.APPLICATION_JSON)
                         .content("{\"loginName\":\"" + loginName + "\",\"displayName\":\"" + displayName
-                                + "\",\"password\":\"passw0rd1\",\"captchaId\":\"" + c[0]
+                                + "\",\"password\":\"passw0rd1!\",\"captchaId\":\"" + c[0]
                                 + "\",\"captchaCode\":\"" + c[1] + "\"}"))
                 .andExpect(status().isCreated());
         return session;
@@ -112,7 +112,7 @@ class P2cNotificationScopeTest {
         MockHttpSession admin = login("admin", "InitPass1234");
         mvc.perform(post("/api/v1/auth/change-password").session(admin).with(csrf())
                         .contentType(MediaType.APPLICATION_JSON)
-                        .content("{\"oldPassword\":\"InitPass1234\",\"newPassword\":\"NewPass1234\"}"))
+                        .content("{\"oldPassword\":\"InitPass1234\",\"newPassword\":\"NewPass1234!\"}"))
                 .andExpect(status().isNoContent());
         return admin;
     }

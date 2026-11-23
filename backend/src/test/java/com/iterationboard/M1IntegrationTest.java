@@ -129,7 +129,7 @@ class M1IntegrationTest {
 
     @Test
     void registerLoginChangePassword_firstUserIsNotPlatformAdmin() throws Exception {
-        MockHttpSession s = register("alice", "爱丽丝", "passw0rd1");
+        MockHttpSession s = register("alice", "爱丽丝", "passw0rd1!");
         MvcResult me = mvc.perform(get("/api/v1/auth/me").session(s)).andExpect(status().isOk()).andReturn();
         String body = me.getResponse().getContentAsString();
         assertThat((Boolean) JsonPath.read(body, "$.platformAdmin")).isFalse();
@@ -137,14 +137,14 @@ class M1IntegrationTest {
 
         mvc.perform(post("/api/v1/auth/change-password").session(s).with(csrf())
                         .contentType(MediaType.APPLICATION_JSON)
-                        .content("{\"oldPassword\":\"passw0rd1\",\"newPassword\":\"newpass123\"}"))
+                        .content("{\"oldPassword\":\"passw0rd1!\",\"newPassword\":\"newpass123!\"}"))
                 .andExpect(status().isNoContent());
         mvc.perform(post("/api/v1/auth/logout").session(s).with(csrf())).andExpect(status().isNoContent());
 
         MockHttpSession s2 = new MockHttpSession();
-        MvcResult oldLogin = login(s2, "alice", "passw0rd1", false);
+        MvcResult oldLogin = login(s2, "alice", "passw0rd1!", false);
         assertThat(oldLogin.getResponse().getStatus()).isEqualTo(401);
-        MvcResult newLogin = login(s2, "alice", "newpass123", false);
+        MvcResult newLogin = login(s2, "alice", "newpass123!", false);
         assertThat(newLogin.getResponse().getStatus()).isEqualTo(200);
     }
 
@@ -160,12 +160,12 @@ class M1IntegrationTest {
                 .andExpect(status().isBadRequest())
                 .andExpect(jsonPath("$.code").value("VALIDATION"));
 
-        register("bob", "鲍勃", "passw0rd1");
+        register("bob", "鲍勃", "passw0rd1!");
         MockHttpSession s2 = new MockHttpSession();
         String[] c2 = captchaCode(s2).split("\\|");
         mvc.perform(post("/api/v1/auth/register").session(s2).with(csrf())
                         .contentType(MediaType.APPLICATION_JSON)
-                        .content("{\"loginName\":\"bob\",\"displayName\":\"鲍勃二号\",\"password\":\"passw0rd1\",\"captchaId\":\"" + c2[0] + "\",\"captchaCode\":\"" + c2[1] + "\"}"))
+                        .content("{\"loginName\":\"bob\",\"displayName\":\"鲍勃二号\",\"password\":\"passw0rd1!\",\"captchaId\":\"" + c2[0] + "\",\"captchaCode\":\"" + c2[1] + "\"}"))
                 .andExpect(status().isConflict())
                 .andExpect(jsonPath("$.code").value("LOGIN_NAME_TAKEN"));
     }
@@ -174,7 +174,7 @@ class M1IntegrationTest {
 
     @Test
     void loginCaptchaAfter3Failures_and_lockAfter5() throws Exception {
-        register("carol", "卡罗尔", "passw0rd1");
+        register("carol", "卡罗尔", "passw0rd1!");
         MockHttpSession s = new MockHttpSession();
         for (int i = 0; i < 3; i++) {
             MvcResult r = login(s, "carol", "wrongpass1", false);
@@ -194,7 +194,7 @@ class M1IntegrationTest {
         assertThat((String) JsonPath.read(body6, "$.code")).isEqualTo("ACCOUNT_LOCKED");
         assertThat((String) JsonPath.read(body6, "$.detail.lockedUntil")).isNotBlank();
         // 锁定期间正确密码也被拒
-        MvcResult r7 = login(s, "carol", "passw0rd1", true);
+        MvcResult r7 = login(s, "carol", "passw0rd1!", true);
         assertThat(r7.getResponse().getStatus()).isEqualTo(423);
     }
 
@@ -202,7 +202,7 @@ class M1IntegrationTest {
 
     @Test
     void teamJoinApprovalFlow() throws Exception {
-        MockHttpSession leader = register("leader1", "组长一", "passw0rd1");
+        MockHttpSession leader = register("leader1", "组长一", "passw0rd1!");
         MvcResult team = createTeam(leader, "星辰组", "SKY", true);
         String teamBody = team.getResponse().getContentAsString();
         long teamId = ((Number) JsonPath.read(teamBody, "$.id")).longValue();
@@ -211,7 +211,7 @@ class M1IntegrationTest {
         long itemId = createItem(leader, teamId,
                 "{\"type\":\"ADHOC\",\"title\":\"组内事项\",\"destination\":\"POOL\"}");
 
-        MockHttpSession member = register("member1", "成员一", "passw0rd1");
+        MockHttpSession member = register("member1", "成员一", "passw0rd1!");
         // 预览
         MvcResult preview = mvc.perform(get("/api/v1/teams/by-invite/" + invite).session(member))
                 .andExpect(status().isOk()).andReturn();
@@ -250,12 +250,12 @@ class M1IntegrationTest {
 
     @Test
     void crossTeamIsolation() throws Exception {
-        MockHttpSession a = register("usera", "甲用户", "passw0rd1");
+        MockHttpSession a = register("usera", "甲用户", "passw0rd1!");
         MvcResult teamA = createTeam(a, "甲组", "AAA", false);
         long teamAId = ((Number) JsonPath.read(teamA.getResponse().getContentAsString(), "$.id")).longValue();
         long itemA = createItem(a, teamAId, "{\"type\":\"ADHOC\",\"title\":\"甲组事项\",\"destination\":\"POOL\"}");
 
-        MockHttpSession b = register("userb", "乙用户", "passw0rd1");
+        MockHttpSession b = register("userb", "乙用户", "passw0rd1!");
         createTeam(b, "乙组", "BBB", false);
 
         mvc.perform(get("/api/v1/teams/" + teamAId + "/items/" + itemA).session(b)).andExpect(status().isNotFound());
@@ -267,14 +267,14 @@ class M1IntegrationTest {
 
     @Test
     void permissionDenied() throws Exception {
-        MockHttpSession leader = register("leader2", "组长二", "passw0rd1");
+        MockHttpSession leader = register("leader2", "组长二", "passw0rd1!");
         MvcResult team = createTeam(leader, "权限组", "PER", false);
         String tb = team.getResponse().getContentAsString();
         long teamId = ((Number) JsonPath.read(tb, "$.id")).longValue();
         String invite = JsonPath.read(tb, "$.inviteCode");
         long leaderId = myId(leader);
 
-        MockHttpSession member = register("member2", "成员二", "passw0rd1");
+        MockHttpSession member = register("member2", "成员二", "passw0rd1!");
         mvc.perform(post("/api/v1/teams/join").session(member).with(csrf())
                         .contentType(MediaType.APPLICATION_JSON)
                         .content("{\"inviteCode\":\"" + invite + "\"}"))
@@ -304,13 +304,13 @@ class M1IntegrationTest {
 
     @Test
     void transitionFullChain() throws Exception {
-        MockHttpSession leader = register("leader3", "组长三", "passw0rd1");
+        MockHttpSession leader = register("leader3", "组长三", "passw0rd1!");
         MvcResult team = createTeam(leader, "流转组", "FLW", false);
         String tb = team.getResponse().getContentAsString();
         long teamId = ((Number) JsonPath.read(tb, "$.id")).longValue();
         String invite = JsonPath.read(tb, "$.inviteCode");
 
-        MockHttpSession member = register("member3", "成员三", "passw0rd1");
+        MockHttpSession member = register("member3", "成员三", "passw0rd1!");
         long memberId = myId(member);
         mvc.perform(post("/api/v1/teams/join").session(member).with(csrf())
                         .contentType(MediaType.APPLICATION_JSON)
@@ -368,14 +368,14 @@ class M1IntegrationTest {
 
     @Test
     void versionConflicts() throws Exception {
-        MockHttpSession leader = register("leader4", "组长四", "passw0rd1");
+        MockHttpSession leader = register("leader4", "组长四", "passw0rd1!");
         MvcResult team = createTeam(leader, "冲突组", "CNF", false);
         String tb = team.getResponse().getContentAsString();
         long teamId = ((Number) JsonPath.read(tb, "$.id")).longValue();
         String invite = JsonPath.read(tb, "$.inviteCode");
 
-        MockHttpSession m1 = register("member4a", "成员四甲", "passw0rd1");
-        MockHttpSession m2 = register("member4b", "成员四乙", "passw0rd1");
+        MockHttpSession m1 = register("member4a", "成员四甲", "passw0rd1!");
+        MockHttpSession m2 = register("member4b", "成员四乙", "passw0rd1!");
         for (MockHttpSession s : new MockHttpSession[]{m1, m2}) {
             mvc.perform(post("/api/v1/teams/join").session(s).with(csrf())
                             .contentType(MediaType.APPLICATION_JSON)
@@ -413,7 +413,7 @@ class M1IntegrationTest {
 
     @Test
     void checklistCrudAndPersistence() throws Exception {
-        MockHttpSession leader = register("leader5", "组长五", "passw0rd1");
+        MockHttpSession leader = register("leader5", "组长五", "passw0rd1!");
         MvcResult team = createTeam(leader, "清单组", "CHK", false);
         String tb = team.getResponse().getContentAsString();
         long teamId = ((Number) JsonPath.read(tb, "$.id")).longValue();
@@ -453,7 +453,7 @@ class M1IntegrationTest {
                 .andExpect(jsonPath("$.done").value(true));
 
         // 无编辑权限的普通成员新增 → 403（权限同编辑事项：创建人/负责人/PO/组长）
-        MockHttpSession member = register("member5", "成员五", "passw0rd1");
+        MockHttpSession member = register("member5", "成员五", "passw0rd1!");
         mvc.perform(post("/api/v1/teams/join").session(member).with(csrf())
                         .contentType(MediaType.APPLICATION_JSON)
                         .content("{\"inviteCode\":\"" + invite + "\"}"))
@@ -486,10 +486,10 @@ class M1IntegrationTest {
 
     @Test
     void teamCodeDuplicateCaseInsensitiveConflict() throws Exception {
-        MockHttpSession a = register("codeowner", "代号甲", "passw0rd1");
+        MockHttpSession a = register("codeowner", "代号甲", "passw0rd1!");
         createTeam(a, "代号组", "DUP", false);
 
-        MockHttpSession b = register("codeother", "代号乙", "passw0rd1");
+        MockHttpSession b = register("codeother", "代号乙", "passw0rd1!");
         // 完全相同代号
         mvc.perform(post("/api/v1/teams").session(b).with(csrf())
                         .contentType(MediaType.APPLICATION_JSON)
@@ -515,14 +515,14 @@ class M1IntegrationTest {
 
     @Test
     void transferUnclaimedActsAsAssign() throws Exception {
-        MockHttpSession leader = register("leader6", "组长六", "passw0rd1");
+        MockHttpSession leader = register("leader6", "组长六", "passw0rd1!");
         MvcResult team = createTeam(leader, "转交组", "TRF", false);
         String tb = team.getResponse().getContentAsString();
         long teamId = ((Number) JsonPath.read(tb, "$.id")).longValue();
         String invite = JsonPath.read(tb, "$.inviteCode");
         long leaderId = myId(leader);
 
-        MockHttpSession member = register("member6", "成员六", "passw0rd1");
+        MockHttpSession member = register("member6", "成员六", "passw0rd1!");
         long memberId = myId(member);
         mvc.perform(post("/api/v1/teams/join").session(member).with(csrf())
                         .contentType(MediaType.APPLICATION_JSON)

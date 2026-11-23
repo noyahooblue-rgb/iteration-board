@@ -100,6 +100,9 @@ public class FeedbackController {
         m.put("rejectReason", f.getRejectReason());
         m.put("releasedVersion", f.getReleasedVersion());
         m.put("officialReply", f.getOfficialReply());
+        // rc3（契约 3）：图片仅提交人与平台管理员可见，列表/详情据此渲染缩略图或提示行
+        m.put("imagesVisible", viewer != null
+                && (viewer.isPlatformAdmin() || f.getSubmitter().getId().equals(viewer.getId())));
         m.put("plusOneCount", plusOneRepo.countByFeedbackId(f.getId()));
         m.put("myPlusOne", viewer != null && plusOneRepo.findByFeedbackIdAndUserId(f.getId(), viewer.getId()).isPresent());
         m.put("commentCount", commentRepo.countByFeedbackId(f.getId()));
@@ -122,13 +125,26 @@ public class FeedbackController {
         if (description == null || description.isBlank()) throw ApiException.validation("描述必填");
     }
 
+    /**
+     * rc3（契约 3）：不信任声明类型，读文件头魔数判定真实格式。
+     * PNG 89 50 4E 47 0D 0A 1A 0A / JPEG FF D8 FF / GIF 47 49 46 38 /
+     * WEBP 52 49 46 46 ?? ?? ?? ?? 57 45 42 50。判不出（含 SVG/HTML）返回 null。
+     */
+    static String detectImageType(byte[] b) {
+        if (b == null) return null;
+        if (b.length >= 8 && (b[0] & 0xFF) == 0x89 && b[1] == 0x50 && b[2] == 0x4E && b[3] == 0x47
+                && b[4] == 0x0D && b[5] == 0x0A && b[6] == 0x1A && b[7] == 0x0A) return "image/png";
+        if (b.length >= 3 && (b[0] & 0xFF) == 0xFF && (b[1] & 0xFF) == 0xD8 && (b[2] & 0xFF) == 0xFF) return "image/jpeg";
+        if (b.length >= 4 && b[0] == 0x47 && b[1] == 0x49 && b[2] == 0x46 && b[3] == 0x38) return "image/gif";
+        if (b.length >= 12 && b[0] == 0x52 && b[1] == 0x49 && b[2] == 0x46 && b[3] == 0x46
+                && b[8] == 0x57 && b[9] == 0x45 && b[10] == 0x42 && b[11] == 0x50) return "image/webp";
+        return null;
+    }
+
     private void saveImages(Feedback f, List<ImageInput> images) {
         if (images == null) return;
         if (images.size() > 5) throw ApiException.validation("图片最多 5 张");
         for (ImageInput in : images) {
-            if (in.contentType() == null || !in.contentType().startsWith("image/")) {
-                throw ApiException.validation("只允许上传图片文件");
-            }
             byte[] bytes;
             try {
                 bytes = Base64.getDecoder().decode(in.contentBase64() == null ? "" : in.contentBase64());
@@ -138,14 +154,42 @@ public class FeedbackController {
             if (bytes.length > MAX_IMAGE_BYTES) {
                 throw ApiException.validation("每张图片不超过 5MB");
             }
+            String detected = detectImageType(bytes);
+            if (detected == null || !detected.equals(in.contentType())) {
+                throw ApiException.validation("只支持 PNG / JPEG / WEBP / GIF 图片");
+            }
             FeedbackImage img = new FeedbackImage();
             img.setFeedback(f);
             img.setFileName(in.fileName() == null || in.fileName().isBlank() ? "image" : in.fileName());
-            img.setContentType(in.contentType());
+            img.setContentType(detected);
             img.setSizeBytes(bytes.length);
             img.setContentBase64(in.contentBase64());
             imageRepo.save(img);
         }
+    }
+
+    /**
+     * rc3（契约 3）：读取反馈图片。仅提交人与平台管理员可见（截图可能含敏感信息）；
+     * inline + nosniff + private 缓存头。未登录由安全层 401。
+     */
+    @GetMapping("/{id}/images/{imageId}")
+    @Transactional(readOnly = true)
+    public ResponseEntity<byte[]> getImage(@PathVariable Long id, @PathVariable Long imageId) {
+        AppUser me = currentUser.require();
+        Feedback f = requireFeedback(id);
+        FeedbackImage img = imageRepo.findById(imageId)
+                .filter(i -> i.getFeedback().getId().equals(id))
+                .orElseThrow(() -> ApiException.notFound("图片不存在"));
+        if (!me.isPlatformAdmin() && !f.getSubmitter().getId().equals(me.getId())) {
+            throw ApiException.forbidden("图片仅提交人和管理员可见");
+        }
+        byte[] bytes = Base64.getDecoder().decode(img.getContentBase64());
+        return ResponseEntity.ok()
+                .contentType(MediaType.parseMediaType(img.getContentType()))
+                .header(HttpHeaders.CONTENT_DISPOSITION, "inline")
+                .header("X-Content-Type-Options", "nosniff")
+                .header(HttpHeaders.CACHE_CONTROL, "private, max-age=3600")
+                .body(bytes);
     }
 
     @PostMapping
