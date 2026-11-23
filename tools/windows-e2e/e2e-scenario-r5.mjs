@@ -26,9 +26,9 @@ function fail(m) { throw new Error(m) }
 function assert(cond, m) { if (!cond) fail(m) }
 
 const USERS = {
-  leader: { login: 'r5_lead', name: '示例组长', password: 'R5Test1234' },
-  po: { login: 'r5_po', name: '示例PO', password: 'R5Test1234' },
-  m1: { login: 'r5_m1', name: '示例成员', password: 'R5Test1234' },
+  leader: { login: 'r5_lead', name: '示例组长', password: 'R5Test1234@' },
+  po: { login: 'r5_po', name: '示例PO', password: 'R5Test1234@' },
+  m1: { login: 'r5_m1', name: '示例成员', password: 'R5Test1234@' },
 }
 const TEAM = { name: '修订五示例组', code: 'RFT' }
 

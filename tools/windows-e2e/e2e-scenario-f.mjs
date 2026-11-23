@@ -38,8 +38,8 @@ function step(m) { console.log(`[scenario-f] ${m}`) }
 function fail(m) { throw new Error(m) }
 
 const USERS = {
-  sub: { login: 'f_sub', name: '反馈提交人', password: 'FTest1234' },
-  plus: { login: 'f_plus', name: '反馈支持者', password: 'FTest1234' },
+  sub: { login: 'f_sub', name: '反馈提交人', password: 'FTest1234@' },
+  plus: { login: 'f_plus', name: '反馈支持者', password: 'FTest1234@' },
 }
 const FB_TITLE = 'F 剧本反馈标记：看板刷新后希望保留筛选条件'
 const PNG_1X1 = 'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8Xw8AAwMCAO+ip1sAAAAASUVORK5CYII='

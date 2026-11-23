@@ -33,10 +33,10 @@ function step(m) { console.log(`[scenario-e] ${m}`) }
 function fail(m) { throw new Error(m) }
 
 const USERS = {
-  leader: { login: 'e_leader', name: '协作组长', password: 'ETest1234' },
-  po: { login: 'e_po', name: '协作PO', password: 'ETest1234' },
-  m1: { login: 'e_m1', name: '协作员一', password: 'ETest1234' },
-  m2: { login: 'e_m2', name: '协作员二', password: 'ETest1234' },
+  leader: { login: 'e_leader', name: '协作组长', password: 'ETest1234@' },
+  po: { login: 'e_po', name: '协作PO', password: 'ETest1234@' },
+  m1: { login: 'e_m1', name: '协作员一', password: 'ETest1234@' },
+  m2: { login: 'e_m2', name: '协作员二', password: 'ETest1234@' },
 }
 const TEAM = { name: '协作验证小组', code: 'EV' }
 

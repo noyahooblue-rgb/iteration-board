@@ -109,7 +109,7 @@ try {
     if ($m) { $initPw = $m.Matches[0].Groups[1].Value }
   }
   Check 'S3 initial password parsed, length >= 16' ($null -ne $initPw -and $initPw.Length -ge 16)
-  $NewPw = 'SmokeAdmin2026x'
+  $NewPw = 'SmokeAdmin2026x@'
   if ($initPw) {
     $s = Api-Login 'admin' $initPw
     $me = Api-Call $s 'Get' '/auth/me' $null

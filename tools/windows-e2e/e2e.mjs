@@ -19,7 +19,7 @@ mkdirSync(SHOTS, { recursive: true })
 
 const LOGIN_NAME = 'ci_admin'
 const DISPLAY_NAME = 'CI 管理员'
-const PASSWORD = 'CiTest1234'
+const PASSWORD = 'CiTest1234@'
 const TEAM_NAME = 'CI 验证小组'
 const TEAM_CODE = 'CI'
 const ITEM_TITLE = 'CI 验证缺陷事项'
