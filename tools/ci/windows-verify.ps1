@@ -132,7 +132,7 @@ function Http-Ok([string]$Url, [int]$TimeoutSec = 60) {
 # as the X-XSRF-TOKEN header. Login needs no captcha (the backend only
 # demands one after 3 failed attempts), so NEVER retry a failed login
 # in a loop - a wrong password three times locks the account.
-$script:AdminNewPw = 'CiAdmin2026x@'   # P1b rotates the admin password to this
+$script:AdminNewPw = 'CiRoot2026x@'   # P1b rotates the admin password to this
 $script:CiAdminPw = 'CiTest1234@'      # password of the account P2 registers (e2e.mjs)
 
 function Api-Call($Session, [string]$Method, [string]$Path, $Body) {
