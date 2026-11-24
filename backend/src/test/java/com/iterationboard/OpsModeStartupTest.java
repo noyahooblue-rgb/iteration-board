@@ -104,8 +104,9 @@ class OpsModeStartupTest {
         assertThat(written).contains("admin initial password:");
         // 落库实证（Gemini 终检补强）：密码文件里的临时密码必须与库中新哈希
         // 匹配（即真能用它登录），且审计行已写入——不只是文件存在。
-        String tempPassword = written.substring(written.indexOf("admin initial password:") + "admin initial password:".length()).trim();
-        assertThat(encoder.matches(tempPassword, after.getPasswordHash())).isTrue();
+        var pwMatcher = java.util.regex.Pattern.compile("admin initial password:\\s*(\\S+)").matcher(written);
+        assertThat(pwMatcher.find()).isTrue();
+        assertThat(encoder.matches(pwMatcher.group(1), after.getPasswordHash())).isTrue();
         Integer auditRows = jdbc.queryForObject(
                 "select count(*) from audit_log where action = 'ADMIN_RESET_VIA_OPS'", Integer.class);
         assertThat(auditRows).isNotNull();
