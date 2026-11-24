@@ -2,7 +2,7 @@
 <AppShell title="小组设置" @refresh="load">
   <div class="layout">
     <GlassPanel class="side">
-      <button v-for="t in tabs" :key="t.k" class="tab press" :class="{on:tab===t.k}" @click="tab=t.k">{{t.label}}</button>
+      <button v-for="t in tabs" :key="t.k" class="tab press" :class="{on:tab===t.k}" @click="tab=t.k">{{t.label}}<span v-if="t.k==='requests' && shell.pendingJoins > 0" class="badge-n">{{ shell.pendingJoins > 99 ? '99+' : shell.pendingJoins }}</span></button>
       <RouterLink to="/trash" class="tab link">回收站</RouterLink>
     </GlassPanel>
     <GlassPanel class="body">
@@ -143,12 +143,15 @@ import AppInput from '../components/AppInput.vue'
 import LabelsPanel from '../components/settings/LabelsPanel.vue'; import AiPanel from '../components/settings/AiPanel.vue'; import IntegrationsPanel from '../components/settings/IntegrationsPanel.vue'
 import { useRouter } from 'vue-router'
 import { api, ApiError } from '../api/http'; import { MEMBER_STATUS_META, estimateUnitLabel, auditActionLabel, auditTargetLabel, type JoinRequest, type Member, type TeamSettings, type AuditLog } from '../api/types'
-import { useTeam } from '../stores/team'; import { useToast } from '../stores/toast'; import { useAuth } from '../stores/auth'
+import { useTeam } from '../stores/team'; import { useToast } from '../stores/toast'; import { useAuth } from '../stores/auth'; import { useShell } from '../stores/shell'
 import { fmtDateTime } from '../utils/datetime'
-const team = useTeam(), toast = useToast(), router = useRouter(), auth = useAuth()
+const team = useTeam(), toast = useToast(), router = useRouter(), auth = useAuth(), shell = useShell()
 const tab = ref('members')
 const isAdmin = computed(()=> !!auth.user?.platformAdmin)
 const canAudit = computed(()=> team.current?.myRole === 'LEADER' || isAdmin.value)
+// 「加入申请」页签角标直接消费 shell.pendingJoins（与侧栏「小组设置」入口角标同 store 同源：
+// GET /teams/{id}/join-requests 条数，仅组长、当前团队口径）；为 0 时不渲染，审批后 approve/reject 调 shell.refresh() 同步归零。
+// 其余页签无待处理语义，不挂角标。
 const tabs = computed(()=> { const base = [{k:'members',label:'成员与角色'},{k:'basic',label:'基本设置'},{k:'remind',label:'容量与提醒'},{k:'labels',label:'标签'},{k:'ai',label:'AI'},{k:'integrations',label:'对接'},{k:'requests',label:'加入申请'},{k:'invite',label:'邀请码'}]
   if (canAudit.value) base.push({k:'audit',label:'审计日志'})
   base.push({k:'danger',label:'归档与退出'}); return base })
@@ -203,14 +206,16 @@ const roleName = (r:string)=> r==='LEADER' ? '组长' : r==='PO' ? 'PO' : '成�
 async function load(){ syncForms(); if (isLeader.value && team.currentId) { requests.value = await api.get(`/teams/${team.currentId}/join-requests`).catch(()=>[]); for (const r of requests.value) reqRoles[r.id] ??= 'MEMBER' } }
 onMounted(load)
 async function setRole(m: Member, role: string){ try{ await api.patch(`/teams/${team.currentId}/members/${m.userId}/role`, { role }); toast.show('角色已更新'); await team.loadTeamData(); if (team.currentId === team.current?.id) await team.loadTeams() }catch(e){ toast.show(e instanceof ApiError ? e.message : '更新失败') } }
-async function approve(r: JoinRequest){ try{ await api.post(`/teams/${team.currentId}/join-requests/${r.id}/approve`, { role: reqRoles[r.id] ?? 'MEMBER' }); toast.show('已通过申请'); load(); team.loadTeamData() }catch(e){ toast.show(e instanceof ApiError ? e.message : '审批失败') } }
-async function reject(r: JoinRequest){ try{ await api.post(`/teams/${team.currentId}/join-requests/${r.id}/reject`); toast.show('已拒绝申请'); load() }catch(e){ toast.show(e instanceof ApiError ? e.message : '审批失败') } }
+async function approve(r: JoinRequest){ try{ await api.post(`/teams/${team.currentId}/join-requests/${r.id}/approve`, { role: reqRoles[r.id] ?? 'MEMBER' }); toast.show('已通过申请'); load(); team.loadTeamData(); shell.refresh() }catch(e){ toast.show(e instanceof ApiError ? e.message : '审批失败') } }
+async function reject(r: JoinRequest){ try{ await api.post(`/teams/${team.currentId}/join-requests/${r.id}/reject`); toast.show('已拒绝申请'); load(); shell.refresh() }catch(e){ toast.show(e instanceof ApiError ? e.message : '审批失败') } }
 async function resetCode(){ if (!confirm('确定要重置邀请码吗？旧邀请码将立即失效。')) return; try{ const res = await api.post(`/teams/${team.currentId}/invite-code/reset`); toast.show(`新邀请码：${res.inviteCode}`); await team.loadTeams() }catch(e){ toast.show(e instanceof ApiError ? e.message : '重置失败') } }
 </script>
 <style scoped>
 .layout{display:grid;grid-template-columns:200px 1fr;gap:14px;align-items:start}
 .side{display:flex;flex-direction:column;gap:4px;padding:14px}
-.tab{text-align:left;padding:9px 12px;border-radius:11px;font-weight:500;min-height:40px;text-decoration:none;color:var(--text)}
+.tab{display:flex;align-items:center;gap:8px;text-align:left;padding:9px 12px;border-radius:11px;font-weight:500;min-height:40px;text-decoration:none;color:var(--text)}
+/* 「加入申请」页签角标：与侧栏 AppShell 同款 .badge-n（同 class、同数值），计数同源 shell.pendingJoins，>0 才渲染 */
+.badge-n{margin-left:auto;background:var(--c-adhoc);color:var(--on-color);font-size:11px;border-radius:99px;padding:0 7px}
 .tab.on{background:var(--theme);color:var(--on-color)}.tab.link{color:var(--text-2)}
 .body{padding:20px}
 .mrow{display:flex;align-items:center;gap:12px;padding:10px 0;border-bottom:1px solid var(--field-brd)}

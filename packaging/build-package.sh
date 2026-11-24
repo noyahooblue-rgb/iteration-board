@@ -4,7 +4,7 @@
 #
 # Usage:  bash packaging/build-package.sh [--skip-downloads]
 #
-# Output: packaging/dist/iteration-board-offline-1.1.0-rc4.zip
+# Output: packaging/dist/iteration-board-offline-1.1.0.zip
 #
 # What it does:
 #   1. Builds the backend jar (offline Maven wrapper).
@@ -25,10 +25,10 @@
 # ============================================================
 set -euo pipefail
 
-# Single source of truth for the package version (1.1.0-rc4).
+# Single source of truth for the package version (1.1.0).
 # It is also written into the package as version.txt, which
 # install/upgrade/migrate scripts read at runtime.
-VERSION="1.1.0-rc4"
+VERSION="1.1.0"
 PKG_NAME="iteration-board-offline-${VERSION}"
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_ROOT="$(cd "${SCRIPT_DIR}/.." && pwd)"

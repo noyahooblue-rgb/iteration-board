@@ -6,9 +6,9 @@
 #   → 用新密码登录 → uninstall。每步输出单独落证据目录，失败不中断
 #   证据收集。目标 ≤20 分钟；全量 E2E 在档 3（windows-verify.ps1），
 #   只在本冒烟全绿后跑。
-# 用法：pwsh -File tools/ci/windows-smoke.ps1 [-ZipPath C:\ibdl\iteration-board-offline-1.1.0-rc4.zip]
+# 用法：pwsh -File tools/ci/windows-smoke.ps1 [-ZipPath C:\ibdl\iteration-board-offline-1.1.0.zip]
 param(
-  [string]$ZipPath = 'C:\ibdl\iteration-board-offline-1.1.0-rc4.zip',
+  [string]$ZipPath = 'C:\ibdl\iteration-board-offline-1.1.0.zip',
   [string]$WorkRoot = 'C:\ibwork-smoke',
   [string]$ChromeExe = ''
 )
@@ -16,9 +16,9 @@ $ErrorActionPreference = 'Continue'
 $script:Failures = @()
 $Evidence = Join-Path $WorkRoot 'evidence'
 $BlockedParent = Join-Path $WorkRoot '迭代 平台'
-$BlockedRoot = Join-Path $BlockedParent 'iteration-board-offline-1.1.0-rc4'
+$BlockedRoot = Join-Path $BlockedParent 'iteration-board-offline-1.1.0'
 $PkgParent = Join-Path $WorkRoot 'install folder'
-$Root = Join-Path $PkgParent 'iteration-board-offline-1.1.0-rc4'
+$Root = Join-Path $PkgParent 'iteration-board-offline-1.1.0'
 $ChineseTemp = Join-Path $WorkRoot '临时目录'
 New-Item -ItemType Directory -Force -Path $Evidence, $BlockedParent, $PkgParent, $ChineseTemp | Out-Null
 # 子进程的 TEMP/TMP 指向中文目录（模拟中文用户名环境）

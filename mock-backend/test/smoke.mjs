@@ -579,6 +579,33 @@ await login('admin')
 r = await req('PATCH', '/admin/users/9/status', { status: 'DISABLED' }); check('1.1.0 P05 交接完成后停用不再被拦', r.status === 200 && r.data.status === 'DISABLED', JSON.stringify(r.data))
 r = await req('PATCH', '/admin/users/9/status', { status: 'ACTIVE' }); check('1.1.0 账号可重新启用', r.status === 200 && r.data.status === 'ACTIVE')
 
+// ---------- 1.1.0 回归批：加入申请角标同源（侧栏「小组设置」入口与设置页「加入申请」页签共用 shell.pendingJoins，
+// 数据源 = 组长视角 GET /teams/{id}/join-requests 条数；此处验证该同源计数 pendingJoins>0 → 审批/拒绝后归零，
+// 即两侧角标同时出现、同时消失；计数为 0 时前端 v-if 不渲染角标） ----------
+// 申请者用种子虚构账号张三（11）/张三2（12）：仅在极光小组、不在云雀小组（mock 演示口径 registrationOpen=false，不能新注册）。
+await login('zhangsan')
+r = await req('POST', '/teams/join', { inviteCode: 'SKY2026A' }); check('角标同源前置：需审批小组提交申请 joined=false', r.status === 200 && r.data.joined === false, JSON.stringify(r.data))
+await login('leader')
+r = await req('GET', `/teams/${T}/join-requests`); const pendingBefore = r.data
+check('角标同源：待审批=1（侧栏与页签角标同取此数）', r.status === 200 && pendingBefore.length === 1 && pendingBefore[0].loginName === 'zhangsan', JSON.stringify(r.data))
+r = await req('POST', `/teams/${T}/join-requests/${pendingBefore[0].id}/approve`, { role: 'MEMBER' }); check('角标同源：审批通过 204', r.status === 204)
+r = await req('GET', `/teams/${T}/join-requests`); check('角标同源：通过后待审批归零（两侧角标同时消失）', r.status === 200 && r.data.length === 0)
+await login('zhangsan2')
+r = await req('POST', '/teams/join', { inviteCode: 'SKY2026A' }); check('角标同源前置：第二名申请者提交申请 joined=false', r.status === 200 && r.data.joined === false, JSON.stringify(r.data))
+await login('leader')
+r = await req('GET', `/teams/${T}/join-requests`); const pendingRej = r.data
+check('角标同源：拒绝前待审批=1', r.status === 200 && pendingRej.length === 1 && pendingRej[0].loginName === 'zhangsan2', JSON.stringify(r.data))
+r = await req('POST', `/teams/${T}/join-requests/${pendingRej[0].id}/reject`); check('角标同源：拒绝 204', r.status === 204)
+r = await req('GET', `/teams/${T}/join-requests`); check('角标同源：拒绝后待审批归零（两侧角标同时消失）', r.status === 200 && r.data.length === 0)
+
+// ---------- 1.1.0 回归批：mock 改密成功链路（改密→旧密码失效→新密码可登录；
+// 真实后端弱密码老账号强制改密全链路见后端 Rc3IntegrationTest.legacyWeakPassword_forceChangeFullChain_*） ----------
+await login('leader')
+r = await req('POST', '/auth/change-password', { oldPassword: 'Demo1234', newPassword: 'Demo12345' }); check('mock 改密成功 204 且标志为 false', r.status === 204)
+r = await req('GET', '/auth/me'); check('mock 改密后 me 的 mustChangePassword=false', r.status === 200 && r.data.mustChangePassword === false)
+r = await req('POST', '/auth/login', { loginName: 'leader', password: 'Demo1234' }); check('mock 改密后旧密码登录 401', r.status === 401)
+r = await req('POST', '/auth/login', { loginName: 'leader', password: 'Demo12345' }); check('mock 改密后新密码可登录', r.status === 200 && r.data.loginName === 'leader')
+
 console.log(results.join('\n'))
 console.log(`\n冒烟结果：${pass} 通过 / ${fail} 失败 / 共 ${pass + fail}`)
 process.exit(fail ? 1 : 0)

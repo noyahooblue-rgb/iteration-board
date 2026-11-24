@@ -1,5 +1,6 @@
 @echo off
-setlocal EnableExtensions
+setlocal EnableExtensions DisableDelayedExpansion
+set "IB_ARGS=%*"
 rem ============================================================
 rem  Iteration Board - generic patch applier (1.1.0 template)
 rem  Usage: apply-patch.bat [install-folder] [--yes] [--no-pause]
@@ -40,7 +41,94 @@ if /i not "%~1"=="--yes" if /i not "%~1"=="--no-pause" set "TARGET=%~1"
 shift
 goto :parse_args
 :args_done
-if "%TARGET%"=="" set "TARGET=%PATCHROOT%"
+rem --- IB unified contract: automation hooks + anti-crash shell --
+rem IB_AUTO=1 (CI): no pause, no prompts, no cmd /k wrapper; the
+rem exit code and this script's log file are the contract.
+rem IB_YES=1: confirmations default to yes. A plain double-click
+rem run is re-launched once under cmd /k (IB_WRAPPED) so the
+rem window stays open on any error instead of flashing away.
+if "%IB_AUTO%"=="1" set "NOPAUSE=1"
+if "%IB_AUTO%"=="1" set "YES=1"
+if "%IB_YES%"=="1" set "YES=1"
+if defined IB_WRAPPED goto :ib_wrap_done
+if "%IB_AUTO%"=="1" goto :ib_wrap_done
+if "%NOPAUSE%"=="1" goto :ib_wrap_done
+set "IB_WRAPPED=1"
+cmd /k ""%~f0" %IB_ARGS%"
+exit /b
+:ib_wrap_done
+rem --- IB unified contract: log file next to this script --------
+for /f "usebackq delims=" %%T in (`powershell -NoProfile -Command "Get-Date -Format yyyyMMdd-HHmmss"`) do set "IB_TS=%%T"
+if "%IB_TS%"=="" set "IB_TS=run"
+set "IB_LOG=%~dp0%~n0-%IB_TS%.log"
+call :log [INFO] %~n0 started - log file: %IB_LOG%
+rem --- IB unified contract: self-elevation ---------------------
+rem A non-admin instance re-launches itself elevated with the
+rem original arguments (IB_ARGS keeps them as typed, quotes
+rem included) and then exits; the elevated instance continues
+rem in the script folder, not in System32 (see :ib_elevate).
+net session >nul 2>&1
+if errorlevel 1 goto :ib_elevate
+cd /d "%~dp0"
+
+rem --- ZIP self-check -------------------------------------------
+rem Started from inside the zip (Explorer preview) the payload
+rem files are not really on disk: refuse with a clear message.
+if exist "%PATCHROOT%\SHA256SUMS.txt" goto :ib_zip_ok
+call :log [ERROR] SHA256SUMS.txt is missing next to apply-patch.bat.
+call :log [ERROR] You may have started apply-patch.bat from inside
+call :log [ERROR] the zip file. Extract the complete patch zip
+call :log [ERROR] first, then run apply-patch.bat from the
+call :log [ERROR] extracted folder.
+call :ib_pause
+exit /b 1
+:ib_zip_ok
+
+rem --- resolve the target install folder ------------------------
+rem NEVER default to the patch folder. Order: 1) the argument,
+rem 2) the single install registered for the IterationBoardApp
+rem service (sc qc / registry ImagePath), confirmed by the
+rem user, 3) a path typed or dragged in by the user. The
+rem result must contain all three install markers (app jar,
+rem config, version.txt) or the patch stops, changing nothing.
+if not "%TARGET%"=="" goto :target_check
+call :detect_target
+if "%IB_DET_COUNT%"=="1" goto :target_detected
+call :log [INFO] No single installed location could be detected
+call :log [INFO] from the IterationBoardApp service registration.
+set /p "TARGET=Type or drag the install folder path here, then press Enter: "
+set "TARGET=%TARGET:"=%"
+goto :target_check
+:target_detected
+set "TARGET=%IB_DET_1%"
+call :log [INFO] Detected install at: %TARGET%
+if "%YES%"=="1" goto :target_check
+choice /C YN /M "Upgrade this installation now"
+if errorlevel 2 goto :target_manual
+goto :target_check
+:target_manual
+set "TARGET="
+set /p "TARGET=Type or drag the install folder path here, then press Enter: "
+set "TARGET=%TARGET:"=%"
+:target_check
+if "%TARGET%"=="" goto :target_missing
+if not exist "%TARGET%\app\iteration-board.jar" goto :target_bad
+if not exist "%TARGET%\config\application.yml" goto :target_bad
+if not exist "%TARGET%\version.txt" goto :target_bad
+goto :target_ready
+:target_missing
+call :log [ERROR] No install folder was given. Nothing was changed.
+call :ib_pause
+exit /b 1
+:target_bad
+call :log [ERROR] Not a complete install folder: %TARGET%
+call :log [ERROR] It must contain app\iteration-board.jar,
+call :log [ERROR] config\application.yml and version.txt.
+call :ib_pause
+exit /b 1
+:target_ready
+if "%TARGET:~1,1%"==":" call :check_mapped
+
 rem --- Install path character warning (ruling A) --------------
 rem PostgreSQL on Windows cannot run reliably from a path with
 rem non-English characters (root-cause ledger #6). An existing
@@ -50,27 +138,16 @@ rem Warn only, and recommend a future move to an English path.
 set "IB_ROOT=%TARGET%"
 powershell -NoProfile -Command "if ($env:IB_ROOT -match '[^\x20-\x7E]') { exit 1 } else { exit 0 }"
 set "IB_PATH_RC=%ERRORLEVEL%"
-if not "%IB_PATH_RC%"=="0" (
-  echo [WARN] The install folder path contains non-English characters: %TARGET%.
-  echo [WARN] PostgreSQL can fail on such a path on some systems. This operation
-  echo [WARN] continues because the existing installation already runs from this
-  echo [WARN] folder, but moving the installation to a path with only
-  echo [WARN] English letters, digits and spaces, for example
-  echo [WARN] D:\IterationBoard, is recommended for the future.
-)
+if "%IB_PATH_RC%"=="0" goto :ib_pathwarn_done
+call :log [WARN] The install folder path contains non-English characters: %TARGET%
+call :log [WARN] PostgreSQL can fail on such a path on some systems. This operation
+call :log [WARN] continues because the existing installation already runs from this
+call :log [WARN] folder, but moving the installation to a path with only
+call :log [WARN] English letters, digits and spaces, for example
+call :log [WARN] D:\IterationBoard, is recommended for the future.
+:ib_pathwarn_done
 if not exist "%TARGET%\tmp" mkdir "%TARGET%\tmp"
-net session >nul 2>&1
-if errorlevel 1 (
-  echo [ERROR] Please run as administrator.
-  call :ib_pause
-  exit /b 1
-)
-if not exist "%TARGET%\install.bat" (
-  echo [ERROR] Install folder not found or invalid: %TARGET%
-  echo [ERROR] Usage: apply-patch.bat [path-to-install-folder]
-  call :ib_pause
-  exit /b 1
-)
+
 rem --- source version gate: IB_EXPECTED_FROM is stamped by the
 rem patch builder (empty = no gate, e.g. the full-package copy).
 rem The check runs before anything is stopped or copied; a
@@ -80,26 +157,22 @@ if "%IB_EXPECTED_FROM%"=="" goto :ver_gate_done
 set "CURVER="
 if exist "%TARGET%\version.txt" set /p CURVER=<"%TARGET%\version.txt"
 if "%CURVER%"=="%IB_EXPECTED_FROM%" goto :ver_gate_done
-echo [ERROR] This patch upgrades version %IB_EXPECTED_FROM% only, but the
-echo [ERROR] install folder reports version "%CURVER%". Nothing was changed.
-echo [ERROR] Use the patch that matches your current version, or reinstall
-echo [ERROR] from the full package.
+call :log [ERROR] This patch upgrades version %IB_EXPECTED_FROM% only, but the
+call :log [ERROR] install folder reports version "%CURVER%". Nothing was changed.
+call :log [ERROR] Use the patch that matches your current version, or reinstall
+call :log [ERROR] from the full package.
 call :ib_pause
 exit /b 1
 :ver_gate_done
-if not exist "%PATCHROOT%\SHA256SUMS.txt" (
-  echo [ERROR] SHA256SUMS.txt is missing next to apply-patch.bat.
-  echo [ERROR] Extract the complete patch zip first.
-  call :ib_pause
-  exit /b 1
-)
-if "%YES%"=="0" (
-  choice /C YN /M "Apply this patch to %TARGET% now"
-  if errorlevel 2 exit /b 0
-)
+rem (the SHA256SUMS.txt presence check moved up: see ZIP self-check)
+call :log [INFO] Target install folder: %TARGET%
+if "%YES%"=="1" goto :confirm_done
+choice /C YN /M "Apply this patch to the target now"
+if errorlevel 2 exit /b 0
+:confirm_done
 
 rem --- step 1: verify the patch files themselves -----------------
-echo [INFO] Verifying patch files against SHA256SUMS.txt ...
+call :log [INFO] Verifying patch files against SHA256SUMS.txt ...
 powershell -NoProfile -Command "function Get-Sha256([string]$path) { $fs = [IO.File]::OpenRead($path); try { return [BitConverter]::ToString(([Security.Cryptography.SHA256]::Create()).ComputeHash($fs)).Replace('-', '').ToLower() } finally { $fs.Close() } }; $fail = 0; foreach ($line in Get-Content '%PATCHROOT%\SHA256SUMS.txt') { if ($line -match '^\s*#' -or $line -notmatch '^\s*([0-9a-fA-F]{64})\s+(.+)$') { continue }; $exp = $Matches[1]; $rel = $Matches[2].Trim(); $p = Join-Path '%PATCHROOT%' $rel; if (-not (Test-Path $p)) { Write-Host \"[ERROR] $rel missing in the patch folder\"; $fail = 1; continue }; $h = (Get-Sha256 $p); if ($h -ne $exp) { Write-Host \"[ERROR] $rel hash mismatch\"; $fail = 1 } else { Write-Host \"[OK] $rel\" } }; exit $fail"
 if errorlevel 1 (
   echo [ERROR] Patch files did not verify - nothing was changed.
@@ -116,7 +189,7 @@ if "%BKROOT%"=="" set "BKROOT=%TARGET%\backup"
 if not exist "%BKROOT%" mkdir "%BKROOT%"
 
 rem --- step 2: database backup + replaced-file bundle -------------
-echo [INFO] Backing up target database, uploads and config ...
+call :log [INFO] Backing up target database, uploads and config ...
 call "%TARGET%\backup.bat" auto
 if errorlevel 1 (
   echo [ERROR] Backup failed. Patch aborted, nothing changed.
@@ -137,9 +210,24 @@ for /f "usebackq delims=" %%T in (`powershell -NoProfile -Command "Get-Date -For
 set "BUNDLE=%BKROOT%\upgrade-%TS%"
 mkdir "%BUNDLE%\files" >nul 2>&1
 powershell -NoProfile -Command "foreach ($line in Get-Content '%PATCHROOT%\SHA256SUMS.txt') { if ($line -notmatch '^\s*([0-9a-fA-F]{64})\s+(.+)$') { continue }; $rel = $Matches[2].Trim(); $t = Join-Path '%TARGET%' $rel; if (Test-Path $t) { $d = Join-Path '%BUNDLE%\files' $rel; New-Item -ItemType Directory -Force (Split-Path $d) | Out-Null; Copy-Item $t $d -Force } }"
+rem The whole app\ folder and version.txt go into the bundle
+rem as well (not only the files this patch replaces), so the
+rem pre-patch program state is fully recoverable. A failure
+rem here aborts the patch before anything is overwritten.
+robocopy "%TARGET%\app" "%BUNDLE%\files\app" /E /NFL /NDL /NJH /NJS /R:1 /W:1 >nul
+if errorlevel 8 goto :bundle_fail
+copy /Y "%TARGET%\version.txt" "%BUNDLE%\files\version.txt" >nul
+if errorlevel 1 goto :bundle_fail
+goto :bundle_done
+:bundle_fail
+call :log [ERROR] Recording the pre-patch program backup failed.
+call :log [ERROR] Patch aborted - nothing was copied or changed.
+call :ib_pause
+exit /b 1
+:bundle_done
 powershell -NoProfile -Command "[IO.File]::WriteAllText('%BUNDLE%\upgrade-info.txt', \"DbBackup=%DBBACKUP%`r`nTarget=%TARGET%`r`nPatchSource=%PATCHROOT%`r`nDate=$((Get-Date).ToString('yyyy-MM-dd HH:mm:ss'))`r`n\", [Text.Encoding]::ASCII)"
-echo [INFO] Pre-patch database backup: %DBBACKUP%
-echo [INFO] Rollback bundle recorded: %BUNDLE%
+call :log [INFO] Pre-patch database backup: %DBBACKUP%
+call :log [INFO] Rollback bundle recorded: %BUNDLE%
 
 rem Make sure the rollback tool itself exists in the target
 rem before anything is replaced (a pre-1.1.0 target has none).
@@ -147,20 +235,29 @@ if exist "%PATCHROOT%\rollback.bat" copy /Y "%PATCHROOT%\rollback.bat" "%TARGET%
 if exist "%PATCHROOT%\reset-admin.bat" copy /Y "%PATCHROOT%\reset-admin.bat" "%TARGET%\reset-admin.bat" >nul
 
 rem --- step 3: stop the app, copy files in, verify copies ----------
-echo [INFO] Stopping the application service ...
+call :log [INFO] Stopping the application service ...
 net stop IterationBoardApp >nul 2>&1
-echo [INFO] Copying patched files into %TARGET% ...
-powershell -NoProfile -Command "function Get-Sha256([string]$path) { $fs = [IO.File]::OpenRead($path); try { return [BitConverter]::ToString(([Security.Cryptography.SHA256]::Create()).ComputeHash($fs)).Replace('-', '').ToLower() } finally { $fs.Close() } }; $fail = 0; foreach ($line in Get-Content '%PATCHROOT%\SHA256SUMS.txt') { if ($line -notmatch '^\s*([0-9a-fA-F]{64})\s+(.+)$') { continue }; $exp = $Matches[1]; $rel = $Matches[2].Trim(); if ($rel -ieq 'apply-patch.bat') { continue }; $s = Join-Path '%PATCHROOT%' $rel; $t = Join-Path '%TARGET%' $rel; New-Item -ItemType Directory -Force (Split-Path $t) | Out-Null; Copy-Item $s $t -Force; if ((Get-Sha256 $t) -ne $exp) { Write-Host \"[ERROR] $rel copy verification failed\"; $fail = 1 } else { Write-Host \"[OK] $rel\" } }; exit $fail"
-if errorlevel 1 (
-  echo [ERROR] Copying the patch failed partway. Roll back with:
-  echo [ERROR]   "%TARGET%\rollback.bat"
-  call :ib_pause
-  exit /b 1
-)
+call :wait_app_exit
+if "%IB_WAIT_OK%"=="1" goto :app_stopped
+call :log [ERROR] The application java process is still running
+call :log [ERROR] 60 seconds after the service stop. Patch
+call :log [ERROR] aborted - stop it manually, then run
+call :log [ERROR] apply-patch.bat again. Nothing was copied.
+call :ib_pause
+exit /b 1
+:app_stopped
+call :log [INFO] Copying patched files into %TARGET% ...
+powershell -NoProfile -Command "function Get-Sha256([string]$path) { $fs = [IO.File]::OpenRead($path); try { return [BitConverter]::ToString(([Security.Cryptography.SHA256]::Create()).ComputeHash($fs)).Replace('-', '').ToLower() } finally { $fs.Close() } }; $fail = 0; foreach ($line in Get-Content '%PATCHROOT%\SHA256SUMS.txt') { if ($line -notmatch '^\s*([0-9a-fA-F]{64})\s+(.+)$') { continue }; $exp = $Matches[1]; $rel = $Matches[2].Trim(); if ($rel -ieq 'apply-patch.bat') { continue }; if ($rel -ieq 'config\application.yml') { Write-Host \"[WARN] config\application.yml is listed in the patch but is NEVER overwritten - the target settings are kept\"; continue }; $s = Join-Path '%PATCHROOT%' $rel; $t = Join-Path '%TARGET%' $rel; New-Item -ItemType Directory -Force (Split-Path $t) | Out-Null; Copy-Item $s $t -Force; if ((Get-Sha256 $t) -ne $exp) { Write-Host \"[ERROR] $rel copy verification failed\"; $fail = 1 } else { Write-Host \"[OK] $rel\" } }; exit $fail"
+if not errorlevel 1 goto :copy_ok
+call :log [ERROR] Copying the patch failed partway. Roll back with:
+call :log [ERROR]   "%TARGET%\rollback.bat"
+call :ib_pause
+exit /b 1
+:copy_ok
 if exist "%PATCHROOT%\version.txt" copy /Y "%PATCHROOT%\version.txt" "%TARGET%\version.txt" >nul
 
 rem --- step 4: restart + health check -------------------------------
-echo [INFO] Starting services - database migration runs automatically ...
+call :log [INFO] Starting services - database migration runs automatically ...
 net start IterationBoardPG >nul 2>&1
 sc query IterationBoardPG | findstr /C:"RUNNING" >nul 2>&1
 if errorlevel 1 (
@@ -175,7 +272,7 @@ if errorlevel 1 (
 )
 set "APP_PORT=18080"
 for /f "usebackq delims=" %%P in (`powershell -NoProfile -Command "$c = Get-Content '%TARGET%\config\application.yml' -Raw; if ($c -match 'port:\s*(\d+)') { $Matches[1] }"`) do set "APP_PORT=%%P"
-echo [INFO] Health check on http://127.0.0.1:%APP_PORT%/ - polling up to 90 seconds ...
+call :log [INFO] Health check on http://127.0.0.1:%APP_PORT%/ - polling up to 90 seconds ...
 powershell -NoProfile -Command "$deadline = (Get-Date).AddSeconds(90); $ok = $false; while ((Get-Date) -lt $deadline) { try { $r = Invoke-WebRequest -UseBasicParsing -Uri 'http://127.0.0.1:%APP_PORT%/' -TimeoutSec 5; $ok = $true; break } catch { if ($_.Exception.Response) { $ok = $true; break } else { Start-Sleep -Seconds 3 } } }; if ($ok) { exit 0 } else { exit 1 }"
 if errorlevel 1 (
   echo [ERROR] The application did not answer the HTTP health check.
@@ -184,24 +281,24 @@ if errorlevel 1 (
 
 rem --- step 5: built-in admin account (created by the app) --------
 call :show_admin_pwfile
-echo [INFO] Patch applied successfully. Rollback bundle: %BUNDLE%
-echo [INFO] To undo this patch completely, run rollback.bat in the
-echo [INFO] target folder.
+call :log [INFO] Patch applied successfully. Rollback bundle: %BUNDLE%
+call :log [INFO] To undo this patch completely, run rollback.bat in the
+call :log [INFO] target folder.
 call :ib_pause
 exit /b 0
 
 :failed
 echo.
-echo [ERROR] Last 50 lines of logs\app.log:
+call :log [ERROR] Last 50 lines of logs\app.log:
 powershell -NoProfile -Command "Get-Content '%TARGET%\logs\app.log' -Tail 50 -ErrorAction SilentlyContinue"
-echo [ERROR] Last 50 lines of logs\IterationBoardApp.out.log:
+call :log [ERROR] Last 50 lines of logs\IterationBoardApp.out.log:
 powershell -NoProfile -Command "Get-Content '%TARGET%\logs\IterationBoardApp.out.log' -Tail 50 -ErrorAction SilentlyContinue"
 echo.
-echo [ERROR] The patch did not complete. To roll back program files
-echo [ERROR] AND the database to the pre-patch state, run this
-echo [ERROR] command as administrator:
-echo [ERROR]   "%TARGET%\rollback.bat"
-echo [ERROR] It uses the bundle recorded at %BUNDLE%
+call :log [ERROR] The patch did not complete. To roll back program files
+call :log [ERROR] AND the database to the pre-patch state, run this
+call :log [ERROR] command as administrator:
+call :log [ERROR]   "%TARGET%\rollback.bat"
+call :log [ERROR] It uses the bundle recorded at %BUNDLE%
 call :ib_pause
 exit /b 1
 
@@ -217,27 +314,115 @@ rem happened by the time the health check above has passed;
 rem if it is not there yet, it appears in the target folder
 rem once startup has completed.
 :show_admin_pwfile
-if exist "%TARGET%\config\admin-initial-password.txt" (
-  echo.
-  echo ============================================================
-  echo  A built-in platform administrator account exists on the
-  echo  target and its initial password file is present:
-  type "%TARGET%\config\admin-initial-password.txt"
-  echo  Log in as admin and change the password right away -
-  echo  the first login forces a change, and the application
-  echo  deletes this file automatically once the password has
-  echo  been changed. Keep the file safe until then.
-  echo ============================================================
-) else (
-  echo [INFO] No config\admin-initial-password.txt on the target
-  echo [INFO] yet. If the application creates the built-in admin
-  echo [INFO] account on this start, the initial password will
-  echo [INFO] appear in config\admin-initial-password.txt in the
-  echo [INFO] target folder once startup has completed. Otherwise
-  echo [INFO] log in with the existing administrator account.
-)
+if exist "%TARGET%\config\admin-initial-password.txt" goto :sap_yes
+call :log [INFO] No config\admin-initial-password.txt on the target
+call :log [INFO] yet. If the application creates the built-in admin
+call :log [INFO] account on this start, the initial password will
+call :log [INFO] appear in config\admin-initial-password.txt in the
+call :log [INFO] target folder once startup has completed. Otherwise
+call :log [INFO] log in with the existing administrator account.
+exit /b 0
+:sap_yes
+echo.
+echo ============================================================
+echo  A built-in platform administrator account exists on the
+echo  target and its initial password file is present:
+type "%TARGET%\config\admin-initial-password.txt"
+echo  Log in as admin and change the password right away -
+echo  the first login forces a change, and the application
+echo  deletes this file automatically once the password has
+echo  been changed. Keep the file safe until then.
+echo ============================================================
+exit /b 0
+
+rem --- subroutine: self-elevate with the original arguments -----
+rem Reached by goto from the admin check. The elevated instance
+rem inherits IB_ELEVATED=1 (loop guard) and IB_WRAPPED, starts in
+rem the script folder (Start-Process WorkingDirectory plus the
+rem cd /d after the admin check), and this instance exits 0.
+rem Arguments travel through the IB_ARGS / IB_SELF / IB_DIR
+rem environment variables only - never string-built into the
+rem PowerShell command together with user data.
+:ib_elevate
+if "%IB_ELEVATED%"=="1" goto :ib_elevate_fail
+set "IB_ELEVATED=1"
+set "IB_SELF=%~f0"
+set "IB_DIR=%~dp0"
+powershell -NoProfile -Command "Start-Process -FilePath $env:IB_SELF -ArgumentList $env:IB_ARGS -Verb RunAs -WorkingDirectory $env:IB_DIR"
+if errorlevel 1 goto :ib_elevate_fail
+exit /b 0
+:ib_elevate_fail
+call :log [ERROR] Please run as administrator - auto-elevation failed
+call :log [ERROR] or was declined. Right-click the script and choose
+call :log [ERROR] Run as administrator instead.
+call :ib_pause
+exit /b 1
+
+rem --- subroutine: detect the installed folder from the --------
+rem IterationBoardApp service registration (sc qc binary path,
+rem registry ImagePath as fallback). The service executable is
+rem <install>\app\IterationBoardApp.exe, so the install folder
+rem is two levels up. Distinct roots are counted in IB_DET_COUNT
+rem (IB_DET_1 / IB_DET_2 hold the first two). Paths travel via
+rem stdout of this PowerShell command only; nothing is judged
+rem inside cmd.
+:detect_target
+set "IB_DET_COUNT=0"
+set "IB_DET_1="
+set "IB_DET_2="
+for /f "usebackq delims=" %%D in (`powershell -NoProfile -Command "$roots = @(); $qc = sc.exe qc IterationBoardApp 2>$null | Out-String; if ($qc -match 'BINARY_PATH_NAME\s*:\s*(.+)') { $p = $Matches[1].Trim().Trim([char]34); if ($p -match '^(.+?\.exe)') { $p = $Matches[1] }; $roots += $p }; try { $reg = (Get-ItemProperty 'HKLM:\SYSTEM\CurrentControlSet\Services\IterationBoardApp' -ErrorAction Stop).ImagePath; if ($reg) { $r = $reg.Trim().Trim([char]34); if ($r -match '^(.+?\.exe)') { $r = $Matches[1] }; $roots += $r } } catch {}; $out = @(); foreach ($p in $roots) { $dir = Split-Path (Split-Path $p -Parent) -Parent; if ($dir -and ($out -notcontains $dir)) { $out += $dir } }; $out"`) do call :det_add "%%D"
+exit /b 0
+
+:det_add
+if "%IB_DET_COUNT%"=="0" set "IB_DET_1=%~1"
+if "%IB_DET_COUNT%"=="1" set "IB_DET_2=%~1"
+set /a IB_DET_COUNT+=1
+exit /b 0
+
+rem --- subroutine: wait until the app java process is gone ------
+rem Matches only java.exe processes whose command line contains
+rem the target folder (passed via the IB_TARGET environment
+rem variable), so unrelated Java programs on the machine do not
+rem count. Polls once a second for up to 60 seconds and sets
+rem IB_WAIT_OK=1 when the process is gone, 0 on timeout.
+:wait_app_exit
+set "IB_WAIT_OK=0"
+set "IB_WAIT_N=0"
+set "IB_TARGET=%TARGET%"
+:wait_loop
+powershell -NoProfile -Command "$p = Get-CimInstance Win32_Process -Filter \"Name='java.exe'\" -ErrorAction SilentlyContinue | Where-Object { $_.CommandLine -and $_.CommandLine.Contains($env:IB_TARGET) }; if ($p) { exit 1 } else { exit 0 }"
+if errorlevel 1 goto :wait_busy
+set "IB_WAIT_OK=1"
+exit /b 0
+:wait_busy
+set /a IB_WAIT_N+=1
+if %IB_WAIT_N% GEQ 60 exit /b 0
+timeout /T 1 /NOBREAK >nul 2>&1
+goto :wait_loop
+
+rem --- subroutine: warn when the target is on a mapped drive ----
+rem An administrator session usually cannot see the drive
+rem mappings of the interactive user. The check runs in
+rem PowerShell on the IB_DRIVE_L environment variable.
+:check_mapped
+set "IB_DRIVE_L=%TARGET:~0,1%"
+powershell -NoProfile -Command "$d = Get-PSDrive $env:IB_DRIVE_L -ErrorAction SilentlyContinue; if ($d -and $d.DisplayRoot) { exit 1 } else { exit 0 }"
+if errorlevel 1 goto :mapped_warn
+exit /b 0
+:mapped_warn
+call :log [WARN] The target folder is on a mapped network drive.
+call :log [WARN] An administrator session usually cannot see your
+call :log [WARN] drive mappings. If anything fails with path errors,
+call :log [WARN] re-run with the UNC path or a local path instead.
 exit /b 0
 
 :ib_pause
+if defined IB_LOG echo [INFO] Log file: %IB_LOG%
 if "%NOPAUSE%"=="0" pause
+exit /b 0
+
+rem --- subroutine: write a line to console AND the script log ---
+:log
+echo %*
+if defined IB_LOG echo %*>>"%IB_LOG%"
 exit /b 0

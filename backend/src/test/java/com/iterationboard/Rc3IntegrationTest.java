@@ -160,6 +160,62 @@ class Rc3IntegrationTest {
                 java.sql.Timestamp.class)).isNotNull();
     }
 
+    /**
+     * 老账号改密全链路回归（1.1.0 角标/回归批补测）：弱密码老账号登录被置强制改密 →
+     * 未改密前业务接口一律 403 MUST_CHANGE_PASSWORD（放行清单内 me/通知偏好可用）→
+     * 改密成功后标志清除、同会话业务恢复 → 登出后旧密码失效、新密码可登录且不再强制改密。
+     * 会话口径以 MustChangePasswordInterceptor 现有实现为准：改密不换会话，当前会话改密后直接可用，
+     * 其余会话靠 passwordVersion 失效（该口径已由 adminResetPassword_fullFlow 覆盖，此处不重复）。
+     */
+    @Test
+    void legacyWeakPassword_forceChangeFullChain_newPasswordWorksOldFails() throws Exception {
+        insertUser("rc3legacy", "weakpass1", false, false); // 旧规则弱密码老账号，入库时未置强制改密
+
+        // ① 弱密码登录成功，登录响应即带 mustChangePassword=true（前端据此跳 /change-password）
+        MockHttpSession s = new MockHttpSession();
+        MvcResult loginRes = loginRaw(s, "rc3legacy", "weakpass1");
+        assertThat(loginRes.getResponse().getStatus()).isEqualTo(200);
+        assertThat((Boolean) JsonPath.read(loginRes.getResponse().getContentAsString(), "$.mustChangePassword")).isTrue();
+
+        // ② 放行清单内接口可用：/auth/me（标志为真）、通知偏好
+        MvcResult me = mvc.perform(get("/api/v1/auth/me").session(s)).andExpect(status().isOk()).andReturn();
+        assertThat((Boolean) JsonPath.read(me.getResponse().getContentAsString(), "$.mustChangePassword")).isTrue();
+        mvc.perform(get("/api/v1/auth/notification-prefs").session(s)).andExpect(status().isOk());
+
+        // ③ 未改密前业务接口被拦（两个不同业务面，同为 403 MUST_CHANGE_PASSWORD）
+        mvc.perform(get("/api/v1/teams/mine").session(s))
+                .andExpect(status().isForbidden())
+                .andExpect(jsonPath("$.code").value("MUST_CHANGE_PASSWORD"));
+        mvc.perform(get("/api/v1/notifications").session(s))
+                .andExpect(status().isForbidden())
+                .andExpect(jsonPath("$.code").value("MUST_CHANGE_PASSWORD"));
+
+        // ④ 改密：旧密码错误 400 且标志不清；正确改密 204 后标志清除、同会话业务恢复
+        mvc.perform(post("/api/v1/auth/change-password").session(s).with(csrf())
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"oldPassword\":\"wrongpass1\",\"newPassword\":\"NewPass1234!\"}"))
+                .andExpect(status().isBadRequest());
+        mvc.perform(get("/api/v1/teams/mine").session(s)).andExpect(status().isForbidden());
+        mvc.perform(post("/api/v1/auth/change-password").session(s).with(csrf())
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"oldPassword\":\"weakpass1\",\"newPassword\":\"NewPass1234!\"}"))
+                .andExpect(status().isNoContent());
+        MvcResult me2 = mvc.perform(get("/api/v1/auth/me").session(s)).andExpect(status().isOk()).andReturn();
+        assertThat((Boolean) JsonPath.read(me2.getResponse().getContentAsString(), "$.mustChangePassword")).isFalse();
+        mvc.perform(get("/api/v1/teams/mine").session(s)).andExpect(status().isOk());
+        // 库内标志已清除（放在业务请求之后查：JPA 改密的 flush 由后续仓储查询触发，jdbc 直查才读得到新值，与 V110 同口径）
+        assertThat(jdbc.queryForObject("select must_change_password from app_user where login_name='rc3legacy'", Boolean.class))
+                .isFalse();
+
+        // ⑤ 登出（放行清单内）后：旧弱密码失效 401，新密码可登录且不再强制改密、业务可用
+        mvc.perform(post("/api/v1/auth/logout").session(s).with(csrf())).andExpect(status().isNoContent());
+        assertThat(loginRaw("rc3legacy", "weakpass1").getResponse().getStatus()).isEqualTo(401);
+        MockHttpSession s2 = loginOk("rc3legacy", "NewPass1234!");
+        MvcResult me3 = mvc.perform(get("/api/v1/auth/me").session(s2)).andExpect(status().isOk()).andReturn();
+        assertThat((Boolean) JsonPath.read(me3.getResponse().getContentAsString(), "$.mustChangePassword")).isFalse();
+        mvc.perform(get("/api/v1/teams/mine").session(s2)).andExpect(status().isOk());
+    }
+
     // ---------- 契约 2：管理员账号管理 ----------
 
     @Test

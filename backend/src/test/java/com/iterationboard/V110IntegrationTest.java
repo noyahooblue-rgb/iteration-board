@@ -382,7 +382,7 @@ class V110IntegrationTest {
         String cb = created.getResponse().getContentAsString();
         long fid = ((Number) JsonPath.read(cb, "$.id")).longValue();
         assertThat((String) JsonPath.read(cb, "$.status")).isEqualTo("NEW");
-        assertThat((String) JsonPath.read(cb, "$.appVersion")).isEqualTo("1.1.0-rc4");
+        assertThat((String) JsonPath.read(cb, "$.appVersion")).isEqualTo("1.1.0");
         assertThat(((Number) JsonPath.read(cb, "$.images.length()")).intValue()).isEqualTo(1);
 
         // +1 防重复：点两次只计一次
@@ -920,7 +920,7 @@ class V110IntegrationTest {
         MvcResult info = mvc.perform(get("/api/v1/admin/system-info").session(admin))
                 .andExpect(status().isOk()).andReturn();
         String ib = info.getResponse().getContentAsString();
-        assertThat((String) JsonPath.read(ib, "$.appVersion")).isEqualTo("1.1.0-rc4");
+        assertThat((String) JsonPath.read(ib, "$.appVersion")).isEqualTo("1.1.0");
         assertThat((String) JsonPath.read(ib, "$.databaseVersion")).contains("PostgreSQL");
         // rc3：新增 V11 迁移后 flyway 版本为 11
         assertThat((String) JsonPath.read(ib, "$.flywayVersion")).isEqualTo("11");
@@ -937,7 +937,7 @@ class V110IntegrationTest {
         // 更新说明：未读 → 标记已读 → 已读
         mvc.perform(get("/api/v1/release-notes").session(plain))
                 .andExpect(status().isOk())
-                .andExpect(jsonPath("$.version").value("1.1.0-rc4"))
+                .andExpect(jsonPath("$.version").value("1.1.0"))
                 .andExpect(jsonPath("$.read").value(false))
                 .andExpect(jsonPath("$.content").value(org.hamcrest.Matchers.containsString("意见反馈")));
         mvc.perform(post("/api/v1/release-notes/read").session(plain).with(csrf()))
@@ -948,7 +948,7 @@ class V110IntegrationTest {
         // /meta 版本
         mvc.perform(get("/api/v1/meta"))
                 .andExpect(status().isOk())
-                .andExpect(jsonPath("$.version").value("1.1.0-rc4"));
+                .andExpect(jsonPath("$.version").value("1.1.0"));
     }
 
     // ---------- rc2 裁定（hsa43amn 二.1 / 二.2） ----------

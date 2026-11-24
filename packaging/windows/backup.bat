@@ -1,5 +1,6 @@
 @echo off
-setlocal EnableExtensions
+setlocal EnableExtensions DisableDelayedExpansion
+set "IB_ARGS=%*"
 rem ============================================================
 rem  Iteration Board - backup (design 10.4, 1.1.0 update)
 rem  Creates <backup-dir>\<yyyyMMdd-HHmmss>\ with:
@@ -33,6 +34,27 @@ set "ROOT=%~dp0"
 if "%ROOT:~-1%"=="\" set "ROOT=%ROOT:~0,-1%"
 if not exist "%ROOT%\logs" mkdir "%ROOT%\logs"
 if not exist "%ROOT%\data" mkdir "%ROOT%\data"
+set "NOPAUSE=0"
+if /i "%~1"=="auto" set "NOPAUSE=1"
+rem --- IB unified contract: automation hooks + anti-crash shell --
+rem IB_AUTO=1 (CI): no pause, no prompts, no cmd /k wrapper; the
+rem exit code and this script's log file are the contract.
+rem IB_YES=1: confirmations default to yes. A plain double-click
+rem run is re-launched once under cmd /k (IB_WRAPPED) so the
+rem window stays open on any error instead of flashing away.
+if "%IB_AUTO%"=="1" set "NOPAUSE=1"
+if defined IB_WRAPPED goto :ib_wrap_done
+if "%IB_AUTO%"=="1" goto :ib_wrap_done
+if "%NOPAUSE%"=="1" goto :ib_wrap_done
+set "IB_WRAPPED=1"
+cmd /k ""%~f0" %IB_ARGS%"
+exit /b
+:ib_wrap_done
+rem --- IB unified contract: log file next to this script --------
+for /f "usebackq delims=" %%T in (`powershell -NoProfile -Command "Get-Date -Format yyyyMMdd-HHmmss"`) do set "IB_TS=%%T"
+if "%IB_TS%"=="" set "IB_TS=run"
+set "IB_LOG=%~dp0%~n0-%IB_TS%.log"
+call :log [INFO] %~n0 started - log file: %IB_LOG%
 
 rem --- resolve the backup directory (config backup.dir) -------
 set "BKROOT=%ROOT%\backup"
@@ -56,20 +78,20 @@ goto :svc_ok
 echo %DATE% %TIME% [SKIP] PostgreSQL service is not running; backup skipped. >> "%ROOT%\logs\backup.log"
 call :write_status skipped
 if "%~1"=="auto" exit /b 0
-echo [INFO] The PostgreSQL service is not running, so there is nothing to back up.
-echo [INFO] Start the services first - run start.bat - then run backup.bat again.
-pause
+call :log [INFO] The PostgreSQL service is not running, so there is nothing to back up.
+call :log [INFO] Start the services first - run start.bat - then run backup.bat again.
+call :ib_pause
 exit /b 0
 :svc_ok
 
 rem --- read DB password from config\application.yml -----------
 set "DBPWD="
 for /f "tokens=1,2" %%A in ('findstr /C:"password:" "%ROOT%\config\application.yml"') do set "DBPWD=%%B"
-if "%DBPWD%"=="" (
-  echo [ERROR] Could not read DB password from config\application.yml >> "%ROOT%\logs\backup.log"
-  call :write_status failed
-  exit /b 1
-)
+if not "%DBPWD%"=="" goto :dbpwd_ok
+echo [ERROR] Could not read DB password from config\application.yml >> "%ROOT%\logs\backup.log"
+call :write_status failed
+exit /b 1
+:dbpwd_ok
 
 for /f "usebackq delims=" %%T in (`powershell -NoProfile -Command "Get-Date -Format yyyyMMdd-HHmmss"`) do set "TS=%%T"
 set "DEST=%BKROOT%\%TS%"
@@ -78,20 +100,19 @@ set "PGPASSWORD=%DBPWD%"
 "%ROOT%\runtime\pgsql\bin\pg_dump.exe" -h 127.0.0.1 -p 15432 -U postgres -Fc -f "%DEST%\db.dump" iteration_board
 set "IBRC=%ERRORLEVEL%"
 set "PGPASSWORD="
-if not "%IBRC%"=="0" (
-  echo [ERROR] pg_dump failed with code %IBRC% >> "%ROOT%\logs\backup.log"
-  call :write_status failed
-  if not "%~1"=="auto" pause
-  exit /b 1
-)
-if exist "%ROOT%\data\uploads" (
-  robocopy "%ROOT%\data\uploads" "%DEST%\uploads" /E /NFL /NDL /NJH /NJS >nul
-  if errorlevel 8 (
-    echo [ERROR] uploads copy failed. >> "%ROOT%\logs\backup.log"
-    call :write_status failed
-    exit /b 1
-  )
-)
+if "%IBRC%"=="0" goto :dump_ok
+echo [ERROR] pg_dump failed with code %IBRC% >> "%ROOT%\logs\backup.log"
+call :write_status failed
+call :ib_pause
+exit /b 1
+:dump_ok
+if not exist "%ROOT%\data\uploads" goto :uploads_done
+robocopy "%ROOT%\data\uploads" "%DEST%\uploads" /E /NFL /NDL /NJH /NJS >nul
+if not errorlevel 8 goto :uploads_done
+echo [ERROR] uploads copy failed. >> "%ROOT%\logs\backup.log"
+call :write_status failed
+exit /b 1
+:uploads_done
 copy /Y "%ROOT%\config\application.yml" "%DEST%\application.yml" >nul
 echo %DATE% %TIME% backup OK: %DEST% >> "%ROOT%\logs\backup.log"
 set "LASTBACKUP=%DEST%"
@@ -99,8 +120,8 @@ call :write_status success
 
 rem --- keep only the last 30 days ------------------------------
 powershell -NoProfile -Command "Get-ChildItem '%BKROOT%' -Directory | Where-Object { $_.LastWriteTime -lt (Get-Date).AddDays(-30) } | Remove-Item -Recurse -Force"
-echo [INFO] Backup complete: %DEST%
-if not "%~1"=="auto" pause
+call :log [INFO] Backup complete: %DEST%
+call :ib_pause
 exit /b 0
 
 rem --- subroutine: record the run in data\backup-status.json ---
@@ -110,4 +131,16 @@ rem file so lastSuccessTime survives failed or skipped runs.
 set "IB_BK_RESULT=%~1"
 set "IB_BK_PATH=%LASTBACKUP%"
 powershell -NoProfile -Command "$f = '%ROOT%\data\backup-status.json'; $now = (Get-Date).ToUniversalTime().ToString('yyyy-MM-ddTHH:mm:ssZ'); $prev = $null; if (Test-Path $f) { try { $prev = Get-Content $f -Raw | ConvertFrom-Json } catch {} }; $o = [ordered]@{}; $o.lastAttemptTime = $now; if ($env:IB_BK_RESULT -eq 'success') { $o.lastSuccessTime = $now } elseif ($prev -and $prev.lastSuccessTime) { $o.lastSuccessTime = $prev.lastSuccessTime } else { $o.lastSuccessTime = $null }; $o.lastResult = $env:IB_BK_RESULT; $o.success = ($env:IB_BK_RESULT -eq 'success'); if ($env:IB_BK_RESULT -eq 'success') { $o.lastBackupPath = $env:IB_BK_PATH } elseif ($prev -and $prev.lastBackupPath) { $o.lastBackupPath = $prev.lastBackupPath } else { $o.lastBackupPath = $null }; $o.lastAttemptAt = $o.lastAttemptTime; $o.lastSuccessAt = $o.lastSuccessTime; $o.result = $env:IB_BK_RESULT.ToUpper(); $o.detail = $o.lastResult; [IO.File]::WriteAllText($f, ($o | ConvertTo-Json -Compress), [Text.Encoding]::ASCII)"
+exit /b 0
+
+
+:ib_pause
+if defined IB_LOG echo [INFO] Log file: %IB_LOG%
+if "%NOPAUSE%"=="0" pause
+exit /b 0
+
+rem --- subroutine: write a line to console AND the script log ---
+:log
+echo %*
+if defined IB_LOG echo %*>>"%IB_LOG%"
 exit /b 0

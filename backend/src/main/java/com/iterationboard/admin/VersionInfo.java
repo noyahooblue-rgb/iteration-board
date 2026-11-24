@@ -15,7 +15,7 @@ public class VersionInfo {
     private final String version;
     private final BuildProperties buildProperties;
 
-    public VersionInfo(@Value("${app.version:1.1.0-rc4}") String version,
+    public VersionInfo(@Value("${app.version:1.1.0}") String version,
                        Optional<BuildProperties> buildProperties) {
         this.version = version;
         this.buildProperties = buildProperties.orElse(null);
