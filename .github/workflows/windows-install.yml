@@ -131,15 +131,15 @@ jobs:
         shell: pwsh
         timeout-minutes: 45
         run: |
-          $nargs = @('-FullZip', 'C:\ibdl\iteration-board-offline-1.1.0.zip')
+          $nargs = @{ FullZip = 'C:\ibdl\iteration-board-offline-1.1.0.zip' }
           $patch = 'C:\ibdl\iteration-board-patch-1.1.0-rc4-to-1.1.0.zip'
-          if (Test-Path $patch) { $nargs += @('-PatchZip', $patch) }
+          if (Test-Path $patch) { $nargs['PatchZip'] = $patch }
           $z104 = 'C:\ibdl\iteration-board-offline-1.0.4.zip'
           $p104 = 'C:\ibdl\iteration-board-patch-1.0.4-to-1.1.0.zip'
-          if ((Test-Path $z104) -and (Test-Path $p104)) { $nargs += @('-OldZip104', $z104, '-Patch104', $p104) }
+          if ((Test-Path $z104) -and (Test-Path $p104)) { $nargs['OldZip104'] = $z104; $nargs['Patch104'] = $p104 }
           $z101 = 'C:\ibdl\iteration-board-offline-1.0.1.zip'
           $p101 = 'C:\ibdl\iteration-board-patch-1.0.1-to-1.1.0.zip'
-          if ((Test-Path $z101) -and (Test-Path $p101)) { $nargs += @('-OldZip101', $z101, '-Patch101', $p101) }
+          if ((Test-Path $z101) -and (Test-Path $p101)) { $nargs['OldZip101'] = $z101; $nargs['Patch101'] = $p101 }
           & ./tools/ci/windows-nasty-paths.ps1 @nargs
       - name: 上传恶劣路径矩阵证据
         if: always()
