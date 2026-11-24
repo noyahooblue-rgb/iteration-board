@@ -77,6 +77,20 @@ packaging/windows 下的 .bat，发现以下已知坑即报错（退出码 1）�
                         矩阵 N3-1.0.1 手动分支实测）。空值判断一律
                         用哨兵后缀形式 if "%VAR%x"=="x"。
 
+  R9 sums-encoding      内嵌 PowerShell 用 Get-Content 读
+                        SHA256SUMS.txt 而未显式 -Encoding UTF8：
+                        该文件由打包机以 UTF-8（无 BOM）生成，
+                        Windows PowerShell 5.1 的 Get-Content
+                        默认按系统 ANSI 代码页解码，其中的中文
+                        文件名（docs\\用户手册.md 等）必然乱码，
+                        补丁自校验误报「文件缺失」并中止（1.1.0
+                        CI 终验修复轮实测：N1×7 + N3-1.0.4 共 8
+                        次补丁运行全部倒在此步）。同机自产自读
+                        的文件（backup-status.json 等）不在此
+                        列——生产与消费同为本机默认编码、自洽；
+                        只有跨平台生成的 UTF-8 文件必须显式
+                        指定编码。
+
 豁免：行尾或上一行加注释 rem IB-CHECK-EXEMPT <规则号> 可豁免
 该行该规则（命令本身不能带尾随注释时用上一行形式），必须在
 重检清单里逐条写理由。
@@ -281,6 +295,10 @@ def check_file_v2(path: Path):
                 findings.append((lineno, "R8",
                                  f"console-input variable %{var}% in a bare quoted if comparison; a trailing backslash before the closing quote breaks the parser - use the sentinel form \"%{var}%x\"==\"x\""))
                 break
+        # R9: Get-Content of SHA256SUMS.txt without explicit UTF-8 encoding
+        if "SHA256SUMS" in line.upper() and re.search(r"(?i)Get-Content", line) and not re.search(r"(?i)Get-Content\s+-Encoding\s+UTF8", line) and not exempt(line, "R9", prev_line):
+            findings.append((lineno, "R9",
+                             "Get-Content reads SHA256SUMS.txt without -Encoding UTF8; the file is generated as UTF-8 (no BOM) and Windows PowerShell 5.1 decodes with the ANSI code page by default, garbling the non-ASCII file names inside"))
         # R6: unquoted path-variable token (approximation, see docstring)
         stripped = line.strip()
         if not re.match(r"(?i)set\s", stripped) and not exempt(line, "R6", prev_line):

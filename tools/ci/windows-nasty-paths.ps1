@@ -215,7 +215,7 @@ try {
   foreach ($fx in @(@{ V = '1.0.4'; Zip = $OldZip104; Patch = $Patch104 }, @{ V = '1.0.1'; Zip = $OldZip101; Patch = $Patch101 })) {
     if (-not $fx.Zip -or -not $fx.Patch) { Write-Host "SKIP N3 $($fx.V) (zips not provided)"; continue }
     $tag = "N3 $($fx.V)"
-    $target = Join-Path $Base "fixture $($fx.V)\iteration-board-offline-$($fx.V)"
+    $target = Join-Path $Base "fixture-$($fx.V)\iteration-board-offline-$($fx.V)"
     Uninstall-Quiet $target
     $code = Install-Fresh $fx.Zip $target
     Check "$tag fixture install exit 0" ($code -eq 0)

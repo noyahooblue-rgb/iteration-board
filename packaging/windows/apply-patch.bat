@@ -99,8 +99,10 @@ call :detect_target
 if "%IB_DET_COUNT%"=="1" goto :target_detected
 call :log [INFO] No single installed location could be detected
 call :log [INFO] from the IterationBoardApp service registration.
+set "TARGET=__IB_NONE__"
 set /p "TARGET=Type or drag the install folder path here, then press Enter: "
 set "TARGET=%TARGET:"=%"
+if "%TARGET%x"=="__IB_NONE__x" goto :target_missing
 goto :target_check
 :target_detected
 set "TARGET=%IB_DET_1%"
@@ -110,9 +112,10 @@ choice /C YN /M "Upgrade this installation now"
 if errorlevel 2 goto :target_manual
 goto :target_check
 :target_manual
-set "TARGET="
+set "TARGET=__IB_NONE__"
 set /p "TARGET=Type or drag the install folder path here, then press Enter: "
 set "TARGET=%TARGET:"=%"
+if "%TARGET%x"=="__IB_NONE__x" goto :target_missing
 :target_check
 rem The empty test uses a sentinel suffix: a typed or dragged
 rem path can end in a backslash, and a bare "%TARGET%"=="" test
@@ -183,7 +186,7 @@ if errorlevel 2 exit /b 0
 
 rem --- step 1: verify the patch files themselves -----------------
 call :log [INFO] Verifying patch files against SHA256SUMS.txt ...
-powershell -NoProfile -Command "function Get-Sha256([string]$path) { $fs = [IO.File]::OpenRead($path); try { return [BitConverter]::ToString(([Security.Cryptography.SHA256]::Create()).ComputeHash($fs)).Replace('-', '').ToLower() } finally { $fs.Close() } }; $fail = 0; foreach ($line in Get-Content '%PATCHROOT%\SHA256SUMS.txt') { if ($line -match '^\s*#' -or $line -notmatch '^\s*([0-9a-fA-F]{64})\s+(.+)$') { continue }; $exp = $Matches[1]; $rel = $Matches[2].Trim(); $p = Join-Path '%PATCHROOT%' $rel; if (-not (Test-Path $p)) { Write-Host \"[ERROR] $rel missing in the patch folder\"; $fail = 1; continue }; $h = (Get-Sha256 $p); if ($h -ne $exp) { Write-Host \"[ERROR] $rel hash mismatch\"; $fail = 1 } else { Write-Host \"[OK] $rel\" } }; exit $fail"
+powershell -NoProfile -Command "function Get-Sha256([string]$path) { $fs = [IO.File]::OpenRead($path); try { return [BitConverter]::ToString(([Security.Cryptography.SHA256]::Create()).ComputeHash($fs)).Replace('-', '').ToLower() } finally { $fs.Close() } }; $fail = 0; foreach ($line in Get-Content -Encoding UTF8 '%PATCHROOT%\SHA256SUMS.txt') { if ($line -match '^\s*#' -or $line -notmatch '^\s*([0-9a-fA-F]{64})\s+(.+)$') { continue }; $exp = $Matches[1]; $rel = $Matches[2].Trim(); $p = Join-Path '%PATCHROOT%' $rel; if (-not (Test-Path $p)) { Write-Host \"[ERROR] $rel missing in the patch folder\"; $fail = 1; continue }; $h = (Get-Sha256 $p); if ($h -ne $exp) { Write-Host \"[ERROR] $rel hash mismatch\"; $fail = 1 } else { Write-Host \"[OK] $rel\" } }; exit $fail"
 if errorlevel 1 (
   echo [ERROR] Patch files did not verify - nothing was changed.
   echo [ERROR] Re-extract the patch zip and try again.
@@ -219,7 +222,7 @@ if "%DBBACKUP%"=="" (
 for /f "usebackq delims=" %%T in (`powershell -NoProfile -Command "Get-Date -Format yyyyMMdd-HHmmss"`) do set "TS=%%T"
 set "BUNDLE=%BKROOT%\upgrade-%TS%"
 mkdir "%BUNDLE%\files" >nul 2>&1
-powershell -NoProfile -Command "foreach ($line in Get-Content '%PATCHROOT%\SHA256SUMS.txt') { if ($line -notmatch '^\s*([0-9a-fA-F]{64})\s+(.+)$') { continue }; $rel = $Matches[2].Trim(); $t = Join-Path '%TARGET%' $rel; if (Test-Path $t) { $d = Join-Path '%BUNDLE%\files' $rel; New-Item -ItemType Directory -Force (Split-Path $d) | Out-Null; Copy-Item $t $d -Force } }"
+powershell -NoProfile -Command "foreach ($line in Get-Content -Encoding UTF8 '%PATCHROOT%\SHA256SUMS.txt') { if ($line -notmatch '^\s*([0-9a-fA-F]{64})\s+(.+)$') { continue }; $rel = $Matches[2].Trim(); $t = Join-Path '%TARGET%' $rel; if (Test-Path $t) { $d = Join-Path '%BUNDLE%\files' $rel; New-Item -ItemType Directory -Force (Split-Path $d) | Out-Null; Copy-Item $t $d -Force } }"
 rem The whole app\ folder (and version.txt, when the install
 rem has one) goes into the bundle as well (not only the files
 rem this patch replaces), so the
@@ -262,7 +265,7 @@ call :ib_pause
 exit /b 1
 :app_stopped
 call :log [INFO] Copying patched files into %TARGET% ...
-powershell -NoProfile -Command "function Get-Sha256([string]$path) { $fs = [IO.File]::OpenRead($path); try { return [BitConverter]::ToString(([Security.Cryptography.SHA256]::Create()).ComputeHash($fs)).Replace('-', '').ToLower() } finally { $fs.Close() } }; $fail = 0; foreach ($line in Get-Content '%PATCHROOT%\SHA256SUMS.txt') { if ($line -notmatch '^\s*([0-9a-fA-F]{64})\s+(.+)$') { continue }; $exp = $Matches[1]; $rel = $Matches[2].Trim(); if ($rel -ieq 'apply-patch.bat') { continue }; if ($rel -ieq 'config\application.yml') { Write-Host \"[WARN] config\application.yml is listed in the patch but is NEVER overwritten - the target settings are kept\"; continue }; $s = Join-Path '%PATCHROOT%' $rel; $t = Join-Path '%TARGET%' $rel; New-Item -ItemType Directory -Force (Split-Path $t) | Out-Null; Copy-Item $s $t -Force; if ((Get-Sha256 $t) -ne $exp) { Write-Host \"[ERROR] $rel copy verification failed\"; $fail = 1 } else { Write-Host \"[OK] $rel\" } }; exit $fail"
+powershell -NoProfile -Command "function Get-Sha256([string]$path) { $fs = [IO.File]::OpenRead($path); try { return [BitConverter]::ToString(([Security.Cryptography.SHA256]::Create()).ComputeHash($fs)).Replace('-', '').ToLower() } finally { $fs.Close() } }; $fail = 0; foreach ($line in Get-Content -Encoding UTF8 '%PATCHROOT%\SHA256SUMS.txt') { if ($line -notmatch '^\s*([0-9a-fA-F]{64})\s+(.+)$') { continue }; $exp = $Matches[1]; $rel = $Matches[2].Trim(); if ($rel -ieq 'apply-patch.bat') { continue }; if ($rel -ieq 'config\application.yml') { Write-Host \"[WARN] config\application.yml is listed in the patch but is NEVER overwritten - the target settings are kept\"; continue }; $s = Join-Path '%PATCHROOT%' $rel; $t = Join-Path '%TARGET%' $rel; New-Item -ItemType Directory -Force (Split-Path $t) | Out-Null; Copy-Item $s $t -Force; if ((Get-Sha256 $t) -ne $exp) { Write-Host \"[ERROR] $rel copy verification failed\"; $fail = 1 } else { Write-Host \"[OK] $rel\" } }; exit $fail"
 if not errorlevel 1 goto :copy_ok
 call :log [ERROR] Copying the patch failed partway. Roll back with:
 call :log [ERROR]   "%TARGET%\rollback.bat"
