@@ -16,7 +16,7 @@ rem ============================================================
 set "DIR=%~dp0"
 if "%DIR:~-1%"=="\" set "DIR=%DIR:~0,-1%"
 set "OUT=%DIR%\iteration-board-offline-1.1.0.zip"
-set "EXPECT=c411549e77aa03c408247740030e146bda5465b99deb428efc35650d12b70fb5"
+set "EXPECT=512136ba8024a7f64a007c4c6b55358dfe445c93580ecd65d3ed9356c5cb179a"
 
 if not exist "%DIR%\iteration-board-offline-1.1.0.zip.001" goto :missing
 if not exist "%DIR%\iteration-board-offline-1.1.0.zip.002" goto :missing
