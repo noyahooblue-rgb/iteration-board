@@ -4,7 +4,7 @@
 #
 # Usage:  bash packaging/build-package.sh [--skip-downloads]
 #
-# Output: packaging/dist/iteration-board-offline-1.1.0-rc3.zip
+# Output: packaging/dist/iteration-board-offline-1.1.0-rc4.zip
 #
 # What it does:
 #   1. Builds the backend jar (offline Maven wrapper).
@@ -25,10 +25,10 @@
 # ============================================================
 set -euo pipefail
 
-# Single source of truth for the package version (1.1.0-rc3).
+# Single source of truth for the package version (1.1.0-rc4).
 # It is also written into the package as version.txt, which
 # install/upgrade/migrate scripts read at runtime.
-VERSION="1.1.0-rc3"
+VERSION="1.1.0-rc4"
 PKG_NAME="iteration-board-offline-${VERSION}"
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_ROOT="$(cd "${SCRIPT_DIR}/.." && pwd)"
@@ -109,7 +109,39 @@ fetch() { # fetch <cache-file> <url>
   return 1
 }
 
+# A3 helper (rc4, ledger #11): backend payload fingerprint of a jar.
+# Hashes the sorted "entry-path CRC" list of every entry EXCEPT the
+# embedded frontend (BOOT-INF/classes/static/**), which packaging adds
+# in step 2; two jars with the same fingerprint carry the same backend
+# code/resources regardless of zip metadata or the embedded UI. Used
+# to prove the jar shipped in the package is the jar built in step 1.
+jar_fingerprint() { # jar_fingerprint <jar-file>
+  unzip -lv "$1" \
+    | awk '$1 ~ /^[0-9]+$/ && $7 ~ /^[0-9a-fA-F]{8}$/ {
+        name = $8; for (i = 9; i <= NF; i++) name = name " " $i
+        if (name !~ /^BOOT-INF\/classes\/static\//) print name " " $7
+      }' \
+    | LC_ALL=C sort \
+    | sha256sum | awk '{print $1}'
+}
+
 echo "=== 1/5 Backend jar ==="
+# A1 (rc4, ledger #11): select the jar by EXACT version name, never by
+# glob. The old `ls iteration-board-*.jar | head -1` picked the
+# lexicographically first jar, so a stale rc2 jar left in target/ was
+# silently packaged into the rc3 offline zip while CI only ever
+# tested the fresh Maven output. Delete every OTHER version's
+# iteration-board-*.jar BEFORE the build (only this glob family, so
+# no stale jar can survive into the package), then assert afterwards
+# that exactly one such jar exists and it is the expected file.
+EXPECTED_JAR="${REPO_ROOT}/backend/target/iteration-board-${VERSION}.jar"
+for stale in "${REPO_ROOT}"/backend/target/iteration-board-*.jar; do
+  [ -e "${stale}" ] || continue
+  if [ "${stale}" != "${EXPECTED_JAR}" ]; then
+    echo "[clean] removing stale jar before build (prevents old-version jars leaking into the package): ${stale}"
+    rm -f "${stale}"
+  fi
+done
 cd "${REPO_ROOT}/backend"
 if [ "${IB_CI}" = "1" ]; then
   mvn -B package -DskipTests
@@ -117,9 +149,28 @@ else
   "${REPO_ROOT}/toolchain/mvn-ib.sh" -o package -DskipTests
 fi
 cd "${REPO_ROOT}"
-JAR_SRC="$(ls "${REPO_ROOT}"/backend/target/iteration-board-*.jar | head -1)"
-[ -f "${JAR_SRC}" ] || { echo "[error] backend jar not found"; exit 1; }
+[ -f "${EXPECTED_JAR}" ] || { echo "[error] expected backend jar missing after build: ${EXPECTED_JAR}"; exit 1; }
+JAR_COUNT="$(ls "${REPO_ROOT}"/backend/target/iteration-board-*.jar | wc -l)"
+[ "${JAR_COUNT}" -eq 1 ] || { echo "[error] expected exactly one iteration-board-*.jar in backend/target, found ${JAR_COUNT}"; ls -l "${REPO_ROOT}"/backend/target/iteration-board-*.jar; exit 1; }
+JAR_SRC="${EXPECTED_JAR}"
 echo "[ok] ${JAR_SRC}"
+# A3 (rc4, ledger #11): record the built jar's sha256 + backend
+# fingerprint in a manifest shipped NEXT TO the package zip, so CI
+# and humans can prove the shipped jar is the built jar.
+JAR_SHA256="$(sha256sum "${JAR_SRC}" | awk '{print $1}')"
+JAR_FINGERPRINT="$(jar_fingerprint "${JAR_SRC}")"
+echo "[ok] backend jar sha256: ${JAR_SHA256}"
+echo "[ok] backend jar fingerprint (entry+CRC, excl. BOOT-INF/classes/static): ${JAR_FINGERPRINT}"
+cat > "${DIST_DIR}/${PKG_NAME}.jar-manifest.txt" <<EOF
+package: ${PKG_NAME}
+version: ${VERSION}
+jar: iteration-board-${VERSION}.jar
+jar-sha256: ${JAR_SHA256}
+jar-fingerprint: ${JAR_FINGERPRINT}
+fingerprint-method: sha256 of sorted "entry-path CRC" lines from unzip -lv, excluding BOOT-INF/classes/static/**
+built: $(date '+%F %T %z')
+EOF
+echo "[ok] jar manifest written: ${DIST_DIR}/${PKG_NAME}.jar-manifest.txt"
 
 echo "=== 2/5 Frontend build + embed into jar ==="
 cd "${REPO_ROOT}/frontend"
@@ -170,6 +221,45 @@ rm -rf "${STAGING_DIR}"
 mkdir -p "${STAGING_DIR}"/{app,runtime/pgsql,runtime/jre,runtime/winsw,config,data,backup,logs,docs,service}
 cp "${WORK_JAR}" "${STAGING_DIR}/app/iteration-board.jar"
 rm -f "${WORK_JAR}"
+
+echo "--- Shipped-jar assertions (A2/A3, rc4, ledger #11) ---"
+# The shipped artifact is what gets tested: assert against the jar as
+# it will leave the factory (staging app/iteration-board.jar, frontend
+# already embedded), not against the Maven output. Any failure aborts
+# the build - a wrong-version jar must never ship again (rc3 did).
+SHIPPED_JAR="${STAGING_DIR}/app/iteration-board.jar"
+assert_fail() { echo "[ERROR] SHIPPED-JAR ASSERTION FAILED: $1"; echo "[ERROR] Build aborted - do NOT ship this package."; exit 1; }
+# Assertion inputs are extracted to FILES first, never piped into
+# grep -q / head: under `set -o pipefail`, an early-exiting consumer
+# SIGPIPEs the producer (unzip exits 141) and the pipeline reports
+# failure even when the pattern matched - that false negative aborted
+# the first rc4 verification build at A2-2 with the class present.
+ASSERT_DIR="${BUILD_TMP}/assert"
+mkdir -p "${ASSERT_DIR}"
+unzip -p "${SHIPPED_JAR}" BOOT-INF/classes/application.yml > "${ASSERT_DIR}/app.yml"
+unzip -Z1 "${SHIPPED_JAR}" > "${ASSERT_DIR}/listing.txt"
+# A2-1: the jar's own application.yml version must equal ${VERSION}.
+JAR_VERSION="$(grep -m1 -E '^[[:space:]]*version:' "${ASSERT_DIR}/app.yml" | sed -E 's/^[[:space:]]*version:[[:space:]]*//; s/[[:space:]]*$//')"
+[ "${JAR_VERSION}" = "${VERSION}" ] || assert_fail "jar application.yml version is '${JAR_VERSION}', expected '${VERSION}'"
+echo "[ok] A2-1 shipped jar version == ${VERSION}"
+# A2-2: the rc3 endpoint class must be inside the jar (its absence is
+# what made the new endpoints 404 on the real machine).
+grep -q '^BOOT-INF/classes/com/iterationboard/item/ItemResolutionController.class$' "${ASSERT_DIR}/listing.txt" \
+  || assert_fail "ItemResolutionController.class missing from shipped jar"
+echo "[ok] A2-2 ItemResolutionController.class present in shipped jar"
+# A2-3: highest Flyway migration inside the jar must equal the highest
+# in the backend sources (sort -V on both sides).
+JAR_MIG="$(grep -E '^BOOT-INF/classes/db/migration/V[^/]*\.sql$' "${ASSERT_DIR}/listing.txt" | sed 's|.*/||' | sort -V | tail -1)"
+SRC_MIG="$(ls "${REPO_ROOT}/backend/src/main/resources/db/migration/"V*.sql | xargs -n1 basename | sort -V | tail -1)"
+[ -n "${JAR_MIG}" ] && [ "${JAR_MIG}" = "${SRC_MIG}" ] \
+  || assert_fail "highest Flyway migration in jar is '${JAR_MIG}', sources have '${SRC_MIG}'"
+echo "[ok] A2-3 highest Flyway migration matches sources: ${SRC_MIG}"
+# A3: the shipped jar's backend fingerprint must equal the step-1
+# jar's (embedding/assembly must not swap or corrupt the payload).
+SHIPPED_FINGERPRINT="$(jar_fingerprint "${SHIPPED_JAR}")"
+[ "${SHIPPED_FINGERPRINT}" = "${JAR_FINGERPRINT}" ] \
+  || assert_fail "backend fingerprint mismatch: built jar ${JAR_FINGERPRINT} vs shipped jar ${SHIPPED_FINGERPRINT}"
+echo "[ok] A3 shipped jar fingerprint matches built jar: ${SHIPPED_FINGERPRINT}"
 cp "${SCRIPT_DIR}/config/application.yml" "${STAGING_DIR}/config/application.yml"
 cp -r "${REPO_ROOT}/backend/config/prompts" "${STAGING_DIR}/config/prompts"
 for f in install start stop uninstall backup restore upgrade apply-patch rollback reset-admin migrate-export migrate-import; do

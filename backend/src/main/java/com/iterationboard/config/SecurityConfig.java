@@ -107,7 +107,7 @@ public class SecurityConfig {
                     .requestMatchers("/v3/api-docs/**", "/v3/api-docs.yaml", "/swagger-ui/**", "/swagger-ui.html", "/openapi.yaml").access(platformAdminFromDb(userRepo))
                     // 1.0.3 修复（实测第四轮）：只对 /api/** 要求认证；/api/** 以外是
                     // 前端静态资源与 SPA 路由，全部放行（否则未登录打开首页直接 401
-                    // JSON，永远看不到登录页）。SPA 路由的 index.html 回退见 SpaController。
+                    // JSON，永远看不到登录页）。SPA 路由的 index.html 回退见 WebConfig 的 SPA 兜底资源解析器。
                     .requestMatchers("/api/**").authenticated()
                     .anyRequest().permitAll())
             .exceptionHandling(ex -> ex

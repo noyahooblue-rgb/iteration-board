@@ -39,7 +39,7 @@ router.beforeEach(async (to) => {
   if (__IB_SHOWCASE__ && (to.meta as any).showcase && !(auth.meta.demoMode || import.meta.env.DEV)) return '/workbench'
   if (!to.meta.auth) return true
   const user = auth.user ?? await auth.loadMe()
-  if (!user) return '/login'
+  if (!user) { if (to.path === '/login') return '/login'; return to.fullPath && to.fullPath !== '/' ? { path: '/login', query: { redirect: to.fullPath } } : '/login' }
   // 修订六契约 5：必须改密的用户先去改密页（置于 team/admin 守卫之前；改密页与登录页本身放行）。
   if (user.mustChangePassword && to.path !== '/change-password' && to.path !== '/login') return '/change-password'
   // 平台管理（1.0.4 I）：非平台管理员直接跳走。

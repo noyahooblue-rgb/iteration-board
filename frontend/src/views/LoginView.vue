@@ -43,11 +43,11 @@
 </template>
 <script setup lang="ts">
 import { reactive, ref, computed, onMounted } from 'vue'
-import { useRouter } from 'vue-router'
+import { useRouter, useRoute } from 'vue-router'
 import { UserRoundX } from 'lucide-vue-next'
 import GlassPanel from '../components/GlassPanel.vue'; import AppButton from '../components/AppButton.vue'; import AppInput from '../components/AppInput.vue'; import SegmentedControl from '../components/SegmentedControl.vue'; import PasswordRules from '../components/PasswordRules.vue'
 import { api, ApiError, DEMO_ACCOUNTS, DEMO_SUBTITLE, DEMO_FILL_HINT, DEMO_REG_CLOSED_TEXT, DEMO_PASSWORD_FILL } from '../api/http'; import { useAuth } from '../stores/auth'; import { useTeam } from '../stores/team'; import { useToast } from '../stores/toast'
-const router = useRouter(), auth = useAuth(), team = useTeam(), toast = useToast()
+const router = useRouter(), route = useRoute(), auth = useAuth(), team = useTeam(), toast = useToast()
 import { APP_VERSION, BUILD_DATE } from '../utils/appMeta'
 import { effectiveTheme, lockupSrc } from '../utils/appearance'
 // 登录页底部版本（修订三二.1）：优先用后端 /meta 的版本，离线兜底用本地常量。
@@ -64,7 +64,7 @@ const strengthColor = computed(()=> ['var(--strength-empty)','var(--c-red)','var
 async function loadCaptcha(){ try{ const d = await api.get('/auth/captcha'); captchaId.value=d.captchaId; captchaSvg.value=d.imageSvg }catch{} }
 onMounted(()=>{ auth.loadMeta(); loadCaptcha() })
 function fillDemo(login:string){ f.loginName=login; f.password=DEMO_PASSWORD_FILL; toast.show('已填入演示账号，点登录即可') }
-async function afterLogin(){ await team.loadTeams(); router.push(team.teams.length ? '/workbench' : '/teams/new') }
+async function afterLogin(){ await team.loadTeams(); const redirect = route.query.redirect; if (typeof redirect === 'string' && redirect.startsWith('/') && !redirect.startsWith('//') && redirect !== '/login') { router.push(redirect); return } router.push(team.teams.length ? '/workbench' : '/teams/new') }
 async function login(){ if (busy.value) return; err.value=''; e.loginName = f.loginName ? '' : '请输入登录名'; e.password = f.password ? '' : '请输入密码'; if(e.loginName||e.password) return
   busy.value = true
   try{ auth.user = await api.post('/auth/login', { loginName:f.loginName, password:f.password, captchaId: needCaptcha.value? captchaId.value:undefined, captchaCode: needCaptcha.value? f.captchaCode:undefined }); await afterLogin() }

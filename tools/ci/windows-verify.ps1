@@ -24,6 +24,14 @@
 #   P2c Scenario F (feedback flow, 1.1.0): submit with image, +1,
 #       admin ACCEPTED with planned version, submitter notified,
 #       admin zip export, direct-open /feedback and /admin
+#   P15 legacy-data upgrade path (rc4, ledger #11): the SHIPPED jar
+#       must report its own version via /meta, and legacy-shaped rows
+#       written straight into the DB (data:-prefixed and CRLF-folded
+#       feedback-image base64, an item carrying the pre-enum status
+#       'OPEN') must still read back over real HTTP. Standing
+#       scenario for every version from rc4 on - born from the rc3
+#       offline package shipping the rc2 backend jar while CI only
+#       ever tested the Maven output, never the shipped artifact.
 #   P3  stop -> backup must SKIP with exit 0 while PG is stopped
 # -> start
 #   P4  backup (auto) produces backup\<ts>\db.dump
@@ -47,7 +55,7 @@
 #; P1 asserted DEMAND_START for the default mode
 # ============================================================
 $ErrorActionPreference = 'Continue'
-$PkgVersion = '1.1.0-rc3'
+$PkgVersion = '1.1.0-rc4'
 $Zip = "C:\ibdl\iteration-board-offline-$PkgVersion.zip"
 $PkgDirName = "iteration-board-offline-$PkgVersion"
 $Work = 'C:\ibwork'
@@ -172,6 +180,27 @@ function Api-Me($Session) {
   $r = Api-Call $Session 'Get' '/auth/me' $null
   if ($r.Status -ne 200) { throw "GET /auth/me -> HTTP $($r.Status)" }
   return $r.Body
+}
+
+# psql scalar query against an installed instance, same connection
+# approach as Assert-Installed (password read from instance config).
+function Invoke-PsqlScalar([string]$RootPath, [string]$Sql) {
+  $pwdLine = Select-String -Path (Join-Path $RootPath 'config\application.yml') -Pattern '^\s*password:\s*(\S+)' | Select-Object -First 1
+  $env:PGPASSWORD = $pwdLine.Matches[0].Groups[1].Value
+  try {
+    $out = & (Join-Path $RootPath 'runtime\pgsql\bin\psql.exe') -h 127.0.0.1 -p 15432 -U postgres -d iteration_board -tAc $Sql
+    if ($LASTEXITCODE -ne 0) { throw "psql exited $LASTEXITCODE for: $Sql" }
+    return ($out | Out-String).Trim()
+  } finally { $env:PGPASSWORD = $null }
+}
+
+# Raw GET for non-JSON responses (e.g. feedback images): Api-Call
+# parses JSON, this one reports status + Content-Type instead.
+function Api-RawGet($Session, [string]$Path) {
+  $r = Invoke-WebRequest -UseBasicParsing -Uri "http://localhost:18080/api/v1$Path" -WebSession $Session -SkipHttpErrorCheck -TimeoutSec 30
+  $ct = ''
+  if ($r.Headers -and $r.Headers['Content-Type']) { $ct = [string]$r.Headers['Content-Type'] }
+  return [pscustomobject]@{ Status = [int]$r.StatusCode; ContentType = $ct }
 }
 
 function Read-AdminInitialPassword([string]$RootPath) {
@@ -343,6 +372,75 @@ try {
   } finally { Pop-Location }
   foreach ($shot in 'F1-feedback-list.png', 'F2-bell-notification.png', 'F3-admin-view.png') {
     Check "P2c screenshot $shot exists" (Test-Path (Join-Path $Evidence "shots-f\$shot"))
+  }
+
+  # ---------- P15: legacy-data upgrade path (rc4, ledger #11) ----------
+  # Origin: the 1.1.0-rc3 offline package silently contained the rc2
+  # backend jar (build-package.sh picked jars by glob and grabbed the
+  # stale one), so the rc3 endpoints 404'd on the real machine while
+  # every CI tier stayed green - CI tested the Maven output, never
+  # the shipped artifact. This phase therefore (1) asks the SHIPPED
+  # jar who it is via /meta and (2) seeds legacy-shaped data directly
+  # in the DB - the shapes pre-rc4 data can have after an in-place
+  # upgrade - and reads it back over real HTTP with the admin
+  # session. Standing scenario: it runs for every version from rc4
+  # on, not just for this fix. All data below is fictional.
+  Phase 'P15 legacy-data upgrade path (shipped-jar version + legacy row shapes)'
+  $p15Log = Join-Path $Evidence 'p15-legacy-shapes.log'
+  $p15Admin = $null
+  try { $p15Admin = Api-Login 'admin' $script:AdminNewPw } catch { Write-Host "P15 admin login failed: $($_.Exception.Message)" }
+  Check 'P15 admin login (password rotated in P1b)' ($null -ne $p15Admin)
+  if ($p15Admin) {
+    # (1) Shipped-jar self-check: /meta version must be the package
+    # version. A wrong-version jar fails HERE first, in tier 3's
+    # earliest API phase, instead of passing every tier.
+    $meta15 = Api-Call $p15Admin 'Get' '/meta' $null
+    "P15 meta: HTTP $($meta15.Status) version=$($meta15.Body.version) expected=$PkgVersion" | Out-File -Append -Encoding utf8 $p15Log
+    Check "P15 shipped jar /meta version is $PkgVersion (got: $($meta15.Body.version), HTTP $($meta15.Status))" ($meta15.Status -eq 200 -and $meta15.Body.version -eq $PkgVersion)
+
+    # (2) Legacy-shaped rows, written with the package's own psql.
+    # Attach to the newest feedback (created by Scenario F in P2c).
+    # Image bytes are the well-known public 1x1 transparent PNG.
+    $png64 = 'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+ip1sAAAAASUVORK5CYII='
+    $fbIdTxt = Invoke-PsqlScalar $Root 'SELECT id FROM feedback ORDER BY id DESC LIMIT 1'
+    Check 'P15 a feedback row from P2c exists to attach legacy images to' ($fbIdTxt -match '^\d+$')
+    if ($fbIdTxt -match '^\d+$') {
+      $fbId = [long]$fbIdTxt
+      # (a) data:-URI prefixed base64 (pre-normalization write shape)
+      $imgPrefix = Invoke-PsqlScalar $Root "INSERT INTO feedback_image (feedback_id, file_name, content_type, size_bytes, content_base64) VALUES ($fbId, 'P15 legacy shape probe prefix.png', 'image/png', 68, 'data:image/png;base64,$png64') RETURNING id"
+      # (b) CRLF-folded base64 (MIME-style line breaks kept in the row)
+      $imgCrlf = Invoke-PsqlScalar $Root "INSERT INTO feedback_image (feedback_id, file_name, content_type, size_bytes, content_base64) VALUES ($fbId, 'P15 legacy shape probe crlf.png', 'image/png', 68, 'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwC' || chr(13) || chr(10) || 'AAAAC0lEQVR42mP8/x8AAwMCAO+ip1sAAAAASUVORK5CYII=') RETURNING id"
+      Check 'P15 legacy feedback image rows inserted (prefix + CRLF shapes)' ($imgPrefix -match '^\d+$' -and $imgCrlf -match '^\d+$')
+      if ($imgPrefix -match '^\d+$') {
+        $img1 = Api-RawGet $p15Admin "/feedback/$fbId/images/$([long]$imgPrefix)"
+        "P15 GET legacy prefix image: HTTP $($img1.Status) Content-Type $($img1.ContentType)" | Out-File -Append -Encoding utf8 $p15Log
+        Check "P15 legacy data:-prefixed image reads back 200 image/* (HTTP $($img1.Status), $($img1.ContentType))" ($img1.Status -eq 200 -and $img1.ContentType -like 'image/*')
+      }
+      if ($imgCrlf -match '^\d+$') {
+        $img2 = Api-RawGet $p15Admin "/feedback/$fbId/images/$([long]$imgCrlf)"
+        "P15 GET legacy CRLF image: HTTP $($img2.Status) Content-Type $($img2.ContentType)" | Out-File -Append -Encoding utf8 $p15Log
+        Check "P15 legacy CRLF-folded image reads back 200 image/* (HTTP $($img2.Status), $($img2.ContentType))" ($img2.Status -eq 200 -and $img2.ContentType -like 'image/*')
+      }
+    }
+    # (c) An item carrying the pre-enum legacy status 'OPEN'.
+    # Chosen approach: UPDATE one existing script-created item and
+    # restore its original status right after the assertion - an
+    # INSERT copy is brittle here because the item table has many
+    # NOT NULL columns (code/type/team/creator/...), while an
+    # in-place flip + restore leaves the data exactly as found.
+    $itemIdTxt = Invoke-PsqlScalar $Root 'SELECT id FROM item ORDER BY id DESC LIMIT 1'
+    Check 'P15 an item row from the earlier scenarios exists' ($itemIdTxt -match '^\d+$')
+    if ($itemIdTxt -match '^\d+$') {
+      $itemId = [long]$itemIdTxt
+      $origStatus = Invoke-PsqlScalar $Root "SELECT status FROM item WHERE id = $itemId"
+      [void](Invoke-PsqlScalar $Root "UPDATE item SET status = 'OPEN' WHERE id = $itemId")
+      $res15 = Api-Call $p15Admin 'Get' "/items/$itemId/resolution" $null
+      "P15 GET /items/$itemId/resolution with legacy status OPEN: HTTP $($res15.Status)" | Out-File -Append -Encoding utf8 $p15Log
+      Check "P15 item with legacy status 'OPEN' resolves 200 (HTTP $($res15.Status))" ($res15.Status -eq 200)
+      [void](Invoke-PsqlScalar $Root "UPDATE item SET status = '$origStatus' WHERE id = $itemId")
+      $restoredStatus = Invoke-PsqlScalar $Root "SELECT status FROM item WHERE id = $itemId"
+      Check "P15 probe item status restored to $origStatus" ($restoredStatus -eq $origStatus)
+    }
   }
 
   # ---------- P2d: Scenario R5 (revision 5: progress/status linkage
@@ -674,6 +772,7 @@ if ($script:Failures.Count -gt 0) {
   if ($script:Failures -match 'P2b ') { Dump-Tail 'p2b-scenario-e.log' }
   if ($script:Failures -match 'P2c ') { Dump-Tail 'p2c-scenario-f.log' }
   if ($script:Failures -match 'P2d') { Dump-Tail 'p2d-scenario-r5.log' 25 }
+  if ($script:Failures -match 'P15') { Dump-Tail 'p15-legacy-shapes.log' }
   if ($script:Failures -match 'P3 ') { Dump-Tail 'p3-stop.log' }
   if ($script:Failures -match 'P6 ') { Dump-Tail 'p6-upgrade.log' }
   if ($script:Failures -match 'P13') { Dump-Tail 'p13-import.log' }

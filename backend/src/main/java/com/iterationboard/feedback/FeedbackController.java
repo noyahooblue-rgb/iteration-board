@@ -169,6 +169,37 @@ public class FeedbackController {
     }
 
     /**
+     * rc4（D2）：旧数据 Base64 容错解码——先剥掉可能的 "data:...;base64," 前缀，
+     * 再用 MIME 解码器容忍 CRLF 折行与空白（旧版本/外部导入的行可能带这些形态）。
+     * 真损坏（解码抛 IllegalArgumentException）返回业务错误 IMAGE_DATA_INVALID，不 500。
+     * 新上传仍走 saveImages 的严格口径，本 helper 只用于读取侧（getImage / export）。
+     */
+    static byte[] decodeStoredImageBase64(String stored) {
+        if (stored == null) {
+            throw new ApiException(HttpStatus.UNPROCESSABLE_ENTITY, "IMAGE_DATA_INVALID", "图片数据损坏");
+        }
+        String s = stored.trim();
+        if (s.startsWith("data:")) {
+            int comma = s.indexOf(',');
+            if (comma >= 0) s = s.substring(comma + 1);
+        }
+        try {
+            return Base64.getMimeDecoder().decode(s);
+        } catch (IllegalArgumentException e) {
+            throw new ApiException(HttpStatus.UNPROCESSABLE_ENTITY, "IMAGE_DATA_INVALID", "图片数据损坏");
+        }
+    }
+
+    /** rc4（D2）：库中 content_type 若损坏到无法解析，兜底 application/octet-stream，不 500。 */
+    private static MediaType parseContentTypeOrOctetStream(String contentType) {
+        try {
+            return MediaType.parseMediaType(contentType);
+        } catch (RuntimeException e) {
+            return MediaType.APPLICATION_OCTET_STREAM;
+        }
+    }
+
+    /**
      * rc3（契约 3）：读取反馈图片。仅提交人与平台管理员可见（截图可能含敏感信息）；
      * inline + nosniff + private 缓存头。未登录由安全层 401。
      */
@@ -183,9 +214,9 @@ public class FeedbackController {
         if (!me.isPlatformAdmin() && !f.getSubmitter().getId().equals(me.getId())) {
             throw ApiException.forbidden("图片仅提交人和管理员可见");
         }
-        byte[] bytes = Base64.getDecoder().decode(img.getContentBase64());
+        byte[] bytes = decodeStoredImageBase64(img.getContentBase64());
         return ResponseEntity.ok()
-                .contentType(MediaType.parseMediaType(img.getContentType()))
+                .contentType(parseContentTypeOrOctetStream(img.getContentType()))
                 .header(HttpHeaders.CONTENT_DISPOSITION, "inline")
                 .header("X-Content-Type-Options", "nosniff")
                 .header(HttpHeaders.CACHE_CONTROL, "private, max-age=3600")
@@ -454,7 +485,7 @@ public class FeedbackController {
             for (Feedback f : selected) {
                 for (FeedbackImage img : imageRepo.findByFeedbackId(f.getId())) {
                     zip.putNextEntry(new ZipEntry("images/" + f.getId() + "/" + img.getFileName()));
-                    zip.write(Base64.getDecoder().decode(img.getContentBase64()));
+                    zip.write(decodeStoredImageBase64(img.getContentBase64()));
                     zip.closeEntry();
                 }
             }

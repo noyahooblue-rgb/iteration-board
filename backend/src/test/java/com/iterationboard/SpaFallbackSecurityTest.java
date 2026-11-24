@@ -4,11 +4,18 @@ import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.boot.webmvc.test.autoconfigure.AutoConfigureMockMvc;
+import org.springframework.http.MediaType;
+import org.springframework.jdbc.core.JdbcTemplate;
+import org.springframework.mock.web.MockHttpSession;
+import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.test.web.servlet.MockMvc;
 import org.springframework.transaction.annotation.Transactional;
 
+import static org.assertj.core.api.Assertions.assertThat;
 import static org.hamcrest.Matchers.containsString;
+import static org.springframework.security.test.web.servlet.request.SecurityMockMvcRequestPostProcessors.csrf;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
+import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.*;
 
 /**
@@ -19,6 +26,10 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
  * - 带扩展名的未知静态路径仍是 404，不被回退吞掉。
  * 测试 classpath 里放了一份标记 index.html（src/test/resources/static/），
  * 生产 jar 的 index.html 由打包阶段嵌入，内容不同、路径口径相同。
+ *
+ * rc4（方案 A）追加：SPA 兜底改由 WebConfig 的资源解析器承担（原 SpaController 显式清单删除）——
+ * - 未在旧清单内的新前端路由 /i/:id（事项直达）、/change-password（独立改密页）未登录也回退 index.html；
+ * - 已登录 GET 不存在的 API 路径仍是后端真 404 JSON（code=NOT_FOUND），不被兜底吞成首页。
  */
 @SpringBootTest
 @AutoConfigureMockMvc
@@ -26,6 +37,25 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
 class SpaFallbackSecurityTest {
 
     @Autowired MockMvc mvc;
+    @Autowired JdbcTemplate jdbc;
+    @Autowired PasswordEncoder passwordEncoder;
+
+    private static final String GOOD_PW = "passw0rd1!";
+
+    /** 直接造数 + 登录（口径同 Rc3IntegrationTest 的 insertUser/loginOk）。 */
+    private MockHttpSession loginOk(String loginName) throws Exception {
+        jdbc.update("insert into app_user (login_name, display_name, password_hash, avatar_color, platform_admin, status,"
+                        + " must_change_password, failed_attempts, password_version, created_at, updated_at)"
+                        + " values (?, ?, ?, 'indigo', false, 'ACTIVE', false, 0, 0, now(), now())",
+                loginName, "虚构-" + loginName, passwordEncoder.encode(GOOD_PW));
+        MockHttpSession session = new MockHttpSession();
+        var r = mvc.perform(post("/api/v1/auth/login").session(session).with(csrf())
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"loginName\":\"" + loginName + "\",\"password\":\"" + GOOD_PW + "\"}"))
+                .andReturn();
+        assertThat(r.getResponse().getStatus()).as("登录应成功: %s", loginName).isEqualTo(200);
+        return session;
+    }
 
     @Test
     void rootServesIndexHtmlWithoutLogin() throws Exception {
@@ -67,5 +97,28 @@ class SpaFallbackSecurityTest {
     void unknownStaticFileIs404NotFallback() throws Exception {
         mvc.perform(get("/assets/does-not-exist.css"))
                 .andExpect(status().isNotFound());
+    }
+
+    /** rc4 方案 A：旧 SpaController 清单里没有的新路由，靠通用兜底回退（这正是 rc3 真机 404 的根因场景）。 */
+    @Test
+    void rc4NewSpaRoutesFallBackToIndexHtml() throws Exception {
+        mvc.perform(get("/i/123"))
+                .andExpect(status().isOk())
+                .andExpect(content().contentTypeCompatibleWith("text/html"))
+                .andExpect(content().string(containsString("TEST-INDEX-MARKER")));
+        mvc.perform(get("/change-password"))
+                .andExpect(status().isOk())
+                .andExpect(content().contentTypeCompatibleWith("text/html"))
+                .andExpect(content().string(containsString("TEST-INDEX-MARKER")));
+    }
+
+    /** rc4 方案 A 安全网：兜底不得吞掉 API 路径——不存在的接口已登录时仍是真 404 JSON。 */
+    @Test
+    void unknownApiRouteIs404JsonNotFallback() throws Exception {
+        MockHttpSession session = loginOk("spafallbackuser");
+        mvc.perform(get("/api/v1/definitely-not-a-route").session(session))
+                .andExpect(status().isNotFound())
+                .andExpect(content().contentTypeCompatibleWith("application/json"))
+                .andExpect(jsonPath("$.code").value("NOT_FOUND"));
     }
 }

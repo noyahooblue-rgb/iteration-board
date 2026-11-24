@@ -21,6 +21,22 @@ export function subscribeEvents(cb: (n: any) => void): () => void {
 }
 const MODE = import.meta.env.VITE_API_MODE === 'mock' ? 'mock' : 'real'
 export const apiMode = MODE
+let redirectingToLogin = false
+export function redirectToLogin() {
+  if (redirectingToLogin) return
+  if (typeof window === 'undefined') return
+  if (window.location.pathname === '/login') return
+  redirectingToLogin = true
+  const target = window.location.pathname + window.location.search
+  let query = ''
+  if (target.startsWith('/') && !target.startsWith('//')) query = '?redirect=' + encodeURIComponent(target)
+  window.location.assign('/login' + query)
+}
+function wrapFetchError(e: unknown): never {
+  if (e instanceof DOMException && e.name === 'AbortError') throw new ApiError(0, 'CANCELED', '请求已取消')
+  if ((e as any)?.name === 'AbortError') throw new ApiError(0, 'CANCELED', '请求已取消')
+  throw new ApiError(0, 'NETWORK', '网络连接失败，请检查网络后重试')
+}
 export async function request<T=any>(method:string, path:string, body?:any, extraHeaders?:Record<string,string>): Promise<T> {
   if (MODE === 'mock') {
     const res = await mockHandle(method, '/api/v1' + path, body, extraHeaders)
@@ -31,10 +47,11 @@ export async function request<T=any>(method:string, path:string, body?:any, extr
   if (body) headers['Content-Type'] = 'application/json'
   // CSRF（契约 0.2.0）：变更类请求带 X-XSRF-TOKEN 头，值取 XSRF-TOKEN Cookie。
   if (!['GET','HEAD','OPTIONS'].includes(method.toUpperCase())) { const m = document.cookie.match(/(?:^|;\s*)XSRF-TOKEN=([^;]+)/); if (m) headers['X-XSRF-TOKEN'] = decodeURIComponent(m[1]) }
-  const res = await fetch('/api/v1' + path, { method, credentials: 'include', headers: Object.keys(headers).length ? headers : undefined, body: body ? JSON.stringify(body) : undefined })
-  if (res.status === 204) return null as T
-  const data = await res.json().catch(() => null)
-  if (!res.ok) throw new ApiError(res.status, data?.code ?? 'ERROR', data?.message ?? '请求失败', data?.detail)
+  let res: Response
+  try { res = await fetch('/api/v1' + path, { method, credentials: 'include', headers: Object.keys(headers).length ? headers : undefined, body: body ? JSON.stringify(body) : undefined }) } catch (e) { wrapFetchError(e) }
+  if (res!.status === 204) return null as T
+  const data = await res!.json().catch(() => null)
+  if (!res!.ok) throw new ApiError(res!.status, data?.code ?? 'ERROR', data?.message ?? '请求失败', data?.detail)
   return data as T
 }
 // multipart 上传（契约 imports/file/parse、ai/paste-import/file 均为 multipart/form-data，字段名 file）：
@@ -47,10 +64,11 @@ export async function requestForm<T=any>(method:string, path:string, form:FormDa
   }
   const headers: Record<string,string> = {}
   if (!['GET','HEAD','OPTIONS'].includes(method.toUpperCase())) { const m = document.cookie.match(/(?:^|;\s*)XSRF-TOKEN=([^;]+)/); if (m) headers['X-XSRF-TOKEN'] = decodeURIComponent(m[1]) }
-  const res = await fetch('/api/v1' + path, { method, credentials: 'include', headers: Object.keys(headers).length ? headers : undefined, body: form })
-  if (res.status === 204) return null as T
-  const data = await res.json().catch(() => null)
-  if (!res.ok) throw new ApiError(res.status, data?.code ?? 'ERROR', data?.message ?? '请求失败', data?.detail)
+  let res: Response
+  try { res = await fetch('/api/v1' + path, { method, credentials: 'include', headers: Object.keys(headers).length ? headers : undefined, body: form }) } catch (e) { wrapFetchError(e) }
+  if (res!.status === 204) return null as T
+  const data = await res!.json().catch(() => null)
+  if (!res!.ok) throw new ApiError(res!.status, data?.code ?? 'ERROR', data?.message ?? '请求失败', data?.detail)
   return data as T
 }
 export const api = {

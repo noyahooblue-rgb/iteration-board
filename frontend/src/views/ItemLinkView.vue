@@ -1,7 +1,22 @@
 <template>
 <AppShell title="事项直达">
   <GlassPanel class="box">
-    <p v-if="state === 'loading'" class="small">正在打开事项…</p>
+    <p v-if="state === 'loading'" class="small">{{ loadingText }}</p>
+    <template v-else-if="state === 'unavailable'">
+      <h2>服务接口不可用</h2>
+      <p class="small" style="margin-top:8px">服务器版本可能不匹配（错误 404），请稍后重试或联系管理员。</p>
+      <div class="row"><AppButton @click="load">重试</AppButton><AppButton variant="ghost" @click="router.push('/workbench')">回工作台</AppButton></div>
+    </template>
+    <template v-else-if="state === 'forbidden'">
+      <h2>没有权限</h2>
+      <p class="small" style="margin-top:8px">你没有权限查看该事项。</p>
+      <div class="row"><AppButton @click="router.push('/workbench')">回工作台</AppButton></div>
+    </template>
+    <template v-else-if="state === 'error'">
+      <h2>打开失败</h2>
+      <p class="small" style="margin-top:8px">{{ errorText }}</p>
+      <div class="row"><AppButton @click="load">重试</AppButton><AppButton variant="ghost" @click="router.push('/workbench')">回工作台</AppButton></div>
+    </template>
     <template v-else-if="state === 'notfound'">
       <h2>事项不存在</h2>
       <p class="small" style="margin-top:8px">这个事项可能已被彻底删除，或链接有误。</p>
@@ -38,13 +53,15 @@
 import { ref, onMounted } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import AppShell from '../components/AppShell.vue'; import GlassPanel from '../components/GlassPanel.vue'; import AppButton from '../components/AppButton.vue'
-import { api, ApiError } from '../api/http'
+import { api, ApiError, redirectToLogin } from '../api/http'
 import type { ItemResolution } from '../api/types'
 import { useTeam } from '../stores/team'; import { useAuth } from '../stores/auth'; import { useToast } from '../stores/toast'
 const route = useRoute(), router = useRouter(), team = useTeam(), auth = useAuth(), toast = useToast()
 const id = Number(route.params.id)
-const state = ref<'loading' | 'notfound' | 'deleted' | 'cross' | 'noaccess'>('loading')
+const state = ref<'loading' | 'notfound' | 'deleted' | 'cross' | 'noaccess' | 'unavailable' | 'forbidden' | 'error'>('loading')
 const res = ref<ItemResolution | null>(null)
+const loadingText = ref('正在打开事项…')
+const errorText = ref('')
 function passQuery(extra: Record<string, string> = {}) {
   const q: Record<string, string> = { ...extra }
   if (route.query.comment) q.comment = String(route.query.comment)
@@ -68,20 +85,30 @@ async function confirmSwitch() {
   if (!r.hasAccess && !auth.user?.platformAdmin) { state.value = 'noaccess'; return }
   locate(r)
 }
-onMounted(async () => {
+async function load() {
+  state.value = 'loading'; loadingText.value = '正在打开事项…'
   if (!team.teams.length) { try { await team.loadTeams() } catch {} }
   let r: ItemResolution
   try { r = await api.get(`/items/${id}/resolution`) }
   catch (e) {
-    if (e instanceof ApiError && e.status === 404) { state.value = 'notfound'; return }
-    toast.show(e instanceof ApiError ? e.message : '打开事项失败'); state.value = 'notfound'; return
+    if (e instanceof ApiError) {
+      if (e.code === 'CANCELED') { return }
+      if (e.status === 401) { loadingText.value = '正在跳转登录…'; redirectToLogin(); return }
+      if (e.status === 404 && e.code === 'ITEM_NOT_FOUND') { state.value = 'notfound'; return }
+      if (e.status === 404) { state.value = 'unavailable'; return }
+      if (e.status === 403) { state.value = 'forbidden'; return }
+      if (e.status === 0 && e.code === 'NETWORK') { errorText.value = '网络连接失败，请检查网络后重试'; state.value = 'error'; return }
+      errorText.value = `打开失败（错误码 ${e.status}），请稍后重试或联系管理员`; state.value = 'error'; return
+    }
+    errorText.value = '打开失败，请稍后重试或联系管理员'; state.value = 'error'; return
   }
   res.value = r
   if (r.deleted) { state.value = 'deleted'; return }
   if (r.teamId !== team.currentId) { state.value = 'cross'; return }
   if (!r.hasAccess && !auth.user?.platformAdmin) { state.value = 'noaccess'; return }
   locate(r)
-})
+}
+onMounted(load)
 </script>
 <style scoped>
 .box{padding:22px;max-width:560px}

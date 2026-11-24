@@ -40,7 +40,7 @@ springdoc:
 
 app:
   # 程序版本（1.1.0-rc2）：与 pom 版本一致；构建日期由 spring-boot build-info 注入（见 VersionInfo）。
-  version: 1.1.0-rc3
+  version: 1.1.0-rc4
   # 数据目录（贴图等运行期文件与 backup-status.json 所在目录；脚本侧约定，见 BackupStatusService）
   data-dir: ${APP_DATA_DIR:data}
   # 管理员启动初始化（1.1.0 裁定第一步）：AdminBootstrapRunner 建 admin 后把初始密码写到此文件
