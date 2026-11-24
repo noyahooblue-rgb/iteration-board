@@ -47,11 +47,43 @@ jobs:
         env:
           IB_CI: '1'
         run: bash packaging/build-package.sh
+      # 1.1.0 起同源组装三个补丁包，让常驻档 3 的恶劣路径矩阵 N1
+      # （rc4 -> 1.1.0 补丁）能用真实包实跑，不再 SKIP。
+      - name: 组装补丁包（与全量包同源同 jar）
+        run: bash packaging/build-patches.sh
+      # N3 夹具：真实 1.0.4 / 1.0.1 全量包太大进不了 git，放在 Drive
+      # 「安装包/CI夹具」文件夹（链接可读）。下载失败时矩阵对应项会
+      # 显式 SKIP 并在日志留痕，不会静默假绿。
+      - name: 下载 N3 夹具包（Drive 链接直下）
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Continue'
+          $fixtures = @(
+            @{ Id = '1_4m8wi41Bv1u-T4z68eyDPSMCIAGvyIl'; Name = 'iteration-board-offline-1.0.4.zip' },
+            @{ Id = '15mt0HyshDUrAqUPGw0UfRlYCmEWg8HdG'; Name = 'iteration-board-offline-1.0.1.zip' }
+          )
+          foreach ($f in $fixtures) {
+            $url = "https://drive.usercontent.google.com/download?id=$($f.Id)&export=download&confirm=t"
+            $out = Join-Path 'packaging/dist' $f.Name
+            try {
+              Invoke-WebRequest -Uri $url -OutFile $out -MaximumRedirection 5
+              Write-Host "fixture downloaded: $($f.Name) $((Get-Item $out).Length) bytes"
+            } catch {
+              Write-Warning "fixture download failed: $($f.Name): $($_.Exception.Message)"
+            }
+          }
       - name: 上传安装包
         uses: actions/upload-artifact@v4
         with:
           name: ib-offline-package
-          path: packaging/dist/iteration-board-offline-1.1.0.zip
+          path: |
+            packaging/dist/iteration-board-offline-1.1.0.zip
+            packaging/dist/iteration-board-patch-1.1.0-rc4-to-1.1.0.zip
+            packaging/dist/iteration-board-patch-1.0.4-to-1.1.0.zip
+            packaging/dist/iteration-board-patch-1.0.1-to-1.1.0.zip
+            packaging/dist/iteration-board-offline-1.0.4.zip
+            packaging/dist/iteration-board-offline-1.0.1.zip
+          if-no-files-found: warn
           retention-days: 7
 
   # 档 2（Windows 冒烟，目标 ≤20 分钟）：中文+空格路径、中文 TEMP、chcp 936 下
