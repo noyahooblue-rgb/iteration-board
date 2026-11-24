@@ -37,26 +37,48 @@ function Check([string]$Name, [bool]$Ok) {
 }
 function Run-BatAuto([string]$BatPath, [string[]]$BatArgs, [string]$LogName, [string]$Cwd, [string]$StdinText = $null) {
   # IB_AUTO/IB_YES 下运行 .bat，返回退出码；控制台输出落证据目录。
-  # 调用形式必须是 cmd /c "<整行再包一层引号>"：cmd /c 的引号剥离
-  # 规则下，路径与参数各带一对引号时首尾引号会被剥掉，带空格的
-  # 路径即被拆断（1.1.0 终验 N1 with-arg 实测：'C:\ibnasty\patch'
-  # is not recognized）。整行外层再包一对引号后，cmd 剥掉外层、
-  # 内层引号完整保留。
-  # $StdinText 非 $null 时经管道喂给子进程 stdin（老版本 install
-  # 的 choice 提问、apply-patch 手动输入分支靠它喂入）。
+  # 经 Process API 以 Arguments 原样串启动 cmd.exe：/c 后跟整行
+  # （"<bat>" "<参数>"…）再外包一对引号，cmd 的 /c 规则剥掉外层
+  # 一对、内层引号完整保留。两种经 PowerShell & 调用的写法都实测
+  # 失败：参数逐个传时 cmd 的引号剥离把带空格路径拆断（run
+  # 45362168304：'C:\ibnasty\patch' is not recognized）；整行作
+  # 单个参数传时 PowerShell 对原生命令参数二次加引号，连程序
+  # 路径都被拆断（run 45377864212 / 45378969080：'""C:\ibnasty
+  # \patch' is not recognized）。ProcessStartInfo.Arguments 不经
+  # PowerShell 参数层，原样到达 cmd。
+  # $StdinText 非 $null 时写入子进程 stdin 后关闭（老版本
+  # install 的 choice 提问、apply-patch 手动输入分支靠它喂入）。
   $env:IB_AUTO = '1'; $env:IB_YES = '1'
   $out = Join-Path $Evidence $LogName
   $cmdLine = '"' + $BatPath + '"'
   foreach ($a in $BatArgs) { $cmdLine += ' "' + $a + '"' }
-  Push-Location $Cwd
-  try {
-    if ($null -ne $StdinText) {
-      $StdinText | & cmd /c "`"$cmdLine`"" *>&1 | Out-File -Encoding utf8 $out
-    } else {
-      & cmd /c "`"$cmdLine`"" *>&1 | Out-File -Encoding utf8 $out
-    }
-    return $LASTEXITCODE
-  } finally { Pop-Location }
+  $psi = New-Object System.Diagnostics.ProcessStartInfo
+  $psi.FileName = "$env:SystemRoot\System32\cmd.exe"
+  $psi.Arguments = '/c "' + $cmdLine + '"'
+  $psi.WorkingDirectory = $Cwd
+  $psi.UseShellExecute = $false
+  $psi.CreateNoWindow = $true
+  $psi.RedirectStandardOutput = $true
+  $psi.RedirectStandardError = $true
+  if ($null -ne $StdinText) { $psi.RedirectStandardInput = $true }
+  $proc = New-Object System.Diagnostics.Process
+  $proc.StartInfo = $psi
+  [void]$proc.Start()
+  $outTask = $proc.StandardOutput.ReadToEndAsync()
+  $errTask = $proc.StandardError.ReadToEndAsync()
+  if ($null -ne $StdinText) {
+    try { $proc.StandardInput.Write($StdinText); $proc.StandardInput.Close() } catch { }
+  }
+  if (-not $proc.WaitForExit(1200000)) {
+    try { $proc.Kill($true) } catch { }
+    [void]$proc.WaitForExit()
+  }
+  $outText = ''
+  $errText = ''
+  if ($outTask.Wait(30000)) { $outText = $outTask.Result }
+  if ($errTask.Wait(30000)) { $errText = $errTask.Result }
+  ($outText + $errText) | Out-File -Encoding utf8 $out
+  return $proc.ExitCode
 }
 function Latest-ScriptLog([string]$Dir, [string]$Prefix) {
   Get-ChildItem $Dir -Filter "$Prefix-*.log" -ErrorAction SilentlyContinue |

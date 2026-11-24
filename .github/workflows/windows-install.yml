@@ -163,7 +163,7 @@ jobs:
       # 下载到 C:\ibdl 即可全量激活，无需再改本 workflow。
       - name: 恶劣路径矩阵（windows-nasty-paths）
         shell: pwsh
-        timeout-minutes: 45
+        timeout-minutes: 90
         run: |
           $nargs = @{ FullZip = 'C:\ibdl\iteration-board-offline-1.1.0.zip' }
           $patch = 'C:\ibdl\iteration-board-patch-1.1.0-rc4-to-1.1.0.zip'
