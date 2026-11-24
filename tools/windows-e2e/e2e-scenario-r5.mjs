@@ -55,7 +55,9 @@ async function registerViaUi(page, u) {
   if (code.length < 4) fail(`captcha glyphs unreadable for ${u.login}: "${code}"`)
   await page.locator('label.field').filter({ hasText: '图形验证码' }).locator('input').fill(code)
   await page.getByRole('button', { name: '注册并登录' }).click()
-  await page.waitForURL(/\/(teams\/new|workbench)/, { timeout: 20000 })
+  // Match on pathname only: since rc4 the login URL carries ?redirect=/workbench,
+  // which would false-match a full-URL regex before registration even completes.
+  await page.waitForURL((url) => /^\/(teams\/new|workbench)/.test(url.pathname), { timeout: 20000 })
 }
 
 async function api(ctx, method, path, body) {

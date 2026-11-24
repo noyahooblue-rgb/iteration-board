@@ -188,7 +188,11 @@ function Invoke-PsqlScalar([string]$RootPath, [string]$Sql) {
   $pwdLine = Select-String -Path (Join-Path $RootPath 'config\application.yml') -Pattern '^\s*password:\s*(\S+)' | Select-Object -First 1
   $env:PGPASSWORD = $pwdLine.Matches[0].Groups[1].Value
   try {
-    $out = & (Join-Path $RootPath 'runtime\pgsql\bin\psql.exe') -h 127.0.0.1 -p 15432 -U postgres -d iteration_board -tAc $Sql
+    # -q is load-bearing: without it psql appends the command tag (e.g.
+    # "INSERT 0 1") to stdout, so INSERT ... RETURNING id comes back as a
+    # two-line string and fails the caller's '^\d+$' id check (first rc4
+    # tier-3 run: the P15 image probes were silently skipped because of it).
+    $out = & (Join-Path $RootPath 'runtime\pgsql\bin\psql.exe') -h 127.0.0.1 -p 15432 -U postgres -d iteration_board -q -tAc $Sql
     if ($LASTEXITCODE -ne 0) { throw "psql exited $LASTEXITCODE for: $Sql" }
     return ($out | Out-String).Trim()
   } finally { $env:PGPASSWORD = $null }
