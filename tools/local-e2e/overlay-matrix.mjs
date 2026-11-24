@@ -3,6 +3,8 @@
 //   × 主题（默认浅色 + 暮光蓝灰深色；IB_MATRIX_THEMES=light,dark,graphite 可调），逐个打开主要浮层，断言：
 //     1) 浮层外框完整在视口内（距边缘 >= 8px，1px 容差）；
 //     2) 每个可交互项中心 elementFromPoint 命中自身（未被裁切/遮挡）。
+//   另含更新说明弹窗（通用 Modal）回归用例：外框在视口内 +「知道了」按钮可达
+//   （1.1.0 长内容曾把按钮推出屏幕，见 Modal.vue 修复注释）。
 // 主题预置：addInitScript 写 localStorage 'ib-appearance'（utils/appearance.ts 的存储键），
 // 首屏 initAppearance 即按预置主题生效；深色同时 colorScheme:'dark' 模拟系统深色。
 //
@@ -28,7 +30,7 @@ const server = spawn('python3', ['-m', 'http.server', String(PORT), '--directory
 process.on('exit', () => server.kill())
 await new Promise((r) => setTimeout(r, 1200))
 
-let pass = 0, fail = 0
+let pass = 0, fail = 0, modalChecks = 0
 const failures = []
 function check(name, cond, extra = '') {
   if (cond) { pass++; console.log(`  PASS ${name}`) }
@@ -103,6 +105,25 @@ try {
       await page.getByRole('button', { name: '登录', exact: true }).click()
       await page.waitForSelector('aside.sidebar', { timeout: 15000 })
       await page.waitForTimeout(600)
+      // 0) 更新说明弹窗（通用 Modal 组件）回归用例：外框完整在视口内 +「知道了」按钮可达。
+      //    1.1.0 冻结时说明内容加长，Modal 无 max-height 导致矮视口下按钮被推出屏幕外、
+      //    遮罩拦截一切点击（档 3 四个 Playwright 场景实证）；修复后弹窗本体内部滚动，按钮须可达。
+      const ackBtn = page.getByRole('button', { name: '知道了', exact: true }).last()
+      if (await ackBtn.count()) {
+        modalChecks++
+        const rnModal = page.locator('.mask .modal').filter({ has: ackBtn })
+        const mbox = await rnModal.boundingBox().catch(() => null)
+        check(`${tag} 更新说明弹窗外框在视口内`, !!mbox && mbox.x >= -0.5 && mbox.y >= -0.5 && mbox.x + mbox.width <= vp.width + 0.5 && mbox.y + mbox.height <= vp.height + 0.5,
+          JSON.stringify(mbox) + ` vs ${vp.width}x${vp.height}`)
+        await ackBtn.scrollIntoViewIfNeeded().catch(() => {})
+        const hit = await ackBtn.evaluate((el) => {
+          const r = el.getBoundingClientRect()
+          if (r.width === 0 || r.height === 0) return false
+          const top = document.elementFromPoint(r.left + r.width / 2, r.top + r.height / 2)
+          return top === el || el.contains(top)
+        }).catch(() => false)
+        check(`${tag} 更新说明「知道了」按钮可达`, hit)
+      }
       await dismissOverlays(page)
       // 窗口 <1440 时侧栏默认收起（既有行为），先展开才能测小组/用户菜单
       if (await page.locator('aside.sidebar.mini').count()) {
@@ -169,6 +190,7 @@ try {
   await browser.close()
   server.kill()
 }
+check('更新说明弹窗回归用例至少执行一次', modalChecks > 0, `实际执行 ${modalChecks} 次`)
 console.log(`\n浮层矩阵结果：${pass} 通过 / ${fail} 失败 / 共 ${pass + fail}`)
 if (failures.length) console.log('失败项：\n' + failures.join('\n'))
 process.exit(fail ? 1 : 0)

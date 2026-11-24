@@ -8,6 +8,8 @@ watch(() => props.open, (v) => { if (v) window.addEventListener('keydown', onKey
 onUnmounted(() => window.removeEventListener('keydown', onKey))
 </script>
 <style scoped>.mask{position:fixed;inset:0;background:var(--mask-strong);z-index:var(--z-modal);display:grid;place-items:center;padding:16px}
-.modal{width:440px;max-width:100%;border-radius:var(--r-panel);padding:20px}
+/* max-height+内部滚动（1.1.0 修复）：内容超高时弹窗本体滚动，底部按钮始终可达；
+   此前无高度上限，更新说明内容加长后在矮视口下按钮被推出屏幕外（档 3 CI 实证，见根因台账/重检清单） */
+.modal{width:440px;max-width:100%;border-radius:var(--r-panel);padding:20px;max-height:calc(100dvh - 32px);overflow-y:auto}
 .md-enter-active{transition:opacity .18s ease}.md-enter-active .modal{transition:transform .35s var(--ease-spring),opacity .2s}
 .md-enter-from{opacity:0}.md-enter-from .modal{transform:scale(.96) translateY(8px);opacity:0}.md-leave-to{opacity:0}</style>
