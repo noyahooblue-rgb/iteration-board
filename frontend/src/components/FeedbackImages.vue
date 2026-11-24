@@ -35,8 +35,11 @@
 <script setup lang="ts">
 import { ref, computed, watch, onUnmounted } from 'vue'
 import { X, ChevronLeft, ChevronRight } from 'lucide-vue-next'
-import { api, apiMode } from '../api/http'
+import { api, apiMode, redirectToLogin } from '../api/http'
 import type { FeedbackImage } from '../api/types'
+// C2 复核处置 2.3：可接受的图片类型白名单，与后端魔数检测（detectImageType）同口径；
+// 只判 image/ 前缀会放行 image/svg+xml 等后端从不产出的类型。
+const IMAGE_CONTENT_TYPES = ['image/png', 'image/jpeg', 'image/gif', 'image/webp']
 const props = defineProps<{ feedbackId: number; images: FeedbackImage[]; visible: boolean }>()
 const srcs = ref<Record<number, string>>({})
 const failed = ref<Record<number, string>>({})
@@ -63,9 +66,12 @@ async function fetchImage(im: FeedbackImage, reload = false) {
   setLoading(im.id, true)
   try {
     const res = await fetch(imageUrl(im.id), { credentials: 'include', ...(reload ? { cache: 'reload' as RequestCache } : {}) })
+    // C2 复核处置 2.4：裸 fetch 绕过统一 http 客户端，401 不会自动跳登录——在此显式
+    // 处理，与走 api 的请求口径一致（并发 401 由 redirectToLogin 的单次锁收敛）。
+    if (res.status === 401) { redirectToLogin(); throw new Error('登录已过期，正在跳转登录…') }
     if (!res.ok) throw new Error(await parseErrorMessage(res))
-    const ct = res.headers.get('Content-Type') ?? ''
-    if (!ct.toLowerCase().startsWith('image/')) throw new Error('服务器返回的不是图片内容')
+    const ct = (res.headers.get('Content-Type') ?? '').toLowerCase().split(';')[0].trim()
+    if (!IMAGE_CONTENT_TYPES.includes(ct)) throw new Error('服务器返回的不是图片内容')
     const blob = await res.blob()
     const old = srcs.value[im.id]
     if (old && objectUrls.has(old)) { URL.revokeObjectURL(old); objectUrls.delete(old) }
@@ -100,9 +106,11 @@ async function downloadCurrent() {
   downloading.value = true
   try {
     const res = await fetch(imageUrl(cur.id), { credentials: 'include' })
+    // C2 复核处置 2.4：同 fetchImage——裸 fetch 的 401 显式跳登录，不只报错文案。
+    if (res.status === 401) { redirectToLogin(); throw new Error('登录已过期，正在跳转登录…') }
     if (!res.ok) throw new Error(await parseErrorMessage(res))
-    const ct = (res.headers.get('Content-Type') ?? '').toLowerCase()
-    if (!(ct.startsWith('image/') || ct.startsWith('application/octet-stream'))) {
+    const ct = (res.headers.get('Content-Type') ?? '').toLowerCase().split(';')[0].trim()
+    if (!(IMAGE_CONTENT_TYPES.includes(ct) || ct.startsWith('application/octet-stream'))) {
       let reason = '服务器返回的不是图片文件'
       if (ct.includes('application/json')) { try { const d: any = await res.clone().json(); if (d?.message) reason = String(d.message) } catch {} }
       throw new Error(reason)

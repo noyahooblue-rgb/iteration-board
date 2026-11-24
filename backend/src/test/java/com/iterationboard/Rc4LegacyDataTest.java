@@ -212,4 +212,40 @@ class Rc4LegacyDataTest {
                 .andExpect(content().contentTypeCompatibleWith("application/json"))
                 .andExpect(jsonPath("$.code").value("IMAGE_DATA_INVALID"));
     }
+
+    // ---------- C2 复核处置（后端 4.2）：MIME 解码器会放行的两种「假图」也必须 422 ----------
+
+    /**
+     * 合法 Base64、但解出的字节根本不是图片：旧 MIME 解码口径会原样以声明类型
+     * image/png 返回 200（一张假图）。新口径在魔数校验处拦截 → 422。
+     */
+    @Test
+    void feedbackImage_validBase64ButNotAnImage_returns422NotFakeImage() throws Exception {
+        MockHttpSession author = register("rc4ffake", "虚构反馈人丙");
+        long fid = createFeedback(author, "虚构假图反馈");
+        String notAnImage = Base64.getEncoder()
+                .encodeToString("hello, this is plainly not an image".getBytes(StandardCharsets.UTF_8));
+        long imgId = insertLegacyImage(fid, "fake.png", "image/png", notAnImage, 35);
+        mvc.perform(get("/api/v1/feedback/" + fid + "/images/" + imgId).session(author))
+                .andExpect(status().isUnprocessableEntity())
+                .andExpect(content().contentTypeCompatibleWith("application/json"))
+                .andExpect(jsonPath("$.code").value("IMAGE_DATA_INVALID"));
+    }
+
+    /**
+     * 真 PNG 的 Base64 中间插入非法字符：MIME 解码器会静默跳过非法字符并解码成功
+     * （200 真图），新口径先剥空白再严格解码，非法字符直接判损坏 → 422。
+     */
+    @Test
+    void feedbackImage_base64WithJunkCharacters_returns422() throws Exception {
+        MockHttpSession author = register("rc4fjunk", "虚构反馈人丁");
+        long fid = createFeedback(author, "虚构含杂质图片反馈");
+        String clean = Base64.getEncoder().encodeToString(PNG_BYTES_LONG);
+        String junked = clean.substring(0, 20) + "####" + clean.substring(20);
+        long imgId = insertLegacyImage(fid, "junked.png", "image/png", junked, PNG_BYTES_LONG.length);
+        mvc.perform(get("/api/v1/feedback/" + fid + "/images/" + imgId).session(author))
+                .andExpect(status().isUnprocessableEntity())
+                .andExpect(content().contentTypeCompatibleWith("application/json"))
+                .andExpect(jsonPath("$.code").value("IMAGE_DATA_INVALID"));
+    }
 }

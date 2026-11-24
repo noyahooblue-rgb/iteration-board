@@ -2,6 +2,7 @@ package com.iterationboard.config;
 
 import org.springframework.core.io.ClassPathResource;
 import org.springframework.core.io.Resource;
+import org.springframework.http.CacheControl;
 import org.springframework.http.MediaType;
 import org.springframework.http.ResponseEntity;
 import org.springframework.stereotype.Controller;
@@ -18,12 +19,18 @@ import org.springframework.web.bind.annotation.GetMapping;
 @Controller
 public class RootIndexController {
 
+    // 映射口径（C2 复核处置 SPA 3.4）：@GetMapping 只映射 GET（HEAD 由框架按 GET
+    // 映射自动支持），其余方法不会命中本控制器；响应带 no-cache，与 WebConfig 对
+    // index.html 的口径一致——入口页长缓存会在发版后指向旧哈希资源导致白屏。
     @GetMapping("/")
     public ResponseEntity<Resource> index() {
         ClassPathResource res = new ClassPathResource("static/index.html");
         if (!res.exists()) {
             return ResponseEntity.notFound().build();
         }
-        return ResponseEntity.ok().contentType(MediaType.TEXT_HTML).body(res);
+        return ResponseEntity.ok()
+                .contentType(MediaType.TEXT_HTML)
+                .cacheControl(CacheControl.noCache())
+                .body(res);
     }
 }

@@ -121,4 +121,37 @@ class SpaFallbackSecurityTest {
                 .andExpect(content().contentTypeCompatibleWith("application/json"))
                 .andExpect(jsonPath("$.code").value("NOT_FOUND"));
     }
+
+    /**
+     * C2 复核处置（SPA 3.3）：最后一段带点号但不是已知静态扩展名的路径（如带小数
+     * 参数的前端路由）不得被「有扩展名即 404」误杀，仍回退 index.html；
+     * 已知静态扩展名的缺失文件仍是真 404（见 unknownStaticFileIs404NotFallback）。
+     */
+    @Test
+    void dottedNonStaticRouteStillFallsBack() throws Exception {
+        mvc.perform(get("/placeholder/v1.2"))
+                .andExpect(status().isOk())
+                .andExpect(content().contentTypeCompatibleWith("text/html"))
+                .andExpect(content().string(containsString("TEST-INDEX-MARKER")));
+    }
+
+    /**
+     * C2 复核处置（SPA 3.1/3.4）：入口 index.html 一律 no-cache（根路径直出与 SPA
+     * 回退两条路径同口径），防发版后旧首页指向旧哈希资源白屏；内容哈希命名的
+     * /assets/** 文件则长缓存 + immutable。
+     */
+    @Test
+    void indexHtmlNoCacheAndHashedAssetsImmutable() throws Exception {
+        mvc.perform(get("/"))
+                .andExpect(status().isOk())
+                .andExpect(header().string("Cache-Control", containsString("no-cache")));
+        mvc.perform(get("/board"))
+                .andExpect(status().isOk())
+                .andExpect(header().string("Cache-Control", containsString("no-cache")));
+        mvc.perform(get("/assets/test-asset.js"))
+                .andExpect(status().isOk())
+                .andExpect(content().string(containsString("TEST-ASSET-MARKER")))
+                .andExpect(header().string("Cache-Control", containsString("immutable")))
+                .andExpect(header().string("Cache-Control", containsString("max-age=31536000")));
+    }
 }

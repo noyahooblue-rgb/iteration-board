@@ -125,6 +125,49 @@ jar_fingerprint() { # jar_fingerprint <jar-file>
     | sha256sum | awk '{print $1}'
 }
 
+# A5 helpers (rc4 C2 review follow-up, ledger #11): frontend static
+# fingerprint. A3 deliberately excludes BOOT-INF/classes/static/**
+# (packaging embeds the frontend in step 2), which left the mirror
+# image of the rc3 incident unchecked: a stale or wrong frontend
+# embedded next to a correct backend. dist_fingerprint hashes the
+# sorted "relpath CRC32" list of the frontend/dist directory built
+# in step 2 of THIS run; jar_static_fingerprint computes the same
+# recipe over the static entries inside a jar (paths made relative
+# to the static root). CRC32 is zlib.crc32 on both sides so the two
+# values are directly comparable. The single entry openapi.yaml is
+# excluded on the jar side: it is a backend resource that ships in
+# the Maven jar under static/ (springdoc), not part of frontend/dist.
+dist_fingerprint() { # dist_fingerprint <dir>
+  python3 - "$1" <<'PYEOF'
+import hashlib, os, sys, zlib
+root = sys.argv[1]
+lines = []
+for dirpath, _dirnames, filenames in os.walk(root):
+    for fn in filenames:
+        full = os.path.join(dirpath, fn)
+        rel = os.path.relpath(full, root).replace(os.sep, '/')
+        crc = 0
+        with open(full, 'rb') as f:
+            for chunk in iter(lambda: f.read(1 << 20), b''):
+                crc = zlib.crc32(chunk, crc)
+        lines.append('%s %08x' % (rel, crc & 0xffffffff))
+lines.sort()
+print(hashlib.sha256(('\n'.join(lines) + '\n').encode()).hexdigest())
+PYEOF
+}
+jar_static_fingerprint() { # jar_static_fingerprint <jar-file>
+  unzip -lv "$1" \
+    | awk '$1 ~ /^[0-9]+$/ && $7 ~ /^[0-9a-fA-F]{8}$/ {
+        name = $8; for (i = 9; i <= NF; i++) name = name " " $i
+        if (name ~ /^BOOT-INF\/classes\/static\// && name !~ /\/$/) {
+          sub(/^BOOT-INF\/classes\/static\//, "", name)
+          if (name != "openapi.yaml") print name " " tolower($7)
+        }
+      }' \
+    | LC_ALL=C sort \
+    | sha256sum | awk '{print $1}'
+}
+
 echo "=== 1/5 Backend jar ==="
 # A1 (rc4, ledger #11): select the jar by EXACT version name, never by
 # glob. The old `ls iteration-board-*.jar | head -1` picked the
@@ -180,6 +223,13 @@ fi
 npm run build
 cd "${REPO_ROOT}"
 [ -f "${REPO_ROOT}/frontend/dist/index.html" ] || { echo "[error] frontend dist missing"; exit 1; }
+# A5 (rc4 C2, ledger #11): fingerprint the frontend built in THIS
+# run; step 4 asserts the static payload embedded in the shipped
+# jar is byte-identical to it (see jar_static_fingerprint).
+DIST_FINGERPRINT="$(dist_fingerprint "${REPO_ROOT}/frontend/dist")"
+echo "[ok] frontend dist fingerprint (entry+CRC): ${DIST_FINGERPRINT}"
+echo "frontend-dist-fingerprint: ${DIST_FINGERPRINT}" >> "${DIST_DIR}/${PKG_NAME}.jar-manifest.txt"
+echo "frontend-fingerprint-method: sha256 of sorted \"relpath CRC32\" lines; jar side reads BOOT-INF/classes/static/** entries (openapi.yaml excluded, backend resource)" >> "${DIST_DIR}/${PKG_NAME}.jar-manifest.txt"
 BUILD_TMP="${SCRIPT_DIR}/.tmp"
 mkdir -p "${BUILD_TMP}"
 WORK_JAR="${BUILD_TMP}/work.jar"
@@ -260,6 +310,13 @@ SHIPPED_FINGERPRINT="$(jar_fingerprint "${SHIPPED_JAR}")"
 [ "${SHIPPED_FINGERPRINT}" = "${JAR_FINGERPRINT}" ] \
   || assert_fail "backend fingerprint mismatch: built jar ${JAR_FINGERPRINT} vs shipped jar ${SHIPPED_FINGERPRINT}"
 echo "[ok] A3 shipped jar fingerprint matches built jar: ${SHIPPED_FINGERPRINT}"
+# A5: the frontend embedded in the shipped jar must be byte-
+# identical to the frontend/dist built in step 2 of this run (A3
+# excludes static/** by design; this closes that blind spot).
+SHIPPED_STATIC_FINGERPRINT="$(jar_static_fingerprint "${SHIPPED_JAR}")"
+[ "${SHIPPED_STATIC_FINGERPRINT}" = "${DIST_FINGERPRINT}" ] \
+  || assert_fail "frontend static fingerprint mismatch: built dist ${DIST_FINGERPRINT} vs shipped jar ${SHIPPED_STATIC_FINGERPRINT}"
+echo "[ok] A5 shipped jar embedded frontend matches built dist: ${SHIPPED_STATIC_FINGERPRINT}"
 cp "${SCRIPT_DIR}/config/application.yml" "${STAGING_DIR}/config/application.yml"
 cp -r "${REPO_ROOT}/backend/config/prompts" "${STAGING_DIR}/config/prompts"
 for f in install start stop uninstall backup restore upgrade apply-patch rollback reset-admin migrate-export migrate-import; do

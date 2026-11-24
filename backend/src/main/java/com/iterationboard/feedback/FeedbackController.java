@@ -169,9 +169,12 @@ public class FeedbackController {
     }
 
     /**
-     * rc4（D2）：旧数据 Base64 容错解码——先剥掉可能的 "data:...;base64," 前缀，
-     * 再用 MIME 解码器容忍 CRLF 折行与空白（旧版本/外部导入的行可能带这些形态）。
-     * 真损坏（解码抛 IllegalArgumentException）返回业务错误 IMAGE_DATA_INVALID，不 500。
+     * rc4（D2）+ C2 复核处置（后端 4.2）：旧数据 Base64 容错解码，口径三步——
+     * ① 剥掉可能的 "data:...;base64," 前缀并去掉全部空白（容忍旧版本/外部导入的 CRLF 折行形态）；
+     * ② 用严格解码器解码（不用 MIME 解码器：它会静默跳过非法字符，真损坏的数据也可能被
+     *    「解码成功」成一团不是图片的字节，再配上库里的声明类型以 200 返回一张假图）；
+     * ③ 解出的字节按魔数校验确为 PNG/JPEG/GIF/WEBP（与 saveImages 的检测同口径）。
+     * 任一步不过 → 业务错误 IMAGE_DATA_INVALID（422），不 500、不返回假图。
      * 新上传仍走 saveImages 的严格口径，本 helper 只用于读取侧（getImage / export）。
      */
     static byte[] decodeStoredImageBase64(String stored) {
@@ -183,20 +186,17 @@ public class FeedbackController {
             int comma = s.indexOf(',');
             if (comma >= 0) s = s.substring(comma + 1);
         }
+        String compact = s.replaceAll("\\s+", "");
+        byte[] bytes;
         try {
-            return Base64.getMimeDecoder().decode(s);
+            bytes = Base64.getDecoder().decode(compact);
         } catch (IllegalArgumentException e) {
             throw new ApiException(HttpStatus.UNPROCESSABLE_ENTITY, "IMAGE_DATA_INVALID", "图片数据损坏");
         }
-    }
-
-    /** rc4（D2）：库中 content_type 若损坏到无法解析，兜底 application/octet-stream，不 500。 */
-    private static MediaType parseContentTypeOrOctetStream(String contentType) {
-        try {
-            return MediaType.parseMediaType(contentType);
-        } catch (RuntimeException e) {
-            return MediaType.APPLICATION_OCTET_STREAM;
+        if (detectImageType(bytes) == null) {
+            throw new ApiException(HttpStatus.UNPROCESSABLE_ENTITY, "IMAGE_DATA_INVALID", "图片数据损坏");
         }
+        return bytes;
     }
 
     /**
@@ -215,8 +215,10 @@ public class FeedbackController {
             throw ApiException.forbidden("图片仅提交人和管理员可见");
         }
         byte[] bytes = decodeStoredImageBase64(img.getContentBase64());
+        // C2 复核处置（后端 4.2）：响应类型以字节魔数实测为准，不信库中声明——
+        // decodeStoredImageBase64 已保证魔数可判，旧数据的声明类型即使有误也不会误导浏览器。
         return ResponseEntity.ok()
-                .contentType(parseContentTypeOrOctetStream(img.getContentType()))
+                .contentType(MediaType.parseMediaType(detectImageType(bytes)))
                 .header(HttpHeaders.CONTENT_DISPOSITION, "inline")
                 .header("X-Content-Type-Options", "nosniff")
                 .header(HttpHeaders.CACHE_CONTROL, "private, max-age=3600")

@@ -46,7 +46,7 @@ import { reactive, ref, computed, onMounted } from 'vue'
 import { useRouter, useRoute } from 'vue-router'
 import { UserRoundX } from 'lucide-vue-next'
 import GlassPanel from '../components/GlassPanel.vue'; import AppButton from '../components/AppButton.vue'; import AppInput from '../components/AppInput.vue'; import SegmentedControl from '../components/SegmentedControl.vue'; import PasswordRules from '../components/PasswordRules.vue'
-import { api, ApiError, DEMO_ACCOUNTS, DEMO_SUBTITLE, DEMO_FILL_HINT, DEMO_REG_CLOSED_TEXT, DEMO_PASSWORD_FILL } from '../api/http'; import { useAuth } from '../stores/auth'; import { useTeam } from '../stores/team'; import { useToast } from '../stores/toast'
+import { api, ApiError, resetLoginRedirectLock, safeInternalPath, DEMO_ACCOUNTS, DEMO_SUBTITLE, DEMO_FILL_HINT, DEMO_REG_CLOSED_TEXT, DEMO_PASSWORD_FILL } from '../api/http'; import { useAuth } from '../stores/auth'; import { useTeam } from '../stores/team'; import { useToast } from '../stores/toast'
 const router = useRouter(), route = useRoute(), auth = useAuth(), team = useTeam(), toast = useToast()
 import { APP_VERSION, BUILD_DATE } from '../utils/appMeta'
 import { effectiveTheme, lockupSrc } from '../utils/appearance'
@@ -62,9 +62,9 @@ const demos = DEMO_ACCOUNTS
 const strength = computed(()=> { let s=0; if(r.password.length>=8)s++; if(/[A-Za-z]/.test(r.password)&&/\d/.test(r.password))s++; if(r.password.length>=12)s++; if(/[^A-Za-z0-9]/.test(r.password))s++; return s })
 const strengthColor = computed(()=> ['var(--strength-empty)','var(--c-red)','var(--c-adhoc)','var(--c-task)','var(--c-green)'][strength.value])
 async function loadCaptcha(){ try{ const d = await api.get('/auth/captcha'); captchaId.value=d.captchaId; captchaSvg.value=d.imageSvg }catch{} }
-onMounted(()=>{ auth.loadMeta(); loadCaptcha() })
+onMounted(()=>{ resetLoginRedirectLock(); auth.loadMeta(); loadCaptcha() })
 function fillDemo(login:string){ f.loginName=login; f.password=DEMO_PASSWORD_FILL; toast.show('已填入演示账号，点登录即可') }
-async function afterLogin(){ await team.loadTeams(); const redirect = route.query.redirect; if (typeof redirect === 'string' && redirect.startsWith('/') && !redirect.startsWith('//') && redirect !== '/login') { router.push(redirect); return } router.push(team.teams.length ? '/workbench' : '/teams/new') }
+async function afterLogin(){ await team.loadTeams(); resetLoginRedirectLock(); const redirect = safeInternalPath(route.query.redirect); if (redirect && redirect.split(/[?#]/)[0] !== '/login') { router.push(redirect); return } router.push(team.teams.length ? '/workbench' : '/teams/new') }
 async function login(){ if (busy.value) return; err.value=''; e.loginName = f.loginName ? '' : '请输入登录名'; e.password = f.password ? '' : '请输入密码'; if(e.loginName||e.password) return
   busy.value = true
   try{ auth.user = await api.post('/auth/login', { loginName:f.loginName, password:f.password, captchaId: needCaptcha.value? captchaId.value:undefined, captchaCode: needCaptcha.value? f.captchaCode:undefined }); await afterLogin() }

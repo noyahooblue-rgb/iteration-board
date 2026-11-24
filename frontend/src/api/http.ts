@@ -22,15 +22,38 @@ export function subscribeEvents(cb: (n: any) => void): () => void {
 const MODE = import.meta.env.VITE_API_MODE === 'mock' ? 'mock' : 'real'
 export const apiMode = MODE
 let redirectingToLogin = false
+let redirectLockTimer: ReturnType<typeof setTimeout> | null = null
+/** 释放 401 跳转锁：登录页挂载与登录成功时调用（C2 复核处置 2.1）。整页 assign 后
+ * 模块状态本会随新页面重置，但 SPA 内到达登录页（路由守卫客户端跳转）时不重载，
+ * 锁若只置位不释放，后续会话再过期时的 401 将永远跳不动——故显式提供释放点，
+ * 并在置锁时挂 10 秒兜底定时释放，双保险防永久死锁。 */
+export function resetLoginRedirectLock() {
+  redirectingToLogin = false
+  if (redirectLockTimer) { clearTimeout(redirectLockTimer); redirectLockTimer = null }
+}
+/**
+ * 站内回跳地址严格校验（C2 复核处置 2.2）：回跳参数可由外部链接构造，单纯
+ * startsWith('/') 会被 //evil.com、/\evil.com 等形式绕过校验本身。故先拒绝
+ * // 与 /\ 开头，再用 URL 解析并严格比对 origin；合法时返回站内
+ * pathname+search+hash，否则返回 null。
+ */
+export function safeInternalPath(raw: unknown): string | null {
+  if (typeof raw !== 'string' || !raw) return null
+  if (!raw.startsWith('/') || raw.startsWith('//') || raw.startsWith('/\\')) return null
+  try {
+    const u = new URL(raw, window.location.origin)
+    if (u.origin !== window.location.origin) return null
+    return u.pathname + u.search + u.hash
+  } catch { return null }
+}
 export function redirectToLogin() {
   if (redirectingToLogin) return
   if (typeof window === 'undefined') return
   if (window.location.pathname === '/login') return
   redirectingToLogin = true
-  const target = window.location.pathname + window.location.search
-  let query = ''
-  if (target.startsWith('/') && !target.startsWith('//')) query = '?redirect=' + encodeURIComponent(target)
-  window.location.assign('/login' + query)
+  redirectLockTimer = setTimeout(() => { redirectingToLogin = false; redirectLockTimer = null }, 10000)
+  const target = safeInternalPath(window.location.pathname + window.location.search)
+  window.location.assign('/login' + (target ? '?redirect=' + encodeURIComponent(target) : ''))
 }
 function wrapFetchError(e: unknown): never {
   if (e instanceof DOMException && e.name === 'AbortError') throw new ApiError(0, 'CANCELED', '请求已取消')
