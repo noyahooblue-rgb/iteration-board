@@ -3,6 +3,7 @@ package com.iterationboard.config;
 import tools.jackson.databind.ObjectMapper;
 import com.iterationboard.domain.AppUser;
 import com.iterationboard.repo.*;
+import org.springframework.boot.autoconfigure.condition.ConditionalOnWebApplication;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
 import org.springframework.http.HttpStatus;
@@ -83,7 +84,15 @@ public class SecurityConfig {
         };
     }
 
+    /**
+     * 仅 Web（SERVLET）模式装配：运维命令模式（--ib.ops=...，WebApplicationType.NONE）下没有
+     * HttpSecurity bean，无条件装配会让整个上下文启动失败（1.1.0 恶劣路径矩阵首跑实证：
+     * reset-admin 以 ops profile 启动出厂 jar 时 APPLICATION FAILED TO START）。
+     * ops 模式无 Web 容器、无请求可过滤，不需要过滤链；密码编码、用户详情等其余安全 bean
+     * 不带此条件，ops 服务层照常使用。Web 模式下条件恒成立，本 bean 的装配与行为不变。
+     */
     @Bean
+    @ConditionalOnWebApplication(type = ConditionalOnWebApplication.Type.SERVLET)
     public SecurityFilterChain filterChain(HttpSecurity http, ObjectMapper objectMapper, UserRepo userRepo) throws Exception {
         http
             // SPA 口径（契约 0.2.0）：前端把 XSRF-TOKEN Cookie 原值放进 X-XSRF-TOKEN 请求头。
