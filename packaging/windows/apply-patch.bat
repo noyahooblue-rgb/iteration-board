@@ -89,9 +89,12 @@ rem NEVER default to the patch folder. Order: 1) the argument,
 rem 2) the single install registered for the IterationBoardApp
 rem service (sc qc / registry ImagePath), confirmed by the
 rem user, 3) a path typed or dragged in by the user. The
-rem result must contain all three install markers (app jar,
-rem config, version.txt) or the patch stops, changing nothing.
-if not "%TARGET%"=="" goto :target_check
+rem result must contain the install markers (app jar and
+rem config) or the patch stops, changing nothing. version.txt
+rem is NOT a marker: pre-1.1.0 installs (1.0.4 / 1.0.1) shipped
+rem without one - their version is fingerprinted from layout
+rem markers instead (see :detect_version).
+if not "%TARGET%x"=="x" goto :target_check
 call :detect_target
 if "%IB_DET_COUNT%"=="1" goto :target_detected
 call :log [INFO] No single installed location could be detected
@@ -111,10 +114,15 @@ set "TARGET="
 set /p "TARGET=Type or drag the install folder path here, then press Enter: "
 set "TARGET=%TARGET:"=%"
 :target_check
-if "%TARGET%"=="" goto :target_missing
+rem The empty test uses a sentinel suffix: a typed or dragged
+rem path can end in a backslash, and a bare "%TARGET%"=="" test
+rem then puts the backslash directly before the closing quote,
+rem which the cmd parser misreads and aborts on (1.1.0 CI
+rem matrix, N3-1.0.1 manual branch). The sentinel form is
+rem immune because the value never ends the quoted string.
+if "%TARGET%x"=="x" goto :target_missing
 if not exist "%TARGET%\app\iteration-board.jar" goto :target_bad
 if not exist "%TARGET%\config\application.yml" goto :target_bad
-if not exist "%TARGET%\version.txt" goto :target_bad
 goto :target_ready
 :target_missing
 call :log [ERROR] No install folder was given. Nothing was changed.
@@ -122,8 +130,8 @@ call :ib_pause
 exit /b 1
 :target_bad
 call :log [ERROR] Not a complete install folder: %TARGET%
-call :log [ERROR] It must contain app\iteration-board.jar,
-call :log [ERROR] config\application.yml and version.txt.
+call :log [ERROR] It must contain app\iteration-board.jar and
+call :log [ERROR] config\application.yml.
 call :ib_pause
 exit /b 1
 :target_ready
@@ -148,14 +156,16 @@ call :log [WARN] D:\IterationBoard, is recommended for the future.
 :ib_pathwarn_done
 if not exist "%TARGET%\tmp" mkdir "%TARGET%\tmp"
 
+rem --- current version of the target (every layout) ------------
+call :detect_version
+call :log [INFO] Target version detected as: "%CURVER%"
+
 rem --- source version gate: IB_EXPECTED_FROM is stamped by the
 rem patch builder (empty = no gate, e.g. the full-package copy).
 rem The check runs before anything is stopped or copied; a
 rem mismatch stops here and changes nothing.
 set "IB_EXPECTED_FROM="
 if "%IB_EXPECTED_FROM%"=="" goto :ver_gate_done
-set "CURVER="
-if exist "%TARGET%\version.txt" set /p CURVER=<"%TARGET%\version.txt"
 if "%CURVER%"=="%IB_EXPECTED_FROM%" goto :ver_gate_done
 call :log [ERROR] This patch upgrades version %IB_EXPECTED_FROM% only, but the
 call :log [ERROR] install folder reports version "%CURVER%". Nothing was changed.
@@ -210,14 +220,19 @@ for /f "usebackq delims=" %%T in (`powershell -NoProfile -Command "Get-Date -For
 set "BUNDLE=%BKROOT%\upgrade-%TS%"
 mkdir "%BUNDLE%\files" >nul 2>&1
 powershell -NoProfile -Command "foreach ($line in Get-Content '%PATCHROOT%\SHA256SUMS.txt') { if ($line -notmatch '^\s*([0-9a-fA-F]{64})\s+(.+)$') { continue }; $rel = $Matches[2].Trim(); $t = Join-Path '%TARGET%' $rel; if (Test-Path $t) { $d = Join-Path '%BUNDLE%\files' $rel; New-Item -ItemType Directory -Force (Split-Path $d) | Out-Null; Copy-Item $t $d -Force } }"
-rem The whole app\ folder and version.txt go into the bundle
-rem as well (not only the files this patch replaces), so the
+rem The whole app\ folder (and version.txt, when the install
+rem has one) goes into the bundle as well (not only the files
+rem this patch replaces), so the
 rem pre-patch program state is fully recoverable. A failure
 rem here aborts the patch before anything is overwritten.
 robocopy "%TARGET%\app" "%BUNDLE%\files\app" /E /NFL /NDL /NJH /NJS /R:1 /W:1 >nul
 if errorlevel 8 goto :bundle_fail
+rem Legacy installs have no version.txt (see :detect_version);
+rem record it in the bundle only when it exists.
+if not exist "%TARGET%\version.txt" goto :bundle_vt_done
 copy /Y "%TARGET%\version.txt" "%BUNDLE%\files\version.txt" >nul
 if errorlevel 1 goto :bundle_fail
+:bundle_vt_done
 goto :bundle_done
 :bundle_fail
 call :log [ERROR] Recording the pre-patch program backup failed.
@@ -225,7 +240,7 @@ call :log [ERROR] Patch aborted - nothing was copied or changed.
 call :ib_pause
 exit /b 1
 :bundle_done
-powershell -NoProfile -Command "[IO.File]::WriteAllText('%BUNDLE%\upgrade-info.txt', \"DbBackup=%DBBACKUP%`r`nTarget=%TARGET%`r`nPatchSource=%PATCHROOT%`r`nDate=$((Get-Date).ToString('yyyy-MM-dd HH:mm:ss'))`r`n\", [Text.Encoding]::ASCII)"
+powershell -NoProfile -Command "[IO.File]::WriteAllText('%BUNDLE%\upgrade-info.txt', \"DbBackup=%DBBACKUP%`r`nFromVersion=%CURVER%`r`nTarget=%TARGET%`r`nPatchSource=%PATCHROOT%`r`nDate=$((Get-Date).ToString('yyyy-MM-dd HH:mm:ss'))`r`n\", [Text.Encoding]::ASCII)"
 call :log [INFO] Pre-patch database backup: %DBBACKUP%
 call :log [INFO] Rollback bundle recorded: %BUNDLE%
 
@@ -377,6 +392,37 @@ exit /b 0
 if "%IB_DET_COUNT%"=="0" set "IB_DET_1=%~1"
 if "%IB_DET_COUNT%"=="1" set "IB_DET_2=%~1"
 set /a IB_DET_COUNT+=1
+exit /b 0
+
+rem --- subroutine: detect the target install's version --------
+rem Sets CURVER (empty when undetectable). Primary source:
+rem version.txt, first line, read through PowerShell (the house
+rem pattern, see upgrade.bat). set /p must NOT be used here:
+rem version.txt is written with LF line endings by the Linux
+rem packaging, and set /p then reads past the first line and
+rem embeds the line break in the value, which corrupts the
+rem next if comparison (1.1.0 CI matrix N1: the run died with
+rem a syntax error at the version gate). Legacy installs
+rem (1.0.4 / 1.0.1) predate version.txt; they are fingerprinted
+rem by layout markers verified against the shipped packages:
+rem 1.0.4 carries the app-local VC++ DLLs under
+rem runtime\pgsql\bin and no runtime\vc_redist.x64.exe;
+rem 1.0.1 is the reverse. (The old jars carry no usable
+rem version string: MANIFEST and pom.properties both say
+rem 0.1.0-SNAPSHOT in 1.0.4 and 1.0.1 alike.) Conflicting or
+rem absent markers leave CURVER empty, and a stamped patch's
+rem version gate then stops the run, changing nothing.
+:detect_version
+set "CURVER="
+if exist "%TARGET%\version.txt" goto :dv_txt
+if exist "%TARGET%\runtime\vc_redist.x64.exe" goto :dv_maybe101
+if exist "%TARGET%\runtime\pgsql\bin\msvcp140.dll" set "CURVER=1.0.4"
+exit /b 0
+:dv_maybe101
+if not exist "%TARGET%\runtime\pgsql\bin\msvcp140.dll" set "CURVER=1.0.1"
+exit /b 0
+:dv_txt
+for /f "usebackq delims=" %%V in (`powershell -NoProfile -Command "(Get-Content '%TARGET%\version.txt' | Select-Object -First 1)"`) do set "CURVER=%%V"
 exit /b 0
 
 rem --- subroutine: wait until the app java process is gone ------

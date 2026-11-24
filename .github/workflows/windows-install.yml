@@ -51,7 +51,7 @@ jobs:
       # （rc4 -> 1.1.0 补丁）能用真实包实跑，不再 SKIP。
       - name: 组装补丁包（与全量包同源同 jar）
         run: bash packaging/build-patches.sh
-      # N3 夹具：真实 1.0.4 / 1.0.1 全量包太大进不了 git，放在 Drive
+      # 矩阵夹具：真实 rc4（N1）/ 1.0.4 / 1.0.1（N3）全量包太大进不了 git，放在 Drive
       # 「安装包/CI夹具」文件夹（链接可读）。下载失败时矩阵对应项会
       # 显式 SKIP 并在日志留痕，不会静默假绿。
       - name: 下载 N3 夹具包（Drive 链接直下）
@@ -59,6 +59,7 @@ jobs:
         run: |
           $ErrorActionPreference = 'Continue'
           $fixtures = @(
+            @{ Id = '1mg6_0CacZtR2KPsWceJQUOerWNpwMw3j'; Name = 'iteration-board-offline-1.1.0-rc4.zip' },
             @{ Id = '1_4m8wi41Bv1u-T4z68eyDPSMCIAGvyIl'; Name = 'iteration-board-offline-1.0.4.zip' },
             @{ Id = '15mt0HyshDUrAqUPGw0UfRlYCmEWg8HdG'; Name = 'iteration-board-offline-1.0.1.zip' }
           )
@@ -78,6 +79,7 @@ jobs:
           name: ib-offline-package
           path: |
             packaging/dist/iteration-board-offline-1.1.0.zip
+            packaging/dist/iteration-board-offline-1.1.0-rc4.zip
             packaging/dist/iteration-board-patch-1.1.0-rc4-to-1.1.0.zip
             packaging/dist/iteration-board-patch-1.0.4-to-1.1.0.zip
             packaging/dist/iteration-board-patch-1.0.1-to-1.1.0.zip
@@ -166,6 +168,8 @@ jobs:
           $nargs = @{ FullZip = 'C:\ibdl\iteration-board-offline-1.1.0.zip' }
           $patch = 'C:\ibdl\iteration-board-patch-1.1.0-rc4-to-1.1.0.zip'
           if (Test-Path $patch) { $nargs['PatchZip'] = $patch }
+          $rc4 = 'C:\ibdl\iteration-board-offline-1.1.0-rc4.zip'
+          if (Test-Path $rc4) { $nargs['Rc4Zip'] = $rc4 }
           $z104 = 'C:\ibdl\iteration-board-offline-1.0.4.zip'
           $p104 = 'C:\ibdl\iteration-board-patch-1.0.4-to-1.1.0.zip'
           if ((Test-Path $z104) -and (Test-Path $p104)) { $nargs['OldZip104'] = $z104; $nargs['Patch104'] = $p104 }

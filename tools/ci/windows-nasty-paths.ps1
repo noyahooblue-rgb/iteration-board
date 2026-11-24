@@ -14,11 +14,12 @@
 #     无法在 CI 里模拟点击，靠日志完整性断言等价覆盖。
 # 用法（档 3 windows-verify 之后或手动）：
 #   pwsh -File tools/ci/windows-nasty-paths.ps1 -FullZip C:\ibdl\iteration-board-offline-1.1.0.zip `
-#     [-PatchZip C:\ibdl\iteration-board-patch-1.1.0-rc4-to-1.1.0.zip] `
+#     [-Rc4Zip C:\ibdl\iteration-board-offline-1.1.0-rc4.zip -PatchZip C:\ibdl\iteration-board-patch-1.1.0-rc4-to-1.1.0.zip] `
 #     [-OldZip104 C:\ibdl\iteration-board-offline-1.0.4.zip -Patch104 C:\ibdl\iteration-board-patch-1.0.4-to-1.1.0.zip] `
 #     [-OldZip101 C:\ibdl\iteration-board-offline-1.0.1.zip -Patch101 C:\ibdl\iteration-board-patch-1.0.1-to-1.1.0.zip]
 param(
   [Parameter(Mandatory = $true)][string]$FullZip,
+  [string]$Rc4Zip,
   [string]$PatchZip,
   [string]$OldZip104,
   [string]$Patch104,
@@ -34,13 +35,26 @@ New-Item -ItemType Directory -Force -Path $Evidence | Out-Null
 function Check([string]$Name, [bool]$Ok) {
   if ($Ok) { Write-Host "PASS $Name" } else { Write-Host "::error::FAIL $Name"; $script:Failures += $Name }
 }
-function Run-BatAuto([string]$BatPath, [string[]]$BatArgs, [string]$LogName, [string]$Cwd) {
+function Run-BatAuto([string]$BatPath, [string[]]$BatArgs, [string]$LogName, [string]$Cwd, [string]$StdinText = $null) {
   # IB_AUTO/IB_YES 下运行 .bat，返回退出码；控制台输出落证据目录。
+  # 调用形式必须是 cmd /c "<整行再包一层引号>"：cmd /c 的引号剥离
+  # 规则下，路径与参数各带一对引号时首尾引号会被剥掉，带空格的
+  # 路径即被拆断（1.1.0 终验 N1 with-arg 实测：'C:\ibnasty\patch'
+  # is not recognized）。整行外层再包一对引号后，cmd 剥掉外层、
+  # 内层引号完整保留。
+  # $StdinText 非 $null 时经管道喂给子进程 stdin（老版本 install
+  # 的 choice 提问、apply-patch 手动输入分支靠它喂入）。
   $env:IB_AUTO = '1'; $env:IB_YES = '1'
   $out = Join-Path $Evidence $LogName
+  $cmdLine = '"' + $BatPath + '"'
+  foreach ($a in $BatArgs) { $cmdLine += ' "' + $a + '"' }
   Push-Location $Cwd
   try {
-    & cmd /c "`"$BatPath`"" @BatArgs *>&1 | Out-File -Encoding utf8 $out
+    if ($null -ne $StdinText) {
+      $StdinText | & cmd /c "`"$cmdLine`"" *>&1 | Out-File -Encoding utf8 $out
+    } else {
+      & cmd /c "`"$cmdLine`"" *>&1 | Out-File -Encoding utf8 $out
+    }
     return $LASTEXITCODE
   } finally { Pop-Location }
 }
@@ -73,7 +87,12 @@ function Install-Fresh([string]$Zip, [string]$TargetDir) {
     $found = Get-ChildItem $parent -Directory | Where-Object { Test-Path (Join-Path $_.FullName 'install.bat') } | Select-Object -First 1
     if ($found -and $found.FullName -ne $TargetDir) { Rename-Item $found.FullName (Split-Path $TargetDir -Leaf) }
   }
-  $code = Run-BatAuto (Join-Path $TargetDir 'install.bat') @('--no-pause') 'tmp-install.log' $TargetDir
+  # stdin 喂入 10 行 Y：1.0.1 的 install.bat 有 choice /C YN 提问，
+  # stdin 为空时 choice 直接报「The file is either empty...」并卡
+  # 住（1.1.0 终验 N3-1.0.1 实测）；新版脚本在 IB_AUTO 下不提问，
+  # 多余输入被丢弃，无副作用。
+  $answers = (@('Y') * 10) -join "`r`n"
+  $code = Run-BatAuto (Join-Path $TargetDir 'install.bat') @('--no-pause') 'tmp-install.log' $TargetDir $answers
   return $code
 }
 function Uninstall-Quiet([string]$TargetDir) {
@@ -84,21 +103,28 @@ function Uninstall-Quiet([string]$TargetDir) {
 }
 
 try {
-  # ---------- N1: 补丁目录恶劣路径 × 两种运行方式 ----------
-  # 目标：英文+空格路径的标准安装；补丁分别从「空格+括号(1)」「中文」
-  # 「Program Files (x86) 风格」目录里运行。
-  $StdTarget = Join-Path $Base 'std target\iteration-board-offline-1.1.0'
+  # ---------- N1: 补丁目录恶劣路径 × 三种运行方式 ----------
+  # 目标：rc4 全量包的标准安装（英文+空格路径）。rc4->1.1.0 补丁的
+  # 版本门期望 from=1.1.0-rc4，拿 1.1.0 全新安装当升级对象必然被
+  # 版本门拦下（1.1.0 终验实测教训），故 N1 夹具必须是 rc4 安装。
+  # 补丁分别从「空格+括号(1)」「中文」「Program Files (x86) 风格」
+  # 目录里运行；方式 = 带参 / 无参（服务反查）/ 手动输入（仅
+  # space-paren 一家：注销应用服务使反查无果，经 stdin 喂入
+  # 「带引号+尾随反斜杠」的拖拽式路径，专测手动分支解析存活）。
+  $Rc4Target = Join-Path $Base 'std target\iteration-board-offline-1.1.0-rc4'
   $PatchHomes = @(
     @{ Tag = 'space-paren'; Dir = (Join-Path $Base 'patch test (1)') },
     @{ Tag = 'chinese';     Dir = (Join-Path $Base '补丁 目录') },
     @{ Tag = 'pfx86';       Dir = (Join-Path $Base 'Program Files (x86)\ib patch') }
   )
-  if (-not $PatchZip) { Write-Host '::warning::SKIP N1 (patch zip not provided; N1 activates once the packaging phase supplies -PatchZip)' } else {
+  if (-not $PatchZip -or -not $Rc4Zip) { Write-Host '::warning::SKIP N1 (patch zip / rc4 fixture zip not provided; N1 activates once the packaging phase supplies -PatchZip and -Rc4Zip)' } else {
   foreach ($ph in $PatchHomes) {
-    foreach ($mode in @('with-arg', 'no-arg')) {
+    $modes = @('with-arg', 'no-arg')
+    if ($ph.Tag -eq 'space-paren') { $modes += 'manual' }
+    foreach ($mode in $modes) {
       $tag = "N1 $($ph.Tag)/$mode"
-      Uninstall-Quiet $StdTarget
-      $code = Install-Fresh $FullZip $StdTarget
+      Uninstall-Quiet $Rc4Target
+      $code = Install-Fresh $Rc4Zip $Rc4Target
       Check "$tag fresh install exit 0" ($code -eq 0)
       Check "$tag fresh install healthy" (Wait-Health)
       New-Item -ItemType Directory -Force -Path $ph.Dir | Out-Null
@@ -106,18 +132,39 @@ try {
       $patchBat = Get-ChildItem $ph.Dir -Recurse -Filter 'apply-patch.bat' | Select-Object -First 1
       Check "$tag apply-patch.bat found in nasty patch dir" ($null -ne $patchBat)
       if ($patchBat) {
-        $args = @()
-        if ($mode -eq 'with-arg') { $args = @($StdTarget) }
         $before = Get-Date
-        $code = Run-BatAuto $patchBat.FullName $args "n1-$($ph.Tag)-$mode.log" $patchBat.Directory.FullName
-        Check "$tag apply-patch exit 0" ($code -eq 0)
-        $slog = Latest-ScriptLog $patchBat.Directory.FullName 'apply-patch'
-        Check "$tag apply-patch script log written (no flash exit)" ($null -ne $slog -and $slog.LastWriteTime -ge $before -and $slog.Length -gt 200)
-        Check "$tag target upgraded to 1.1.0" (((Get-Content (Join-Path $StdTarget 'version.txt') -Raw) -match '1.1.0' -and (Get-Content (Join-Path $StdTarget 'version.txt') -Raw) -notmatch 'rc'))
-        Check "$tag app healthy after patch" (Wait-Health)
-        Check "$tag /meta version 1.1.0" ((Get-MetaVersion) -eq '1.1.0')
+        if ($mode -eq 'manual') {
+          # 注销应用服务 -> 服务反查无果 -> 脚本走手动输入分支；
+          # stdin 喂入拖拽式路径（带引号、尾随反斜杠）。服务已
+          # 注销，补丁必然在最后的服务重启步失败（exit 1 为
+          # 预期），本例只断言手动分支的解析存活：目标被正确
+          # 识别、文件拷贝步已到达、日志无 cmd 解析错误字样
+          # （N3-1.0.1 手动分支语法错误的回归门）。
+          & sc.exe stop IterationBoardApp | Out-Null
+          Start-Sleep -Seconds 5
+          & sc.exe delete IterationBoardApp | Out-Null
+          Start-Sleep -Seconds 2
+          $dragPath = '"' + $Rc4Target + '\"'
+          $code = Run-BatAuto $patchBat.FullName @() "n1-$($ph.Tag)-$mode.log" $patchBat.Directory.FullName $dragPath
+          $elog = Get-Content (Join-Path $Evidence "n1-$($ph.Tag)-$mode.log") -Raw
+          Check "$tag manual branch resolved the dragged path" ($elog -match [regex]::Escape("Target install folder: $Rc4Target"))
+          Check "$tag manual branch reached the copy step" ($elog -match 'Copying patched files into')
+          Check "$tag manual branch free of cmd parse errors" ($elog -notmatch 'syntax of the command' -and $elog -notmatch 'was unexpected at this time')
+          $slog = Latest-ScriptLog $patchBat.Directory.FullName 'apply-patch'
+          Check "$tag apply-patch script log written (no flash exit)" ($null -ne $slog -and $slog.LastWriteTime -ge $before -and $slog.Length -gt 200)
+        } else {
+          $args = @()
+          if ($mode -eq 'with-arg') { $args = @($Rc4Target) }
+          $code = Run-BatAuto $patchBat.FullName $args "n1-$($ph.Tag)-$mode.log" $patchBat.Directory.FullName
+          Check "$tag apply-patch exit 0" ($code -eq 0)
+          $slog = Latest-ScriptLog $patchBat.Directory.FullName 'apply-patch'
+          Check "$tag apply-patch script log written (no flash exit)" ($null -ne $slog -and $slog.LastWriteTime -ge $before -and $slog.Length -gt 200)
+          Check "$tag target upgraded to 1.1.0" (((Get-Content (Join-Path $Rc4Target 'version.txt') -Raw) -match '1.1.0' -and (Get-Content (Join-Path $Rc4Target 'version.txt') -Raw) -notmatch 'rc'))
+          Check "$tag app healthy after patch" (Wait-Health)
+          Check "$tag /meta version 1.1.0" ((Get-MetaVersion) -eq '1.1.0')
+        }
       }
-      Uninstall-Quiet $StdTarget
+      Uninstall-Quiet $Rc4Target
     }
   }
   }

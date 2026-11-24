@@ -71,12 +71,15 @@ for /f "usebackq delims=" %%V in (`powershell -NoProfile -Command "$c = Get-Cont
 if not "%BKROOT%"=="" if not "%BKROOT:~1,1%"==":" set "BKROOT=%ROOT%\%BKROOT%"
 if "%BKROOT%"=="" set "BKROOT=%ROOT%\backup"
 
-if not "%SEL%"=="" goto :sel_done
+rem SEL can be typed by the user; the empty tests below use a
+rem sentinel suffix so a trailing backslash in the typed value
+rem cannot break the if comparison (check-bat R8).
+if not "%SEL%x"=="x" goto :sel_done
 echo Available backups in %BKROOT% :
 dir /B /AD "%BKROOT%" 2>nul
 set /p "SEL=Type the backup folder name to restore: "
 :sel_done
-if "%SEL%"=="" (
+if "%SEL%x"=="x" (
   echo [ERROR] No backup selected.
   call :ib_pause
   exit /b 1

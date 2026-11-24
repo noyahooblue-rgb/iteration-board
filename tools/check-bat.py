@@ -61,6 +61,22 @@ packaging/windows 下的 .bat，发现以下已知坑即报错（退出码 1）�
                         引号内的拼接、for 变量 %%X、纯变量引用不在
                         此列——近似性见重检清单文档。
 
+  R7 setp-file-read     set /p VAR=<文件 用重定向读文件内容：对
+                        LF-only 文件会读过第一行、把换行读进变量值，
+                        后续 if "%VAR%"== 比较变成跨行命令直接语法
+                        错误（1.1.0 CI 恶劣路径矩阵 N1 实测：版本门
+                        set /p 读 LF 版 version.txt 后脚本死亡）。
+                        读文件首行一律用 PowerShell Get-Content
+                        -First 1 的 for /f 写法（upgrade.bat 既有
+                        范式）。
+  R8 input-bare-compare 控制台输入变量（set /p 提示读入的 VAR）出现
+                        在裸 if "%VAR%"== / =="%VAR%" 比较里：用户
+                        键入/拖拽的路径可带尾随反斜杠，反斜杠紧贴
+                        闭合引号会被 cmd 解析器误读，比较行直接报
+                        「was unexpected at this time」（1.1.0 CI
+                        矩阵 N3-1.0.1 手动分支实测）。空值判断一律
+                        用哨兵后缀形式 if "%VAR%x"=="x"。
+
 豁免：行尾或上一行加注释 rem IB-CHECK-EXEMPT <规则号> 可豁免
 该行该规则（命令本身不能带尾随注释时用上一行形式），必须在
 重检清单里逐条写理由。
@@ -215,6 +231,13 @@ def check_file_v2(path: Path):
     text = raw.decode("ascii", errors="replace")
     lines = text.replace("\r\n", "\n").split("\n")
     has_ib_auto = "IB_AUTO" in text
+    # console-input variables (set /p prompt form; the file-read
+    # form set /p VAR=<file is R7's domain, not an input var)
+    input_vars = set()
+    for _l in lines:
+        _m = re.search(r"(?i)\bset\s+/p\s+\"?([A-Za-z_][A-Za-z0-9_]*)", _l)
+        if _m and not re.search(r"(?i)\bset\s+/p\s+[A-Za-z_][A-Za-z0-9_]*\s*=<", _l):
+            input_vars.add(_m.group(1).upper())
     depth = 0
     prev_lines = []
     for lineno, line in enumerate(lines, 1):
@@ -248,6 +271,16 @@ def check_file_v2(path: Path):
             if "pause" not in prev:
                 findings.append((lineno, "R2",
                                  "exit without a preceding pause and no IB_AUTO exemption marker in file (manual review: subroutine exits are expected false positives)"))
+        # R7: set /p reading a file through redirection
+        if re.search(r"(?i)\bset\s+/p\s+[A-Za-z_][A-Za-z0-9_]*\s*=<", line) and not exempt(line, "R7", prev_line):
+            findings.append((lineno, "R7",
+                             "set /p reads a file via redirection; LF-only files corrupt the value with an embedded line break - read the first line via PowerShell Get-Content in a for /f instead"))
+        # R8: console-input variable in a bare quoted if comparison
+        for var in input_vars:
+            if re.search(r'"%' + var + r'%"\s*==|==\s*"%' + var + r'%"', line, re.IGNORECASE) and not exempt(line, "R8", prev_line):
+                findings.append((lineno, "R8",
+                                 f"console-input variable %{var}% in a bare quoted if comparison; a trailing backslash before the closing quote breaks the parser - use the sentinel form \"%{var}%x\"==\"x\""))
+                break
         # R6: unquoted path-variable token (approximation, see docstring)
         stripped = line.strip()
         if not re.match(r"(?i)set\s", stripped) and not exempt(line, "R6", prev_line):
