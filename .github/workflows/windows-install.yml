@@ -51,7 +51,7 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: ib-offline-package
-          path: packaging/dist/iteration-board-offline-1.1.0-rc4.zip
+          path: packaging/dist/iteration-board-offline-1.1.0.zip
           retention-days: 7
 
   # 档 2（Windows 冒烟，目标 ≤20 分钟）：中文+空格路径、中文 TEMP、chcp 936 下
@@ -107,7 +107,7 @@ jobs:
     needs: [build-package, windows-smoke]
     if: ${{ always() && inputs.tier != 'smoke' && needs.build-package.result == 'success' && (needs.windows-smoke.result == 'success' || needs.windows-smoke.result == 'skipped') }}
     runs-on: windows-latest
-    timeout-minutes: 150
+    timeout-minutes: 180
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
@@ -121,6 +121,34 @@ jobs:
       - name: Windows 实跑全流程
         shell: pwsh
         run: ./tools/ci/windows-verify.ps1
+      # 恶劣路径矩阵（1.1.0 脚本专项，rucc9a9y/7pjby64d）：补丁目录三类恶劣
+      # 路径 × 带参/双击两方式（N1）+ 恶劣安装目录运维脚本（N2）+ 老版本
+      # 夹具补丁升级（N3）。补丁包与夹具包是打包阶段产物：zip 出现在
+      # C:\ibdl 时自动带参启用对应段，缺席时脚本内显式 SKIP 并打 warning，
+      # N2 只依赖全量包、恒跑。打包阶段交付时把补丁/夹具 zip 作为产物
+      # 下载到 C:\ibdl 即可全量激活，无需再改本 workflow。
+      - name: 恶劣路径矩阵（windows-nasty-paths）
+        shell: pwsh
+        timeout-minutes: 45
+        run: |
+          $nargs = @('-FullZip', 'C:\ibdl\iteration-board-offline-1.1.0.zip')
+          $patch = 'C:\ibdl\iteration-board-patch-1.1.0-rc4-to-1.1.0.zip'
+          if (Test-Path $patch) { $nargs += @('-PatchZip', $patch) }
+          $z104 = 'C:\ibdl\iteration-board-offline-1.0.4.zip'
+          $p104 = 'C:\ibdl\iteration-board-patch-1.0.4-to-1.1.0.zip'
+          if ((Test-Path $z104) -and (Test-Path $p104)) { $nargs += @('-OldZip104', $z104, '-Patch104', $p104) }
+          $z101 = 'C:\ibdl\iteration-board-offline-1.0.1.zip'
+          $p101 = 'C:\ibdl\iteration-board-patch-1.0.1-to-1.1.0.zip'
+          if ((Test-Path $z101) -and (Test-Path $p101)) { $nargs += @('-OldZip101', $z101, '-Patch101', $p101) }
+          & ./tools/ci/windows-nasty-paths.ps1 @nargs
+      - name: 上传恶劣路径矩阵证据
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: windows-nasty-evidence
+          path: C:\ibnasty\evidence
+          retention-days: 7
+          if-no-files-found: warn
       - name: 上传日志与截图证据
         if: always()
         uses: actions/upload-artifact@v4
