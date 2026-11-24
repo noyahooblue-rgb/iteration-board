@@ -27,6 +27,9 @@ import java.util.Map;
  * 改用 JdbcTemplate 原生 SQL 只读标量列：type/status 以字符串读出，能匹配现行枚举则用枚举名，
  * 匹配不上则原样返回原始字符串（前端只把 type 当分支判断、status 当不透明展示值，原始串安全）。
  * rc4（B）：404 使用专属错误码 ITEM_NOT_FOUND，让前端能区分「业务 404」与「裸 404（接口不存在）」。
+ * rc4（C3 复核第二遍核查）：字段收敛——title/code 仅对 hasAccess 的请求者（小组成员或平台管理员）
+ * 返回；无权者只拿到定位与状态字段（id/type/status/teamId/teamName/deleted/hasAccess），
+ * 避免已删/无权事项的标题经直达解析泄露给非成员。正文（description）本接口从不查询、不返回。
  */
 @RestController
 @RequestMapping("/api/v1/items")
@@ -56,19 +59,21 @@ public class ItemResolutionController {
             throw new ApiException(HttpStatus.NOT_FOUND, "ITEM_NOT_FOUND", "事项不存在");
         }
         long teamId = ((Number) row.get("team_id")).longValue();
+        boolean hasAccess = me.isPlatformAdmin()
+                || memberRepo.findByTeamIdAndUserId(teamId, me.getId()).isPresent();
         Map<String, Object> m = new LinkedHashMap<>();
         m.put("id", ((Number) row.get("id")).longValue());
-        m.put("code", row.get("code"));
+        // C3 字段收敛：code/title 仅对有权者返回（见类注释），无权者为 null。
+        m.put("code", hasAccess ? row.get("code") : null);
         m.put("type", enumNameOrRaw((String) row.get("type"), Enums.ItemType.class));
-        m.put("title", row.get("title"));
+        m.put("title", hasAccess ? row.get("title") : null);
         m.put("status", enumNameOrRaw((String) row.get("status"), Enums.ItemStatus.class));
         m.put("teamId", teamId);
         m.put("teamName", row.get("team_name"));
         m.put("parentId", row.get("parent_id") == null ? null : ((Number) row.get("parent_id")).longValue());
         m.put("iterationId", row.get("iteration_id") == null ? null : ((Number) row.get("iteration_id")).longValue());
         m.put("deleted", row.get("deleted_at") != null);
-        m.put("hasAccess", me.isPlatformAdmin()
-                || memberRepo.findByTeamIdAndUserId(teamId, me.getId()).isPresent());
+        m.put("hasAccess", hasAccess);
         return m;
     }
 

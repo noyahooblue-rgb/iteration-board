@@ -38,10 +38,14 @@ export function resetLoginRedirectLock() {
  * pathname+search+hash，否则返回 null。
  */
 export function safeInternalPath(raw: unknown): string | null {
-  if (typeof raw !== 'string' || !raw) return null
-  if (!raw.startsWith('/') || raw.startsWith('//') || raw.startsWith('/\\')) return null
+  if (typeof raw !== 'string') return null
+  // C3 复核第二遍核查：先 trim 再判开头，与 URL 解析对空白的处理口径一致，
+  // 避免 " //evil.com" 这类带前导空白的输入在前缀判断与解析之间出现不一致。
+  const s = raw.trim()
+  if (!s) return null
+  if (!s.startsWith('/') || s.startsWith('//') || s.startsWith('/\\')) return null
   try {
-    const u = new URL(raw, window.location.origin)
+    const u = new URL(s, window.location.origin)
     if (u.origin !== window.location.origin) return null
     return u.pathname + u.search + u.hash
   } catch { return null }

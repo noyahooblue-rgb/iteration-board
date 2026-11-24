@@ -248,4 +248,69 @@ class Rc4LegacyDataTest {
                 .andExpect(content().contentTypeCompatibleWith("application/json"))
                 .andExpect(jsonPath("$.code").value("IMAGE_DATA_INVALID"));
     }
+
+    // ---------- C3 复核第二遍核查 1：resolution 字段收敛（无权者不带 title/code） ----------
+
+    /**
+     * Gemini 复核第二遍 1：软删事项的 resolution 返回体是否把标题带给无权者。
+     * 收敛后口径：title/code 仅 hasAccess（成员/平台管理员）返回；无权者只拿到
+     * 定位与状态字段，deleted 标记照常；成员看已删事项时标题不受影响（回收站提示文案）。
+     */
+    @Test
+    void resolution_noAccessUser_titleAndCodeWithheld() throws Exception {
+        MockHttpSession leader = register("rc4c3lead", "虚构组长丙");
+        TeamCtx team = createTeam(leader, "虚构收敛组", "RCQC");
+        long itemId = createItem(leader, team.teamId(), "{\"type\":\"TASK\",\"title\":\"虚构敏感标题事项\"}");
+        MockHttpSession outsider = register("rc4c3out", "虚构组外人");
+
+        // 未删除：组外人可查到状态，但拿不到标题与编号
+        MvcResult r1 = mvc.perform(get("/api/v1/items/" + itemId + "/resolution").session(outsider))
+                .andExpect(status().isOk()).andReturn();
+        String b1 = r1.getResponse().getContentAsString();
+        assertThat((Boolean) JsonPath.read(b1, "$.hasAccess")).isFalse();
+        assertThat((Boolean) JsonPath.read(b1, "$.deleted")).isFalse();
+        assertThat((Object) JsonPath.read(b1, "$.title")).isNull();
+        assertThat((Object) JsonPath.read(b1, "$.code")).isNull();
+        assertThat((String) JsonPath.read(b1, "$.teamName")).isEqualTo("虚构收敛组");
+
+        // 软删后：组外人只看到 deleted 标记，标题仍收敛；成员仍能看到标题（回收站文案不受影响）
+        jdbc.update("update item set deleted_at = now() where id = ?", itemId);
+        MvcResult r2 = mvc.perform(get("/api/v1/items/" + itemId + "/resolution").session(outsider))
+                .andExpect(status().isOk()).andReturn();
+        String b2 = r2.getResponse().getContentAsString();
+        assertThat((Boolean) JsonPath.read(b2, "$.deleted")).isTrue();
+        assertThat((Object) JsonPath.read(b2, "$.title")).isNull();
+        assertThat((Object) JsonPath.read(b2, "$.code")).isNull();
+
+        MvcResult r3 = mvc.perform(get("/api/v1/items/" + itemId + "/resolution").session(leader))
+                .andExpect(status().isOk()).andReturn();
+        String b3 = r3.getResponse().getContentAsString();
+        assertThat((Boolean) JsonPath.read(b3, "$.deleted")).isTrue();
+        assertThat((String) JsonPath.read(b3, "$.title")).isEqualTo("虚构敏感标题事项");
+        assertThat((Object) JsonPath.read(b3, "$.code")).isNotNull();
+    }
+
+    // ---------- C3 复核第二遍核查 4：WebP 魔数须 RIFF + WEBP 双段，WAV 头不得蒙混 ----------
+
+    /**
+     * Gemini 复核第二遍 4：WAV 文件与 WebP 同为 RIFF 容器（偏移 0–3 都是 "RIFF"），
+     * 区别在偏移 8–11（"WAVE" vs "WEBP"）。魔数校验若只查 RIFF 一段，WAV 会冒充
+     * WebP 被 200 返回；双段校验下应判非图片 → 422。
+     */
+    @Test
+    void feedbackImage_wavHeaderBytes_returns422() throws Exception {
+        MockHttpSession author = register("rc4fwav", "虚构反馈人戊");
+        long fid = createFeedback(author, "虚构 WAV 冒充反馈");
+        byte[] wav = new byte[24];
+        System.arraycopy("RIFF".getBytes(StandardCharsets.US_ASCII), 0, wav, 0, 4);
+        wav[4] = 0x24; // ChunkSize 任意
+        System.arraycopy("WAVE".getBytes(StandardCharsets.US_ASCII), 0, wav, 8, 4);
+        System.arraycopy("fmt ".getBytes(StandardCharsets.US_ASCII), 0, wav, 12, 4);
+        String stored = Base64.getEncoder().encodeToString(wav);
+        long imgId = insertLegacyImage(fid, "fake.webp", "image/webp", stored, wav.length);
+        mvc.perform(get("/api/v1/feedback/" + fid + "/images/" + imgId).session(author))
+                .andExpect(status().isUnprocessableEntity())
+                .andExpect(content().contentTypeCompatibleWith("application/json"))
+                .andExpect(jsonPath("$.code").value("IMAGE_DATA_INVALID"));
+    }
 }

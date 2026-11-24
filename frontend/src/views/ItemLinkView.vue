@@ -24,7 +24,7 @@
     </template>
     <template v-else-if="state === 'deleted'">
       <h2>该事项已被删除</h2>
-      <p class="small" style="margin-top:8px">「{{ res?.code }} {{ res?.title }}」已在回收站中，30 天内可恢复。</p>
+      <p class="small" style="margin-top:8px"><span v-if="res?.title">「{{ res.code }} {{ res.title }}」</span>已在回收站中，30 天内可恢复。</p>
       <div class="row">
         <AppButton v-if="res?.hasAccess" variant="ghost" @click="goTrash">去回收站</AppButton>
         <AppButton @click="router.push('/workbench')">回工作台</AppButton>

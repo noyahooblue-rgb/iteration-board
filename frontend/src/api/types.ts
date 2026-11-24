@@ -23,7 +23,7 @@ export interface Planning{iteration:Iteration;groups:PlanningGroup[];loads:{user
 // M3 协同类型（契约 0.3.0）
 export interface NotificationItem{id:number;teamId:number|null;type:string;category:string;itemId:number|null;itemCode:string|null;itemType:string|null;refId:number|null;actorId:number|null;content:string;readAt:string|null;createdAt:string}
 // 修订六契约 4：GET /items/{id}/resolution 的解析结果（事项直达 /i/:id 用）
-export interface ItemResolution{id:number;code:string;type:ItemType;title:string;status:string;teamId:number;teamName:string;parentId:number|null;iterationId:number|null;deleted:boolean;hasAccess:boolean}
+export interface ItemResolution{id:number;code:string|null;type:ItemType;title:string|null;status:string;teamId:number;teamName:string;parentId:number|null;iterationId:number|null;deleted:boolean;hasAccess:boolean}
 // 修订六契约 2：平台管理用户行（AdminUserDto 扩展 mustChangePassword/locked/lastLoginAt）
 export interface AdminUser{id:number;loginName:string;displayName:string;platformAdmin:boolean;status?:string;createdAt:string;mustChangePassword:boolean;locked:boolean;lastLoginAt:string|null}
 export interface NudgeResult{itemId:number;nudgedUserIds:number[];redirectedToLeader:boolean;nudgeCount:number}
