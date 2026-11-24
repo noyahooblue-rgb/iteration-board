@@ -202,23 +202,84 @@ if "%BKROOT%"=="" set "BKROOT=%TARGET%\backup"
 if not exist "%BKROOT%" mkdir "%BKROOT%"
 
 rem --- step 2: database backup + replaced-file bundle -------------
+rem The database backup is made HERE, by this script - never by
+rem calling the target's backup.bat: pre-1.1.0 backup.bat
+rem versions do not write data\backup-status.json at all (that
+rem format arrived with 1.1.0), and the 1.0.4 one silently
+rem SKIPS with exit code 0 when the PostgreSQL service is
+rem stopped, so relying on it either aborted the patch on real
+rem legacy installs or credited a backup that was never made.
+rem The dump below is always fresh (pg_dump -Fc, taken seconds
+rem before it is recorded - no reuse window on the patch path),
+rem uses the same folder layout backup.bat produces, and is
+rem registered in backup-status.json in the same agreed format.
 call :log [INFO] Backing up target database, uploads and config ...
-call "%TARGET%\backup.bat" auto
-if errorlevel 1 (
-  echo [ERROR] Backup failed. Patch aborted, nothing changed.
-  call :ib_pause
-  exit /b 1
-)
-set "DBBACKUP="
-for /f "usebackq delims=" %%P in (`powershell -NoProfile -Command "$f = '%TARGET%\data\backup-status.json'; if (Test-Path $f) { try { $j = Get-Content $f -Raw | ConvertFrom-Json; if ($j.success -and $j.lastBackupPath -and (Test-Path (Join-Path $j.lastBackupPath 'db.dump')) -and ((Get-Item (Join-Path $j.lastBackupPath 'db.dump')).LastWriteTime -gt (Get-Date).AddMinutes(-15))) { $j.lastBackupPath } } catch {} }"`) do set "DBBACKUP=%%P"
-if "%DBBACKUP%"=="" (
-  echo [ERROR] No fresh database backup was produced - PostgreSQL is
-  echo [ERROR] probably stopped, so backup.bat skipped. Start the
-  echo [ERROR] services with start.bat in the target folder first,
-  echo [ERROR] then run apply-patch.bat again. Nothing was changed.
-  call :ib_pause
-  exit /b 1
-)
+rem PostgreSQL must be up for the dump. Both services are
+rem manual-start since 1.0.3, so start the PG service first
+rem when it is stopped; the app service is stopped later, in
+rem step 3, after the backup.
+sc query IterationBoardPG >nul 2>&1
+if errorlevel 1 goto :bk_pg_missing
+sc query IterationBoardPG | findstr /C:"RUNNING" >nul 2>&1
+if not errorlevel 1 goto :bk_pg_up
+net start IterationBoardPG >nul 2>&1
+set "IB_PGWAIT=0"
+:bk_pg_wait
+sc query IterationBoardPG | findstr /C:"RUNNING" >nul 2>&1
+if not errorlevel 1 goto :bk_pg_up
+set /a IB_PGWAIT+=1
+if "%IB_PGWAIT%"=="15" goto :bk_pg_missing
+powershell -NoProfile -Command "Start-Sleep -Seconds 2"
+goto :bk_pg_wait
+:bk_pg_missing
+call :log [ERROR] The PostgreSQL service (IterationBoardPG) is
+call :log [ERROR] not running and could not be started, so no
+call :log [ERROR] database backup can be made. Patch aborted -
+call :log [ERROR] start the services with start.bat in the
+call :log [ERROR] target folder first, then run apply-patch.bat
+call :log [ERROR] again. Nothing was changed.
+call :ib_pause
+exit /b 1
+:bk_pg_up
+set "DBPWD="
+for /f "tokens=1,2" %%A in ('findstr /C:"password:" "%TARGET%\config\application.yml"') do set "DBPWD=%%B"
+if not "%DBPWD%"=="" goto :bk_pwd_ok
+call :log [ERROR] Could not read the database password from
+call :log [ERROR] config\application.yml. Patch aborted,
+call :log [ERROR] nothing was changed.
+call :ib_pause
+exit /b 1
+:bk_pwd_ok
+for /f "usebackq delims=" %%T in (`powershell -NoProfile -Command "Get-Date -Format yyyyMMdd-HHmmss"`) do set "TS=%%T"
+set "DBBACKUP=%BKROOT%\%TS%"
+mkdir "%DBBACKUP%" >nul 2>&1
+set "PGPASSWORD=<redacted>"
+"%TARGET%\runtime\pgsql\bin\pg_dump.exe" -h 127.0.0.1 -p 15432 -U postgres -Fc -f "%DBBACKUP%\db.dump" iteration_board
+set "IB_DUMP_RC=%ERRORLEVEL%"
+set "PGPASSWORD="
+if "%IB_DUMP_RC%"=="0" goto :bk_dump_ok
+call :log [ERROR] pg_dump failed with code %IB_DUMP_RC%. Patch
+call :log [ERROR] aborted - nothing was changed.
+call :ib_pause
+exit /b 1
+:bk_dump_ok
+if not exist "%TARGET%\data\uploads" goto :bk_uploads_done
+robocopy "%TARGET%\data\uploads" "%DBBACKUP%\uploads" /E /NFL /NDL /NJH /NJS /R:1 /W:1 >nul
+if errorlevel 8 goto :bk_copy_fail
+:bk_uploads_done
+copy /Y "%TARGET%\config\application.yml" "%DBBACKUP%\application.yml" >nul
+if errorlevel 1 goto :bk_copy_fail
+goto :bk_done
+:bk_copy_fail
+call :log [ERROR] Copying uploads or config into the backup
+call :log [ERROR] folder failed. Patch aborted - nothing was
+call :log [ERROR] changed.
+call :ib_pause
+exit /b 1
+:bk_done
+set "IB_BK_RESULT=success"
+set "IB_BK_PATH=%DBBACKUP%"
+call :write_bk_status
 for /f "usebackq delims=" %%T in (`powershell -NoProfile -Command "Get-Date -Format yyyyMMdd-HHmmss"`) do set "TS=%%T"
 set "BUNDLE=%BKROOT%\upgrade-%TS%"
 mkdir "%BUNDLE%\files" >nul 2>&1
@@ -377,6 +438,16 @@ call :ib_pause
 exit /b 1
 
 rem --- subroutine: detect the installed folder from the --------
+rem --- subroutine: record the patch-made backup in the
+rem target's data\backup-status.json, in the same agreed
+rem format and with the same merge semantics as backup.bat's
+rem :write_status (1.1.0, P23) - the backend reads this file,
+rem and a patch-made backup must look exactly like a
+rem backup.bat one. Inputs: IB_BK_RESULT, IB_BK_PATH.
+:write_bk_status
+if not exist "%TARGET%\data" mkdir "%TARGET%\data"
+powershell -NoProfile -Command "$f = '%TARGET%\data\backup-status.json'; $now = (Get-Date).ToUniversalTime().ToString('yyyy-MM-ddTHH:mm:ssZ'); $prev = $null; if (Test-Path $f) { try { $prev = Get-Content $f -Raw | ConvertFrom-Json } catch {} }; $o = [ordered]@{}; $o.lastAttemptTime = $now; if ($env:IB_BK_RESULT -eq 'success') { $o.lastSuccessTime = $now } elseif ($prev -and $prev.lastSuccessTime) { $o.lastSuccessTime = $prev.lastSuccessTime } else { $o.lastSuccessTime = $null }; $o.lastResult = $env:IB_BK_RESULT; $o.success = ($env:IB_BK_RESULT -eq 'success'); if ($env:IB_BK_RESULT -eq 'success') { $o.lastBackupPath = $env:IB_BK_PATH } elseif ($prev -and $prev.lastBackupPath) { $o.lastBackupPath = $prev.lastBackupPath } else { $o.lastBackupPath = $null }; $o.lastAttemptAt = $o.lastAttemptTime; $o.lastSuccessAt = $o.lastSuccessTime; $o.result = $env:IB_BK_RESULT.ToUpper(); $o.detail = $o.lastResult; [IO.File]::WriteAllText($f, ($o | ConvertTo-Json -Compress), [Text.Encoding]::ASCII)"
+exit /b 0
 rem IterationBoardApp service registration (sc qc binary path,
 rem registry ImagePath as fallback). The service executable is
 rem <install>\app\IterationBoardApp.exe, so the install folder

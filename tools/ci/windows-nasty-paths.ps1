@@ -100,6 +100,71 @@ function Get-MetaVersion {
     return ($r.Content | ConvertFrom-Json).version
   } catch { return $null }
 }
+function Wait-HealthLegacy([int]$Seconds = 150) {
+  # Legacy (pre-1.1.0) jars have no /api/v1/meta - that endpoint
+  # arrived with the 1.1.0 line. The captcha endpoint exists in
+  # every shipped version and is what the smoke tier probes.
+  for ($i = 0; $i -lt $Seconds; $i += 3) {
+    try {
+      $r = Invoke-WebRequest -UseBasicParsing -Uri 'http://localhost:18080/api/v1/auth/captcha' -TimeoutSec 5
+      if ($r.StatusCode -eq 200) { return $true }
+    } catch { }
+    Start-Sleep -Seconds 3
+  }
+  return $false
+}
+function Api-Call($Session, [string]$Method, [string]$Path, $Body) {
+  $params = @{
+    Uri = "http://localhost:18080/api/v1$Path"; Method = $Method
+    WebSession = $Session; UseBasicParsing = $true
+    SkipHttpErrorCheck = $true; TimeoutSec = 30
+  }
+  $headers = @{}
+  if ($Method -ne 'Get') {
+    $csrf = $Session.Cookies.GetCookies('http://localhost:18080/') |
+      Where-Object { $_.Name -eq 'XSRF-TOKEN' } | Select-Object -First 1
+    if ($csrf) { $headers['X-XSRF-TOKEN'] = $csrf.Value }
+  }
+  if ($null -ne $Body) {
+    $params.Body = ($Body | ConvertTo-Json -Depth 6)
+    $params.ContentType = 'application/json'
+  }
+  if ($headers.Count -gt 0) { $params.Headers = $headers }
+  $r = Invoke-WebRequest @params
+  $parsed = $null
+  if ($r.Content) { try { $parsed = $r.Content | ConvertFrom-Json } catch { } }
+  return [pscustomobject]@{ Status = [int]$r.StatusCode; Body = $parsed; Raw = [string]$r.Content }
+}
+function Api-Register([string]$Login, [string]$Display, [string]$Pass) {
+  # Registration demands a captcha; the code glyphs are <text>
+  # nodes in the issued SVG (same approach as tools/windows-e2e).
+  $s = New-Object Microsoft.PowerShell.Commands.WebRequestSession
+  $cap = Api-Call $s 'Get' '/auth/captcha' $null
+  if ($cap.Status -ne 200 -or -not $cap.Body) { return $null }
+  $glyphs = [regex]::Matches([string]$cap.Body.imageSvg, '>(.)</text>') | ForEach-Object { $_.Groups[1].Value }
+  $code = -join $glyphs
+  if ($code.Length -lt 4) { return $null }
+  $r = Api-Call $s 'Post' '/auth/register' @{ loginName = $Login; displayName = $Display; password = $Pass; captchaId = $cap.Body.captchaId; captchaCode = $code }
+  if ($r.Status -ge 300) { return $null }
+  return $s
+}
+function Api-Login([string]$User, [string]$Pass) {
+  $s = New-Object Microsoft.PowerShell.Commands.WebRequestSession
+  try { Invoke-WebRequest -UseBasicParsing -Uri 'http://localhost:18080/api/v1/auth/captcha' -WebSession $s -TimeoutSec 10 | Out-Null } catch { }
+  $r = Api-Call $s 'Post' '/auth/login' @{ loginName = $User; password = $Pass }
+  if ($r.Status -ne 200) { return $null }
+  return $s
+}
+function Invoke-PsqlScalar([string]$RootPath, [string]$Sql) {
+  $pwdLine = Select-String -Path (Join-Path $RootPath 'config\application.yml') -Pattern '^\s*password:\s*(\S+)' | Select-Object -First 1
+  if (-not $pwdLine) { return $null }
+  $env:PGPASSWORD = $pwdLine.Matches[0].Groups[1].Value
+  try {
+    $out = & (Join-Path $RootPath 'runtime\pgsql\bin\psql.exe') -h 127.0.0.1 -p 15432 -U postgres -d iteration_board -q -tAc $Sql
+    if ($LASTEXITCODE -ne 0) { return $null }
+    return ($out | Out-String).Trim()
+  } finally { $env:PGPASSWORD = $null }
+}
 function Install-Fresh([string]$Zip, [string]$TargetDir) {
   # 解包并把包内根目录改名/定位到 $TargetDir，再 install（--no-pause）。
   $parent = Split-Path $TargetDir -Parent
@@ -200,6 +265,21 @@ try {
   Check 'N2 backup.bat auto exit 0' ($code -eq 0)
   $code = Run-BatAuto (Join-Path $NastyTarget 'reset-admin.bat') @('--no-pause') 'n2-reset-admin.log' $NastyTarget
   Check 'N2 reset-admin.bat exit 0' ($code -eq 0)
+  # Log hygiene (final-verification item 3): the temporary
+  # password is displayed on the operator console by design,
+  # but it must never land in the persistent log files (the
+  # script's own reset-admin-<ts>.log, the application log).
+  $pwFile = Join-Path $NastyTarget 'config\admin-initial-password.txt'
+  if (Test-Path $pwFile) {
+    $pwm = Select-String -Path $pwFile -Pattern 'admin initial password:\s*(\S+)' | Select-Object -First 1
+    if ($pwm) {
+      $tempPw = $pwm.Matches[0].Groups[1].Value
+      $rlog = Latest-ScriptLog $NastyTarget 'reset-admin'
+      Check 'N2 reset-admin script log free of the temp password' ($null -ne $rlog -and ((Get-Content $rlog.FullName -Raw) -notmatch [regex]::Escape($tempPw)))
+      $appLog = Join-Path $NastyTarget 'logs\app.log'
+      Check 'N2 app log free of the temp password' ((-not (Test-Path $appLog)) -or ((Get-Content $appLog -Raw) -notmatch [regex]::Escape($tempPw)))
+    }
+  }
   $bk = Get-ChildItem (Join-Path $NastyTarget 'backup') -Directory -ErrorAction SilentlyContinue | Sort-Object Name -Descending | Select-Object -First 1
   Check 'N2 backup folder created' ($null -ne $bk)
   if ($bk) {
@@ -219,7 +299,7 @@ try {
     Uninstall-Quiet $target
     $code = Install-Fresh $fx.Zip $target
     Check "$tag fixture install exit 0" ($code -eq 0)
-    Check "$tag fixture healthy" (Wait-Health)
+    Check "$tag fixture healthy" (Wait-HealthLegacy)
     $patchHome = Join-Path $Base "patch fixture (1)"
     New-Item -ItemType Directory -Force -Path $patchHome | Out-Null
     Expand-Archive -Path $fx.Patch -DestinationPath $patchHome -Force
@@ -234,6 +314,130 @@ try {
       Check "$tag /meta version 1.1.0" ((Get-MetaVersion) -eq '1.1.0')
     }
     Uninstall-Quiet $target
+  }
+
+  # ---------- N4: 终验追加五项（Gemini 终检采纳项） ----------
+  # N4a 分卷合并.bat 恶劣路径实跑（追加项 5）：夹具是发布用的
+  # 同一份合并.bat（tools/ci/fixtures），矩阵按打包侧同法把
+  # EXPECT 戳成本轮 CI 全量包的哈希；分卷由 CI 全量包现切
+  # （每卷 98,000,000 字节，与发布分卷同规格）。
+  $mergeHome = Join-Path $Base 'merge test (1)'
+  New-Item -ItemType Directory -Force -Path $mergeHome | Out-Null
+  $zipHash = (Get-FileHash $FullZip -Algorithm SHA256).Hash.ToLower()
+  $srcStream = [IO.File]::OpenRead($FullZip)
+  try {
+    $buf = New-Object byte[] 1048576
+    $v1 = [IO.File]::Create((Join-Path $mergeHome 'iteration-board-offline-1.1.0.zip.001'))
+    $left = 98000000
+    while ($left -gt 0) { $n = $srcStream.Read($buf, 0, [Math]::Min($buf.Length, $left)); if ($n -le 0) { break }; $v1.Write($buf, 0, $n); $left -= $n }
+    $v1.Close()
+    $v2 = [IO.File]::Create((Join-Path $mergeHome 'iteration-board-offline-1.1.0.zip.002'))
+    while (($n = $srcStream.Read($buf, 0, $buf.Length)) -gt 0) { $v2.Write($buf, 0, $n) }
+    $v2.Close()
+  } finally { $srcStream.Close() }
+  $mergeBatText = [IO.File]::ReadAllText((Join-Path $PSScriptRoot 'fixtures\合并.bat'))
+  $mergeBatText = $mergeBatText -replace 'set "EXPECT=[0-9a-f]{64}"', ('set "EXPECT=' + $zipHash + '"')
+  [IO.File]::WriteAllText((Join-Path $mergeHome '合并.bat'), $mergeBatText, [Text.Encoding]::ASCII)
+  $code = Run-BatAuto (Join-Path $mergeHome '合并.bat') @() 'n4-merge.log' $mergeHome
+  Check 'N4 merge.bat exit 0 in space+paren folder' ($code -eq 0)
+  $mergedZip = Join-Path $mergeHome 'iteration-board-offline-1.1.0.zip'
+  Check 'N4 merged zip sha256 equals the full zip' ((Test-Path $mergedZip) -and ((Get-FileHash $mergedZip -Algorithm SHA256).Hash.ToLower() -eq $zipHash))
+
+  # N4b 版本门负控（追加项 4）：1.0.4 补丁打 rc4 安装，必须
+  # 干净拒绝（明确报期望版本）、目标分毫不动、服务照常健康。
+  if (-not $Patch104 -or -not $Rc4Zip) { Write-Host '::warning::SKIP N4 gate negative (patch 1.0.4 / rc4 fixture not provided)' } else {
+    Uninstall-Quiet $Rc4Target
+    $code = Install-Fresh $Rc4Zip $Rc4Target
+    Check 'N4 gate-negative fresh rc4 install exit 0' ($code -eq 0)
+    Check 'N4 gate-negative rc4 healthy' (Wait-Health)
+    $negHome = Join-Path $Base 'patch negctl (1)'
+    New-Item -ItemType Directory -Force -Path $negHome | Out-Null
+    Expand-Archive -Path $Patch104 -DestinationPath $negHome -Force
+    $negBat = Get-ChildItem $negHome -Recurse -Filter 'apply-patch.bat' | Select-Object -First 1
+    Check 'N4 gate-negative apply-patch.bat found' ($null -ne $negBat)
+    if ($negBat) {
+      $code = Run-BatAuto $negBat.FullName @($Rc4Target) 'n4-gate-negative.log' $negBat.Directory.FullName
+      Check 'N4 wrong-version patch rejected (exit != 0)' ($code -ne 0)
+      $nlog = Get-Content (Join-Path $Evidence 'n4-gate-negative.log') -Raw
+      Check 'N4 rejection names the expected version' ($nlog -match 'upgrades version 1\.0\.4 only')
+      Check 'N4 target version.txt untouched (still rc4)' (((Get-Content (Join-Path $Rc4Target 'version.txt') -Raw) -match '1\.1\.0-rc4'))
+      Check 'N4 target still healthy after rejection' (Wait-Health)
+    }
+    Uninstall-Quiet $Rc4Target
+  }
+
+  # N4c 播种升级 + 全链路回滚（追加项 1、2、3 前半）：1.0.4
+  # 夹具预置管理员/普通用户/团队/事项，application.yml 原样
+  # 不动打补丁，验 Flyway V11 + 旧账号登录 + 原数据可读 +
+  # 升级前 .dump 可用；随后 rollback.bat 一键回滚，验旧版
+  # 恢复服务、version.txt 残留清除、Flyway 回 V7、数据完好。
+  if (-not $OldZip104 -or -not $Patch104) { Write-Host '::warning::SKIP N4 chain (1.0.4 fixture / patch not provided)' } else {
+    $chainTarget = Join-Path $Base 'fixture-chain\iteration-board-offline-1.0.4'
+    Uninstall-Quiet $chainTarget
+    $code = Install-Fresh $OldZip104 $chainTarget
+    Check 'N4 chain fixture install exit 0' ($code -eq 0)
+    Check 'N4 chain fixture healthy' (Wait-HealthLegacy)
+    $cfgHashBefore = (Get-FileHash (Join-Path $chainTarget 'config\application.yml') -Algorithm SHA256).Hash
+    $marker = 'N4SEED-' + (Get-Date -Format 'HHmmss')
+    $adminS = Api-Register 'n4admin' 'N4 Admin' 'N4Seed1234@'
+    Check 'N4 seed admin registered on 1.0.4 (first account)' ($null -ne $adminS)
+    $userS = Api-Register 'n4user' 'N4 User' 'N4Seed1234@'
+    Check 'N4 seed ordinary user registered on 1.0.4' ($null -ne $userS)
+    $teamId = $null
+    if ($adminS) {
+      $tr = Api-Call $adminS 'Post' '/teams' @{ name = 'N4 Seed Team'; code = 'N4SEED' }
+      if ($tr.Body -and $tr.Body.id) { $teamId = [long]$tr.Body.id }
+      if ($teamId) {
+        $ir = Api-Call $adminS 'Post' "/teams/$teamId/items" @{ type = 'TASK'; title = $marker }
+        Check 'N4 seed item created' ($ir.Status -lt 300)
+      }
+    }
+    Check 'N4 seed team created' ($null -ne $teamId)
+    $patchHome2 = Join-Path $Base 'patch chain (1)'
+    New-Item -ItemType Directory -Force -Path $patchHome2 | Out-Null
+    Expand-Archive -Path $Patch104 -DestinationPath $patchHome2 -Force
+    $chainBat = Get-ChildItem $patchHome2 -Recurse -Filter 'apply-patch.bat' | Select-Object -First 1
+    Check 'N4 chain apply-patch.bat found' ($null -ne $chainBat)
+    if ($chainBat) {
+      $code = Run-BatAuto $chainBat.FullName @() 'n4-chain-patch.log' $chainBat.Directory.FullName
+      Check 'N4 chain patch exit 0 (auto-detect, seeded target)' ($code -eq 0)
+    }
+    Check 'N4 chain healthy after upgrade' (Wait-Health)
+    Check 'N4 chain /meta version 1.1.0' ((Get-MetaVersion) -eq '1.1.0')
+    Check 'N4 chain application.yml untouched by the patch' (((Get-FileHash (Join-Path $chainTarget 'config\application.yml') -Algorithm SHA256).Hash) -eq $cfgHashBefore)
+    $fly = Invoke-PsqlScalar $chainTarget 'select version from flyway_schema_history where success order by installed_rank desc limit 1'
+    Check 'N4 chain Flyway migrated to V11' ($fly -eq '11')
+    $adminS2 = Api-Login 'n4admin' 'N4Seed1234@'
+    Check 'N4 pre-upgrade admin can still login after upgrade' ($null -ne $adminS2)
+    if ($adminS2 -and $teamId) {
+      $items = Api-Call $adminS2 'Get' "/teams/$teamId/items?scope=all" $null
+      Check 'N4 seeded item readable after upgrade' ($items.Raw -match [regex]::Escape($marker))
+    }
+    $userS2 = Api-Login 'n4user' 'N4Seed1234@'
+    Check 'N4 pre-upgrade ordinary user can still login' ($null -ne $userS2)
+    $bundle = Get-ChildItem (Join-Path $chainTarget 'backup') -Directory -Filter 'upgrade-*' -ErrorAction SilentlyContinue | Sort-Object Name -Descending | Select-Object -First 1
+    Check 'N4 rollback bundle recorded' ($null -ne $bundle)
+    if ($bundle) {
+      $info = Get-Content (Join-Path $bundle.FullName 'upgrade-info.txt') -Raw
+      if ($info -match 'DbBackup=(.+)') {
+        $dumpPath = Join-Path $Matches[1].Trim() 'db.dump'
+        $listOut = & (Join-Path $chainTarget 'runtime\pgsql\bin\pg_restore.exe') --list $dumpPath 2>&1
+        Check 'N4 pre-upgrade dump readable by pg_restore --list' ($LASTEXITCODE -eq 0 -and (($listOut | Out-String) -match 'TABLE'))
+      }
+    }
+    $code = Run-BatAuto (Join-Path $chainTarget 'rollback.bat') @('--yes', '--no-pause') 'n4-rollback.log' $chainTarget
+    Check 'N4 rollback.bat exit 0' ($code -eq 0)
+    Check 'N4 healthy after rollback (legacy version serving)' (Wait-HealthLegacy)
+    Check 'N4 version.txt removed by rollback (legacy layout restored)' (-not (Test-Path (Join-Path $chainTarget 'version.txt')))
+    $flyAfter = Invoke-PsqlScalar $chainTarget 'select version from flyway_schema_history where success order by installed_rank desc limit 1'
+    Check 'N4 Flyway back at V7 after rollback' ($flyAfter -eq '7')
+    $adminS3 = Api-Login 'n4admin' 'N4Seed1234@'
+    Check 'N4 admin can login after rollback' ($null -ne $adminS3)
+    if ($adminS3 -and $teamId) {
+      $items = Api-Call $adminS3 'Get' "/teams/$teamId/items?scope=all" $null
+      Check 'N4 seeded item intact after rollback (business data preserved)' ($items.Raw -match [regex]::Escape($marker))
+    }
+    Uninstall-Quiet $chainTarget
   }
 } catch {
   Write-Host "::error::NASTY FATAL: $($_.Exception.Message)"

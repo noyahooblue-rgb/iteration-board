@@ -93,7 +93,15 @@ rem --- restore program files ------------------------------------
 if not exist "%BUNDLE%\files" goto :files_done
 call :log [INFO] Restoring program files from the bundle ...
 robocopy "%BUNDLE%\files" "%ROOT%" /E /NFL /NDL /NJH /NJS /R:1 /W:1 >nul
-if not errorlevel 8 goto :files_done
+if errorlevel 8 goto :files_fail
+rem If the pre-upgrade install had no version.txt (1.0.4 /
+rem 1.0.1), the bundle holds none either, and robocopy does
+rem not delete files: remove the version.txt the patch
+rem wrote, or the rolled-back install keeps reporting the
+rem new version and the version gate refuses later patches.
+if not exist "%BUNDLE%\files\version.txt" del "%ROOT%\version.txt" >nul 2>&1
+goto :files_done
+:files_fail
 call :log [ERROR] Program file restore failed.
 call :ib_pause
 exit /b 1
