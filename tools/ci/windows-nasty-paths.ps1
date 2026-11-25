@@ -17,7 +17,7 @@
 #     路径只考 1.1.0 自己的脚本（补丁包目录、1.1.0 / rc4 安装目录，
 #     rc4 起同属 1.1.0 脚本世代）。
 #   - 1.0.1 夹具的 install.bat 有确定性解析缺陷（裁定情形 a），
-#     CI 侧复刻 1.0.3 的同一行修复来建立安装态（见
+#     CI 侧复刻后续版本对该安装器的同类修复来建立安装态（见
 #     Patch-Legacy101Installer），安装器本身不是被测对象。
 #   - N5 新增回滚完整性证明：rc4 / 1.0.4 两条路径构造「升级失败
 #     -> 回滚」，断言程序文件、version.txt、数据库全部回到升级前
@@ -198,35 +198,52 @@ function Install-Fresh([string]$Zip, [string]$TargetDir, [string]$Tag = '', [scr
   return $code
 }
 function Patch-Legacy101Installer([string]$TargetDir) {
-  # 1.0.1 install.bat 第 52-55 行的确定性解析缺陷（裁定 32yje3dj
-  # 情形 a；Kiro 终检读公开仓代码坐实）：if 括号块内的 echo 文案
-  # "Existing config detected (.installed marker). Keeping..."
-  # 中 marker 后的右括号提前关闭括号块，余下 ". Keeping..."
-  # 被当作顶层命令 -> ". was unexpected at this time."，与路径/
-  # 环境无关、每次必崩；1.0.2 仍保留此行，1.0.3（源仓 1c5e8c4）
-  # 已改掉（即 changelog 的「install.bat 闪退修复」）。本函数在
-  # CI 侧对解包出的夹具 install.bat 复刻 1.0.3 的同一处修改，
-  # 使夹具能建立 1.0.1 安装态；被测对象是「1.0.1 安装态 +
-  # 1.0.1->1.1.0 补丁」，安装器本身不是被测对象。改动前后的
-  # sha256 与差异行写入证据目录备案（fixture-1.0.1-installer-fix.txt）。
+  # 1.0.1 install.bat 的安装器缺陷（裁定 32yje3dj 情形 a：夹具
+  # 自带脚本崩，非 1.1.0 缺陷；安装器本身不是被测对象，被测
+  # 对象是「1.0.1 安装态 + 1.0.1->1.1.0 补丁」）。CI 实测依次
+  # 暴露三处同类缺陷，均为后续版本已修掉的老毛病，本函数在
+  # CI 侧逐项复刻后续版本的修法，使夹具能建立 1.0.1 安装态：
+  #   (1) 第 53 行：if 括号块内 echo 文案 "…(.installed
+  #       marker). Keeping…" 中 marker 后的右括号提前关闭
+  #       括号块，余下 ". Keeping…" 被当作顶层命令 ->
+  #       ". was unexpected at this time."，与路径/环境无关、
+  #       每次必崩（Kiro 终检读公开仓代码坐实；1.0.2 仍保留
+  #       此行，1.0.3 源仓 1c5e8c4 已改掉）。
+  #   (2) 第 126 行：else 括号块内 echo "Daily backup task
+  #       created (02:00, keeps 30 days)." 同类未转义括号，
+  #       块在 days) 处被截断 -> 同样闪退（1.0.3「块内 echo
+  #       未转义括号两处」的第二处；现行版该行已去括号）。
+  #   (3) 服务 XML 占位符替换用 Get-Content | Set-Content
+  #       同文件管道：读写同文件竞态，CI 实测两份 XML 均
+  #       IOException、__INSTALL_DIR__ 未被替换（现行版已改
+  #       [IO.File] 读改写并加 findstr 复核）。
+  # 三处锚点均为精确字符串，任一未命中即返回 $false 让矩阵
+  # FAIL 留痕；改动前后 sha256 与逐项差异写入证据目录
+  # （fixture-1.0.1-installer-fix.txt）备案。
   $bat = Join-Path $TargetDir 'install.bat'
   if (-not (Test-Path $bat)) { return $false }
   $before = (Get-FileHash $bat -Algorithm SHA256).Hash.ToLower()
   $text = [IO.File]::ReadAllText($bat)
-  $buggy = 'Existing config detected (.installed marker). Keeping current config and database.'
-  $fixed = 'Existing config detected - .installed marker present. Keeping current config and database.'
-  if (-not $text.Contains($buggy)) { return $false }
-  $text = $text.Replace($buggy, $fixed)
+  $subs = @(
+    @('Existing config detected (.installed marker). Keeping current config and database.',
+      'Existing config detected - .installed marker present. Keeping current config and database.'),
+    @('Daily backup task created (02:00, keeps 30 days).',
+      'Daily backup task created - every day at 02:00, keeps 30 days.'),
+    @("Get-Content '%ROOT%\app\IterationBoardApp.xml' | ForEach-Object { `$_.Replace('__INSTALL_DIR__', `$env:IB_ROOT) } | Set-Content -Encoding ASCII '%ROOT%\app\IterationBoardApp.xml'",
+      "`$p = '%ROOT%\app\IterationBoardApp.xml'; `$c = [IO.File]::ReadAllText(`$p); [IO.File]::WriteAllText(`$p, `$c.Replace('__INSTALL_DIR__', `$env:IB_ROOT), [Text.Encoding]::ASCII)"),
+    @("Get-Content '%ROOT%\app\IterationBoardPG.xml' | ForEach-Object { `$_.Replace('__INSTALL_DIR__', `$env:IB_ROOT) } | Set-Content -Encoding ASCII '%ROOT%\app\IterationBoardPG.xml'",
+      "`$p = '%ROOT%\app\IterationBoardPG.xml'; `$c = [IO.File]::ReadAllText(`$p); [IO.File]::WriteAllText(`$p, `$c.Replace('__INSTALL_DIR__', `$env:IB_ROOT), [Text.Encoding]::ASCII)")
+  )
+  $rec = @('CI-side fixture installer fixes (replicating the fixes later versions shipped for the 1.0.1 installer; the installer is not the tested object)', "target: $bat", "sha256 before: $before")
+  foreach ($s in $subs) {
+    if (-not $text.Contains($s[0])) { return $false }
+    $text = $text.Replace($s[0], $s[1])
+    $rec += "-  $($s[0])"
+    $rec += "+  $($s[1])"
+  }
   [IO.File]::WriteAllText($bat, $text, [Text.Encoding]::ASCII)
   $after = (Get-FileHash $bat -Algorithm SHA256).Hash.ToLower()
-  $rec = @(
-    'CI-side fixture installer fix (replicates the 1.0.3 fix for the 1.0.1 install.bat parse defect)'
-    "target: $bat"
-    "sha256 before: $before"
-    "sha256 after:  $after"
-    "-  echo [INFO] $buggy"
-    "+  echo [INFO] $fixed"
-  )
+  $rec += "sha256 after:  $after"
   $rec | Out-File -Encoding utf8 (Join-Path $Evidence 'fixture-1.0.1-installer-fix.txt')
   return $true
 }
@@ -455,7 +472,7 @@ try {
   # 裁定 32yje3dj：历史夹具一律在干净路径（C:\ibfix）建立，恶劣
   # 路径只留给 1.1.0 自己的脚本（补丁包目录仍在 $Base 下）。
   # 1.0.1 的 install.bat 有确定性解析缺陷（情形 a），解包后经
-  # $hook101 复刻 1.0.3 的同一行修复再安装（见函数注释）。
+  # $hook101 复刻后续版本的同类修复再安装（见函数注释）。
   foreach ($fx in @(@{ V = '1.0.4'; Zip = $OldZip104; Patch = $Patch104 }, @{ V = '1.0.1'; Zip = $OldZip101; Patch = $Patch101 })) {
     if (-not $fx.Zip -or -not $fx.Patch) { Write-Host "SKIP N3 $($fx.V) (zips not provided)"; continue }
     $tag = "N3 $($fx.V)"
@@ -650,10 +667,15 @@ try {
     [IO.File]::WriteAllBytes($jar, (New-Object byte[] 4096))
     $h = (Get-FileHash $jar -Algorithm SHA256).Hash.ToLower()
     $sumsPath = Join-Path $root 'SHA256SUMS.txt'
-    $lines = Get-Content $sumsPath | ForEach-Object {
+    # SHA256SUMS.txt 是 UTF-8（含中文文件名行）：必须显式按
+    # UTF-8 读写。首跑教训：默认代码页读 + ASCII 写把
+    # docs/用户手册.md、补丁说明.txt 等行写成问号，篡改包在
+    # 第 1 步校验即被自己的校验拦下（哈希不符），回滚包根本
+    # 没生成——失败注入必须只动 jar 一行、其余逐字节不动。
+    $lines = Get-Content $sumsPath -Encoding UTF8 | ForEach-Object {
       if ($_ -match 'iteration-board\.jar') { $_ -replace '^[0-9a-fA-F]{64}', $h } else { $_ }
     }
-    [IO.File]::WriteAllText($sumsPath, (($lines -join "`n") + "`n"), [Text.Encoding]::ASCII)
+    [IO.File]::WriteAllText($sumsPath, (($lines -join "`n") + "`n"), (New-Object Text.UTF8Encoding $false))
     return $bat
   }
   function Invoke-RollbackCase([string]$Tag, [string]$FixtureZip, [string]$PatchZipPath, [string]$Target, [bool]$Legacy, [string]$TeamCode) {
