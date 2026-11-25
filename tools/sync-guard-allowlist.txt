@@ -1,0 +1,12 @@
+# sync-guard 允许清单：以下字面值是已知的虚构测试值/占位符，放行 scan 的
+# 疑似口令检查。新增条目必须在提交说明里写明理由；真实口令永远不许进仓，
+# 也永远不许登记到这里。
+# —— test-migrate-settings.ps1 的虚构夹具口令（迁移设置回归测试专用）
+Test-Only-Pwd-0001
+# —— test-migrate-settings.ps1 的虚构夹具 api-key（含 $ 令牌，验逐字应用）
+sk-test$&key$$x
+# —— packaging/config/application.yml 模板里的占位提示词（api-key: your ...）
+your
+# —— 公开仓 CI 的 postgres 测试库口令（与用户名同为 postgres，GitHub
+#    Actions 一次性测试库，无任何真实环境复用）
+postgres

@@ -117,7 +117,7 @@ spring:
   datasource:
     url: jdbc:postgresql://127.0.0.1:15432/iteration_board
     username: postgres
-    password: <redacted>
+    password: Test-Only-Pwd-0001
   jpa:
     hibernate:
       ddl-auto: validate
@@ -141,7 +141,7 @@ server:
       timeout: 8h
 spring:
   datasource:
-    password: <redacted>
+    password: Test-Only-Pwd-0001
 ai:
   base-url: ""
   api-key: ""
@@ -187,7 +187,7 @@ try {
     Check 'case 1: api-key with $ tokens applied verbatim' ($lines -contains '  api-key: "sk-test$&key$$x"')
     Check 'case 1: base-url applied verbatim' ($lines -contains '  base-url: "https://api.example.com/v1"')
     Check 'case 1: mode applied verbatim' ($lines -contains '  mode: live')
-    Check 'case 1: target database password preserved' ($lines -contains '    password: <redacted>')
+    Check 'case 1: target database password preserved' ($lines -contains '    password: Test-Only-Pwd-0001')
 
     # --- case 2: target without a port line must be rejected ---
     $noPortPath = Join-Path $work 'target-noport.yml'

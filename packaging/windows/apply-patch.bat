@@ -336,7 +336,7 @@ exit /b 1
 for /f "usebackq delims=" %%T in (`powershell -NoProfile -Command "Get-Date -Format yyyyMMdd-HHmmss"`) do set "TS=%%T"
 set "DBBACKUP=%BKROOT%\%TS%"
 mkdir "%DBBACKUP%" >nul 2>&1
-set "PGPASSWORD=<redacted>"
+set "PGPASSWORD=%DBPWD%"
 "%TARGET%\runtime\pgsql\bin\pg_dump.exe" -h 127.0.0.1 -p 15432 -U postgres -Fc -f "%DBBACKUP%\db.dump" iteration_board
 set "IB_DUMP_RC=%ERRORLEVEL%"
 set "PGPASSWORD="
