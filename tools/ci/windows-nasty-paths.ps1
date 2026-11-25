@@ -165,7 +165,7 @@ function Invoke-PsqlScalar([string]$RootPath, [string]$Sql) {
     return ($out | Out-String).Trim()
   } finally { $env:PGPASSWORD = $null }
 }
-function Install-Fresh([string]$Zip, [string]$TargetDir) {
+function Install-Fresh([string]$Zip, [string]$TargetDir, [string]$Tag = '') {
   # 解包并把包内根目录改名/定位到 $TargetDir，再 install（--no-pause）。
   $parent = Split-Path $TargetDir -Parent
   New-Item -ItemType Directory -Force -Path $parent | Out-Null
@@ -179,14 +179,115 @@ function Install-Fresh([string]$Zip, [string]$TargetDir) {
   # 住（1.1.0 终验 N3-1.0.1 实测）；新版脚本在 IB_AUTO 下不提问，
   # 多余输入被丢弃，无副作用。
   $answers = (@('Y') * 10) -join "`r`n"
-  $code = Run-BatAuto (Join-Path $TargetDir 'install.bat') @('--no-pause') 'tmp-install.log' $TargetDir $answers
+  $logName = 'tmp-install.log'
+  if ($Tag) { $logName = "install-$Tag.log" }
+  $code = Run-BatAuto (Join-Path $TargetDir 'install.bat') @('--no-pause') $logName $TargetDir $answers
+  if ($Tag) { Dump-Forensics "install-$Tag" $TargetDir }
   return $code
 }
+function Dump-Forensics([string]$Tag, [string]$TargetDir) {
+  # Gemini 补证清单（1.1.0 终验修复轮）：在关键节点与失败现场
+  # 留存服务登记原值、进程命令行、端口占用、口令脱敏指纹、
+  # PG_VERSION 时间戳与检测器单跑输出。本函数只读、绝不抛错，
+  # 证据缺失时如实记 <absent>。
+  $safe = ($Tag -replace '[^\w.-]+', '_')
+  $f = Join-Path $Evidence "forensics-$safe.txt"
+  $lines = @()
+  try {
+    $lines += "== forensics $Tag at $(Get-Date -Format o) target=$TargetDir"
+    foreach ($svc in @('IterationBoardApp', 'IterationBoardPG')) {
+      $reg = $null
+      try { $reg = (Get-ItemProperty "HKLM:\SYSTEM\CurrentControlSet\Services\$svc" -ErrorAction Stop).ImagePath } catch { }
+      if ($reg) { $lines += "$svc registry ImagePath: $reg" } else { $lines += "$svc registry ImagePath: <absent>" }
+      $w = Get-CimInstance Win32_Service -Filter "Name='$svc'" -ErrorAction SilentlyContinue
+      if ($w) { $lines += "$svc Win32_Service: State=$($w.State) StartMode=$($w.StartMode) PathName=$($w.PathName)" } else { $lines += "$svc Win32_Service: <absent>" }
+      $qx = (& sc.exe queryex $svc 2>&1 | Out-String).Trim()
+      $lines += "$svc sc queryex: $qx"
+    }
+    $procs = Get-CimInstance Win32_Process -Filter "Name='postgres.exe' or Name='java.exe'" -ErrorAction SilentlyContinue
+    if ($procs) {
+      foreach ($pr in $procs) { $lines += "proc $($pr.Name) pid=$($pr.ProcessId): $($pr.CommandLine)" }
+    } else { $lines += 'proc: none' }
+    $ns = & netstat.exe -ano 2>$null | Select-String ':15432'
+    if ($ns) { foreach ($n in $ns) { $lines += "netstat: $($n.Line.Trim())" } } else { $lines += 'netstat :15432: <none>' }
+    if ($TargetDir) {
+      $yml = Join-Path $TargetDir 'config\application.yml'
+      if (Test-Path $yml) {
+        $m = Select-String -Path $yml -Pattern '^\s*password:\s*(\S+)' | Select-Object -First 1
+        if ($m) {
+          $pw = $m.Matches[0].Groups[1].Value
+          $lines += "yml password: len=$($pw.Length) prefix=$($pw.Substring(0, [Math]::Min(4, $pw.Length)))"
+        } else { $lines += 'yml password: <no match>' }
+      } else { $lines += 'yml: <absent>' }
+      $pgv = Join-Path $TargetDir 'data\pgdata\PG_VERSION'
+      if (Test-Path $pgv) {
+        $lines += "PG_VERSION: mtime=$((Get-Item $pgv).LastWriteTime.ToString('o')) content=$((Get-Content $pgv -Raw).Trim())"
+      } else { $lines += 'PG_VERSION: <absent>' }
+      # 检测器单跑探针：与 apply-patch :detect_target 同逻辑
+      # （Win32_Service + 注册表两路、归一化、向上两级、去重）。
+      $vals = @()
+      $sv = Get-CimInstance Win32_Service -Filter "Name='IterationBoardApp'" -ErrorAction SilentlyContinue
+      if ($sv -and $sv.PathName) { $vals += $sv.PathName }
+      try {
+        $r2 = (Get-ItemProperty 'HKLM:\SYSTEM\CurrentControlSet\Services\IterationBoardApp' -ErrorAction Stop).ImagePath
+        if ($r2) { $vals += [Environment]::ExpandEnvironmentVariables($r2) }
+      } catch { }
+      $roots = @()
+      foreach ($v in $vals) {
+        $pp = $v.Trim().Trim([char]34)
+        if ($pp -match '^(.+?\.exe)') { $pp = $Matches[1] }
+        try { $pp = [IO.Path]::GetFullPath($pp) } catch { }
+        $dir = Split-Path (Split-Path $pp -Parent) -Parent
+        if ($dir -and ($roots -notcontains $dir)) { $roots += $dir }
+      }
+      $lines += "detector probe: count=$($roots.Count) roots=[$($roots -join ' | ')]"
+    }
+  } catch {
+    $lines += "forensics error: $($_.Exception.Message)"
+  }
+  $lines | Out-File -Encoding utf8 $f
+  Write-Host "forensics written: forensics-$safe.txt"
+}
 function Uninstall-Quiet([string]$TargetDir) {
+  # 卸载纪律（Gemini 终检/咨询两轮采纳项）：严禁 SilentlyContinue
+  # 吞掉删除失败——残留的服务登记或 pgdata 正是卡点 A/B 的温床。
+  # 顺序：先停两服务 -> 等进程退出 -> 跑夹具自己的 uninstall.bat
+  # （其服务操作此时可能无的放矢，容忍其退出码）-> 注销两服务
+  # 并确认注销完成 -> 删目录（带重试），删不掉即 FAIL 并留现场。
+  foreach ($svc in @('IterationBoardApp', 'IterationBoardPG')) {
+    & sc.exe stop $svc 2>$null | Out-Null
+  }
+  for ($i = 0; $i -lt 30; $i++) {
+    $busy = Get-CimInstance Win32_Process -Filter "Name='postgres.exe' or Name='java.exe'" -ErrorAction SilentlyContinue |
+      Where-Object { $_.CommandLine -and $_.CommandLine.Contains($TargetDir) }
+    $pgBusy = Get-CimInstance Win32_Process -Filter "Name='postgres.exe'" -ErrorAction SilentlyContinue
+    if (-not $busy -and -not $pgBusy) { break }
+    Start-Sleep -Seconds 2
+  }
   $u = Join-Path $TargetDir 'uninstall.bat'
   if (Test-Path $u) { Run-BatAuto $u @('--yes', '--no-pause') 'tmp-uninstall.log' $TargetDir | Out-Null }
-  Start-Sleep -Seconds 3
-  Remove-Item $TargetDir -Recurse -Force -ErrorAction SilentlyContinue
+  foreach ($svc in @('IterationBoardApp', 'IterationBoardPG')) {
+    & sc.exe delete $svc 2>$null | Out-Null
+  }
+  for ($i = 0; $i -lt 15; $i++) {
+    $left = $false
+    foreach ($svc in @('IterationBoardApp', 'IterationBoardPG')) {
+      & sc.exe query $svc 2>$null | Out-Null
+      if ($LASTEXITCODE -eq 0) { $left = $true }
+    }
+    if (-not $left) { break }
+    Start-Sleep -Seconds 2
+  }
+  for ($i = 0; $i -lt 5; $i++) {
+    if (-not (Test-Path $TargetDir)) { break }
+    Remove-Item $TargetDir -Recurse -Force -ErrorAction SilentlyContinue
+    if (-not (Test-Path $TargetDir)) { break }
+    Start-Sleep -Seconds 3
+  }
+  if (Test-Path $TargetDir) {
+    Check "uninstall removed $TargetDir completely" $false
+    Dump-Forensics "uninstall-leftover-$([IO.Path]::GetFileName($TargetDir))" $TargetDir
+  }
 }
 
 try {
@@ -211,7 +312,7 @@ try {
     foreach ($mode in $modes) {
       $tag = "N1 $($ph.Tag)/$mode"
       Uninstall-Quiet $Rc4Target
-      $code = Install-Fresh $Rc4Zip $Rc4Target
+      $code = Install-Fresh $Rc4Zip $Rc4Target "n1-$($ph.Tag)-$mode"
       Check "$tag fresh install exit 0" ($code -eq 0)
       Check "$tag fresh install healthy" (Wait-Health)
       New-Item -ItemType Directory -Force -Path $ph.Dir | Out-Null
@@ -237,6 +338,7 @@ try {
           Check "$tag manual branch resolved the dragged path" ($elog -match [regex]::Escape("Target install folder: $Rc4Target"))
           Check "$tag manual branch reached the copy step" ($elog -match 'Copying patched files into')
           Check "$tag manual branch free of cmd parse errors" ($elog -notmatch 'syntax of the command' -and $elog -notmatch 'was unexpected at this time')
+          Dump-Forensics "n1-$($ph.Tag)-$mode-postpatch" $Rc4Target
           $slog = Latest-ScriptLog $patchBat.Directory.FullName 'apply-patch'
           Check "$tag apply-patch script log written (no flash exit)" ($null -ne $slog -and $slog.LastWriteTime -ge $before -and $slog.Length -gt 200)
         } else {
@@ -249,6 +351,7 @@ try {
           Check "$tag target upgraded to 1.1.0" (((Get-Content (Join-Path $Rc4Target 'version.txt') -Raw) -match '1.1.0' -and (Get-Content (Join-Path $Rc4Target 'version.txt') -Raw) -notmatch 'rc'))
           Check "$tag app healthy after patch" (Wait-Health)
           Check "$tag /meta version 1.1.0" ((Get-MetaVersion) -eq '1.1.0')
+          Dump-Forensics "n1-$($ph.Tag)-$mode-postpatch" $Rc4Target
         }
       }
       Uninstall-Quiet $Rc4Target
@@ -258,7 +361,7 @@ try {
 
   # ---------- N2: 恶劣安装目录（英文+空格+括号）里的运维脚本 ----------
   $NastyTarget = Join-Path $Base 'install (1)\iteration-board-offline-1.1.0'
-  $code = Install-Fresh $FullZip $NastyTarget
+  $code = Install-Fresh $FullZip $NastyTarget 'n2' 
   Check 'N2 install into space+paren path exit 0' ($code -eq 0)
   Check 'N2 healthy' (Wait-Health)
   $code = Run-BatAuto (Join-Path $NastyTarget 'backup.bat') @('auto') 'n2-backup.log' $NastyTarget
@@ -297,7 +400,8 @@ try {
     $tag = "N3 $($fx.V)"
     $target = Join-Path $Base "fixture-$($fx.V)\iteration-board-offline-$($fx.V)"
     Uninstall-Quiet $target
-    $code = Install-Fresh $fx.Zip $target
+    Dump-Forensics "$tag post-uninstall" $target
+    $code = Install-Fresh $fx.Zip $target "n3-$($fx.V)"
     Check "$tag fixture install exit 0" ($code -eq 0)
     Check "$tag fixture healthy" (Wait-HealthLegacy)
     $patchHome = Join-Path $Base "patch fixture (1)"
@@ -312,6 +416,7 @@ try {
       Check "$tag upgraded to 1.1.0" (((Get-Content (Join-Path $target 'version.txt') -Raw) -match '1.1.0' -and (Get-Content (Join-Path $target 'version.txt') -Raw) -notmatch 'rc'))
       Check "$tag healthy after upgrade" (Wait-Health)
       Check "$tag /meta version 1.1.0" ((Get-MetaVersion) -eq '1.1.0')
+      Dump-Forensics "$tag postpatch" $target
     }
     Uninstall-Quiet $target
   }
@@ -347,7 +452,7 @@ try {
   # 干净拒绝（明确报期望版本）、目标分毫不动、服务照常健康。
   if (-not $Patch104 -or -not $Rc4Zip) { Write-Host '::warning::SKIP N4 gate negative (patch 1.0.4 / rc4 fixture not provided)' } else {
     Uninstall-Quiet $Rc4Target
-    $code = Install-Fresh $Rc4Zip $Rc4Target
+    $code = Install-Fresh $Rc4Zip $Rc4Target 'n4-gate'
     Check 'N4 gate-negative fresh rc4 install exit 0' ($code -eq 0)
     Check 'N4 gate-negative rc4 healthy' (Wait-Health)
     $negHome = Join-Path $Base 'patch negctl (1)'
@@ -362,6 +467,7 @@ try {
       Check 'N4 rejection names the expected version' ($nlog -match 'upgrades version 1\.0\.4 only')
       Check 'N4 target version.txt untouched (still rc4)' (((Get-Content (Join-Path $Rc4Target 'version.txt') -Raw) -match '1\.1\.0-rc4'))
       Check 'N4 target still healthy after rejection' (Wait-Health)
+      Dump-Forensics 'n4-gate-postpatch' $Rc4Target
     }
     Uninstall-Quiet $Rc4Target
   }
@@ -374,7 +480,7 @@ try {
   if (-not $OldZip104 -or -not $Patch104) { Write-Host '::warning::SKIP N4 chain (1.0.4 fixture / patch not provided)' } else {
     $chainTarget = Join-Path $Base 'fixture-chain\iteration-board-offline-1.0.4'
     Uninstall-Quiet $chainTarget
-    $code = Install-Fresh $OldZip104 $chainTarget
+    $code = Install-Fresh $OldZip104 $chainTarget 'n4-chain'
     Check 'N4 chain fixture install exit 0' ($code -eq 0)
     Check 'N4 chain fixture healthy' (Wait-HealthLegacy)
     $cfgHashBefore = (Get-FileHash (Join-Path $chainTarget 'config\application.yml') -Algorithm SHA256).Hash
@@ -437,6 +543,7 @@ try {
       $items = Api-Call $adminS3 'Get' "/teams/$teamId/items?scope=all" $null
       Check 'N4 seeded item intact after rollback (business data preserved)' ($items.Raw -match [regex]::Escape($marker))
     }
+    Dump-Forensics 'n4-chain-final' $chainTarget
     Uninstall-Quiet $chainTarget
   }
 } catch {
