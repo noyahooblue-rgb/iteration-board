@@ -400,10 +400,18 @@ powershell -NoProfile -Command "[IO.File]::WriteAllText('%BUNDLE%\upgrade-info.t
 call :log [INFO] Pre-patch database backup: %DBBACKUP%
 call :log [INFO] Rollback bundle recorded: %BUNDLE%
 
-rem Make sure the rollback tool itself exists in the target
-rem before anything is replaced (a pre-1.1.0 target has none).
+rem Make sure the rollback toolset exists in the target before
+rem anything is replaced: a pre-1.1.0 target has no rollback.bat
+rem at all, and its restore.bat cannot resolve the absolute
+rem database-backup path the bundle records. rollback.bat
+rem restores the database BEFORE the program files precisely
+rem so it can drive these current scripts (ledger #14). The
+rem bundle above already holds the target's pre-patch copies,
+rem so a rollback still returns them afterwards.
 if exist "%PATCHROOT%\rollback.bat" copy /Y "%PATCHROOT%\rollback.bat" "%TARGET%\rollback.bat" >nul
 if exist "%PATCHROOT%\reset-admin.bat" copy /Y "%PATCHROOT%\reset-admin.bat" "%TARGET%\reset-admin.bat" >nul
+if exist "%PATCHROOT%\restore.bat" copy /Y "%PATCHROOT%\restore.bat" "%TARGET%\restore.bat" >nul
+if exist "%PATCHROOT%\backup.bat" copy /Y "%PATCHROOT%\backup.bat" "%TARGET%\backup.bat" >nul
 
 rem --- step 3: stop the app, copy files in, verify copies ----------
 call :log [INFO] Stopping the application service ...

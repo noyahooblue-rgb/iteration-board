@@ -12,6 +12,16 @@
 #     （确认类提问自动肯定），断言以退出码 + 日志文件为准，这正是新脚本
 #     契约给 CI 的接口；人工双击路径由 IB_WRAPPED 外壳保证窗口留存，
 #     无法在 CI 里模拟点击，靠日志完整性断言等价覆盖。
+# 修复轮 5 口径（裁定 32yje3dj）：
+#   - 历史夹具（1.0.4 / 1.0.1）一律在干净路径 C:\ibfix 建立；恶劣
+#     路径只考 1.1.0 自己的脚本（补丁包目录、1.1.0 / rc4 安装目录，
+#     rc4 起同属 1.1.0 脚本世代）。
+#   - 1.0.1 夹具的 install.bat 有确定性解析缺陷（裁定情形 a），
+#     CI 侧复刻 1.0.3 的同一行修复来建立安装态（见
+#     Patch-Legacy101Installer），安装器本身不是被测对象。
+#   - N5 新增回滚完整性证明：rc4 / 1.0.4 两条路径构造「升级失败
+#     -> 回滚」，断言程序文件、version.txt、数据库全部回到升级前
+#     状态；N4 链在回滚后追加一次重打补丁，验证前滚路径完好。
 # 用法（档 3 windows-verify 之后或手动）：
 #   pwsh -File tools/ci/windows-nasty-paths.ps1 -FullZip C:\ibdl\iteration-board-offline-1.1.0.zip `
 #     [-Rc4Zip C:\ibdl\iteration-board-offline-1.1.0-rc4.zip -PatchZip C:\ibdl\iteration-board-patch-1.1.0-rc4-to-1.1.0.zip] `
@@ -30,6 +40,7 @@ param(
 $ErrorActionPreference = 'Continue'
 $script:Failures = @()
 $Base = 'C:\ibnasty'
+$FixBase = 'C:\ibfix'
 New-Item -ItemType Directory -Force -Path $Evidence | Out-Null
 
 function Check([string]$Name, [bool]$Ok) {
@@ -165,7 +176,7 @@ function Invoke-PsqlScalar([string]$RootPath, [string]$Sql) {
     return ($out | Out-String).Trim()
   } finally { $env:PGPASSWORD = $null }
 }
-function Install-Fresh([string]$Zip, [string]$TargetDir, [string]$Tag = '') {
+function Install-Fresh([string]$Zip, [string]$TargetDir, [string]$Tag = '', [scriptblock]$AfterExpand = $null) {
   # 解包并把包内根目录改名/定位到 $TargetDir，再 install（--no-pause）。
   $parent = Split-Path $TargetDir -Parent
   New-Item -ItemType Directory -Force -Path $parent | Out-Null
@@ -174,6 +185,7 @@ function Install-Fresh([string]$Zip, [string]$TargetDir, [string]$Tag = '') {
     $found = Get-ChildItem $parent -Directory | Where-Object { Test-Path (Join-Path $_.FullName 'install.bat') } | Select-Object -First 1
     if ($found -and $found.FullName -ne $TargetDir) { Rename-Item $found.FullName (Split-Path $TargetDir -Leaf) }
   }
+  if ($AfterExpand) { & $AfterExpand $TargetDir }
   # stdin 喂入 10 行 Y：1.0.1 的 install.bat 有 choice /C YN 提问，
   # stdin 为空时 choice 直接报「The file is either empty...」并卡
   # 住（1.1.0 终验 N3-1.0.1 实测）；新版脚本在 IB_AUTO 下不提问，
@@ -184,6 +196,39 @@ function Install-Fresh([string]$Zip, [string]$TargetDir, [string]$Tag = '') {
   $code = Run-BatAuto (Join-Path $TargetDir 'install.bat') @('--no-pause') $logName $TargetDir $answers
   if ($Tag) { Dump-Forensics "install-$Tag" $TargetDir }
   return $code
+}
+function Patch-Legacy101Installer([string]$TargetDir) {
+  # 1.0.1 install.bat 第 52-55 行的确定性解析缺陷（裁定 32yje3dj
+  # 情形 a；Kiro 终检读公开仓代码坐实）：if 括号块内的 echo 文案
+  # "Existing config detected (.installed marker). Keeping..."
+  # 中 marker 后的右括号提前关闭括号块，余下 ". Keeping..."
+  # 被当作顶层命令 -> ". was unexpected at this time."，与路径/
+  # 环境无关、每次必崩；1.0.2 仍保留此行，1.0.3（源仓 1c5e8c4）
+  # 已改掉（即 changelog 的「install.bat 闪退修复」）。本函数在
+  # CI 侧对解包出的夹具 install.bat 复刻 1.0.3 的同一处修改，
+  # 使夹具能建立 1.0.1 安装态；被测对象是「1.0.1 安装态 +
+  # 1.0.1->1.1.0 补丁」，安装器本身不是被测对象。改动前后的
+  # sha256 与差异行写入证据目录备案（fixture-1.0.1-installer-fix.txt）。
+  $bat = Join-Path $TargetDir 'install.bat'
+  if (-not (Test-Path $bat)) { return $false }
+  $before = (Get-FileHash $bat -Algorithm SHA256).Hash.ToLower()
+  $text = [IO.File]::ReadAllText($bat)
+  $buggy = 'Existing config detected (.installed marker). Keeping current config and database.'
+  $fixed = 'Existing config detected - .installed marker present. Keeping current config and database.'
+  if (-not $text.Contains($buggy)) { return $false }
+  $text = $text.Replace($buggy, $fixed)
+  [IO.File]::WriteAllText($bat, $text, [Text.Encoding]::ASCII)
+  $after = (Get-FileHash $bat -Algorithm SHA256).Hash.ToLower()
+  $rec = @(
+    'CI-side fixture installer fix (replicates the 1.0.3 fix for the 1.0.1 install.bat parse defect)'
+    "target: $bat"
+    "sha256 before: $before"
+    "sha256 after:  $after"
+    "-  echo [INFO] $buggy"
+    "+  echo [INFO] $fixed"
+  )
+  $rec | Out-File -Encoding utf8 (Join-Path $Evidence 'fixture-1.0.1-installer-fix.txt')
+  return $true
 }
 function Dump-Forensics([string]$Tag, [string]$TargetDir) {
   # Gemini 补证清单（1.1.0 终验修复轮）：在关键节点与失败现场
@@ -332,12 +377,24 @@ try {
           Start-Sleep -Seconds 5
           & sc.exe delete IterationBoardApp | Out-Null
           Start-Sleep -Seconds 2
+          # 「补丁打印的迁移日志是安装期旧日志」的哈希证据
+          # （Kiro 终检补强项）：应用服务已注销，补丁全程不
+          # 可能再写 logs\app.log；补丁前后哈希不变，则其
+          # :failed 段打印的迁移日志只能是夹具安装期的旧
+          # app.log，而非补丁连错库产生的新迁移活动。
+          $appLogPath = Join-Path $Rc4Target 'logs\app.log'
+          $appLogHashBefore = $null
+          if (Test-Path $appLogPath) { $appLogHashBefore = (Get-FileHash $appLogPath -Algorithm SHA256).Hash }
           $dragPath = '"' + $Rc4Target + '\"'
           $code = Run-BatAuto $patchBat.FullName @() "n1-$($ph.Tag)-$mode.log" $patchBat.Directory.FullName $dragPath
           $elog = Get-Content (Join-Path $Evidence "n1-$($ph.Tag)-$mode.log") -Raw
           Check "$tag manual branch resolved the dragged path" ($elog -match [regex]::Escape("Target install folder: $Rc4Target"))
           Check "$tag manual branch reached the copy step" ($elog -match 'Copying patched files into')
           Check "$tag manual branch free of cmd parse errors" ($elog -notmatch 'syntax of the command' -and $elog -notmatch 'was unexpected at this time')
+          Check "$tag manual branch exit code is 1" ($code -eq 1)
+          $errLines = @($elog -split "`r?`n" | Where-Object { $_ -match '\[ERROR\]' })
+          Check "$tag manual branch first [ERROR] is the service restart step" ($errLines.Count -ge 1 -and $errLines[0] -match 'Application failed to start after the patch')
+          Check "$tag printed migration log is the install-time log (app.log untouched by the patch run)" ($null -ne $appLogHashBefore -and (Get-FileHash $appLogPath -Algorithm SHA256).Hash -eq $appLogHashBefore)
           Dump-Forensics "n1-$($ph.Tag)-$mode-postpatch" $Rc4Target
           $slog = Latest-ScriptLog $patchBat.Directory.FullName 'apply-patch'
           Check "$tag apply-patch script log written (no flash exit)" ($null -ne $slog -and $slog.LastWriteTime -ge $before -and $slog.Length -gt 200)
@@ -395,13 +452,20 @@ try {
   Uninstall-Quiet $NastyTarget
 
   # ---------- N3: 夹具老版本补丁升级（1.0.4 / 1.0.1，双击方式） ----------
+  # 裁定 32yje3dj：历史夹具一律在干净路径（C:\ibfix）建立，恶劣
+  # 路径只留给 1.1.0 自己的脚本（补丁包目录仍在 $Base 下）。
+  # 1.0.1 的 install.bat 有确定性解析缺陷（情形 a），解包后经
+  # $hook101 复刻 1.0.3 的同一行修复再安装（见函数注释）。
   foreach ($fx in @(@{ V = '1.0.4'; Zip = $OldZip104; Patch = $Patch104 }, @{ V = '1.0.1'; Zip = $OldZip101; Patch = $Patch101 })) {
     if (-not $fx.Zip -or -not $fx.Patch) { Write-Host "SKIP N3 $($fx.V) (zips not provided)"; continue }
     $tag = "N3 $($fx.V)"
-    $target = Join-Path $Base "fixture-$($fx.V)\iteration-board-offline-$($fx.V)"
+    $target = Join-Path $FixBase "fixture-$($fx.V)\iteration-board-offline-$($fx.V)"
     Uninstall-Quiet $target
     Dump-Forensics "$tag post-uninstall" $target
-    $code = Install-Fresh $fx.Zip $target "n3-$($fx.V)"
+    $hook101 = $null
+    if ($fx.V -eq '1.0.1') { $hook101 = { param($d) Patch-Legacy101Installer $d | Out-Null } }
+    $code = Install-Fresh $fx.Zip $target "n3-$($fx.V)" $hook101
+    if ($fx.V -eq '1.0.1') { Check "$tag CI-side installer line fix applied (1.0.3 replica, evidence recorded)" (Test-Path (Join-Path $Evidence 'fixture-1.0.1-installer-fix.txt')) }
     Check "$tag fixture install exit 0" ($code -eq 0)
     Check "$tag fixture healthy" (Wait-HealthLegacy)
     $patchHome = Join-Path $Base "patch fixture (1)"
@@ -473,12 +537,15 @@ try {
   }
 
   # N4c 播种升级 + 全链路回滚（追加项 1、2、3 前半）：1.0.4
-  # 夹具预置管理员/普通用户/团队/事项，application.yml 原样
-  # 不动打补丁，验 Flyway V11 + 旧账号登录 + 原数据可读 +
-  # 升级前 .dump 可用；随后 rollback.bat 一键回滚，验旧版
-  # 恢复服务、version.txt 残留清除、Flyway 回 V7、数据完好。
+  # 夹具（干净路径 C:\ibfix，裁定 32yje3dj）预置管理员/普通
+  # 用户/团队/事项，application.yml 原样不动打补丁，验
+  # Flyway V11 + 旧账号登录 + 原数据可读 + 升级前 .dump
+  # 可用；随后 rollback.bat 一键回滚，验旧版恢复服务、
+  # version.txt 残留清除、Flyway 回 V7、数据完好；修复轮 5
+  # 追加：回滚后再打一次补丁，验前滚路径完好（回滚若残留
+  # V8 的 feedback 系列表，重打补丁时 V8 建表会冲突）。
   if (-not $OldZip104 -or -not $Patch104) { Write-Host '::warning::SKIP N4 chain (1.0.4 fixture / patch not provided)' } else {
-    $chainTarget = Join-Path $Base 'fixture-chain\iteration-board-offline-1.0.4'
+    $chainTarget = Join-Path $FixBase 'fixture-chain\iteration-board-offline-1.0.4'
     Uninstall-Quiet $chainTarget
     $code = Install-Fresh $OldZip104 $chainTarget 'n4-chain'
     Check 'N4 chain fixture install exit 0' ($code -eq 0)
@@ -543,8 +610,113 @@ try {
       $items = Api-Call $adminS3 'Get' "/teams/$teamId/items?scope=all" $null
       Check 'N4 seeded item intact after rollback (business data preserved)' ($items.Raw -match [regex]::Escape($marker))
     }
+    # 回滚后再打一次补丁（修复轮 5，Kiro 终检采纳项）：验证
+    # 前滚路径完好。回滚恢复的是 V7 时代备份而升级后数据库
+    # 已有 V8 建出的 feedback 系列表——旧 restore 的
+    # pg_restore --clean 删不掉被引用的 app_user 必然失败；
+    # 本链跑通即正面证明 1.1.0 的 restore（整 schema 重置 +
+    # 单事务加载，台账 #14）已覆盖该失败点。重打补丁再验
+    # 一遍：若回滚残留了新版表，V8 建表会在此冲突。
+    $code = Run-BatAuto $chainBat.FullName @() 'n4-chain-repatch.log' $chainBat.Directory.FullName
+    Check 'N4 re-patch after rollback exit 0' ($code -eq 0)
+    Check 'N4 healthy after re-patch' (Wait-Health)
+    Check 'N4 /meta version 1.1.0 after re-patch' ((Get-MetaVersion) -eq '1.1.0')
+    $flyRe = Invoke-PsqlScalar $chainTarget 'select version from flyway_schema_history where success order by installed_rank desc limit 1'
+    Check 'N4 Flyway back at V11 after re-patch' ($flyRe -eq '11')
+    $adminS4 = Api-Login 'n4admin' 'N4Seed1234@'
+    Check 'N4 admin can login after re-patch' ($null -ne $adminS4)
+    if ($adminS4 -and $teamId) {
+      $items = Api-Call $adminS4 'Get' "/teams/$teamId/items?scope=all" $null
+      Check 'N4 seeded item intact after re-patch' ($items.Raw -match [regex]::Escape($marker))
+    }
     Dump-Forensics 'n4-chain-final' $chainTarget
     Uninstall-Quiet $chainTarget
+  }
+
+  # ---------- N5: 回滚完整性证明（裁定 32yje3dj 任务 2） ----------
+  # 对 rc4->1.1.0 与 1.0.4->1.1.0 两条路径构造「升级失败 ->
+  # 执行回滚」：把补丁包里的 jar 换成垃圾字节并同步改写其
+  # SHA256SUMS 行（包内校验能过、文件拷贝能成、应用起不来），
+  # 补丁在第 4 步健康检查失败退出，升级包（bundle）已记录；
+  # 随后 rollback.bat 必须把程序文件、version.txt、数据库
+  # 全部带回升级前状态，种子数据完好、无半回滚残留。
+  function New-FailingPatch([string]$PatchZipPath, [string]$StageDir) {
+    New-Item -ItemType Directory -Force -Path $StageDir | Out-Null
+    Expand-Archive -Path $PatchZipPath -DestinationPath $StageDir -Force
+    $bat = Get-ChildItem $StageDir -Recurse -Filter 'apply-patch.bat' | Select-Object -First 1
+    if (-not $bat) { return $null }
+    $root = $bat.Directory.FullName
+    $jar = Join-Path $root 'app\iteration-board.jar'
+    [IO.File]::WriteAllBytes($jar, (New-Object byte[] 4096))
+    $h = (Get-FileHash $jar -Algorithm SHA256).Hash.ToLower()
+    $sumsPath = Join-Path $root 'SHA256SUMS.txt'
+    $lines = Get-Content $sumsPath | ForEach-Object {
+      if ($_ -match 'iteration-board\.jar') { $_ -replace '^[0-9a-fA-F]{64}', $h } else { $_ }
+    }
+    [IO.File]::WriteAllText($sumsPath, (($lines -join "`n") + "`n"), [Text.Encoding]::ASCII)
+    return $bat
+  }
+  function Invoke-RollbackCase([string]$Tag, [string]$FixtureZip, [string]$PatchZipPath, [string]$Target, [bool]$Legacy, [string]$TeamCode) {
+    Uninstall-Quiet $Target
+    $code = Install-Fresh $FixtureZip $Target "n5-$Tag"
+    Check "N5 $Tag fixture install exit 0" ($code -eq 0)
+    if ($Legacy) { Check "N5 $Tag fixture healthy (legacy)" (Wait-HealthLegacy) } else { Check "N5 $Tag fixture healthy" (Wait-Health) }
+    $marker = "N5SEED-$Tag-" + (Get-Date -Format 'HHmmss')
+    $seedS = Api-Register "n5admin$Tag" 'N5 Admin' 'N5Seed1234@'
+    Check "N5 $Tag seed admin registered" ($null -ne $seedS)
+    $teamId = $null
+    if ($seedS) {
+      $tr = Api-Call $seedS 'Post' '/teams' @{ name = "N5 Seed Team $Tag"; code = $TeamCode }
+      if ($tr.Body -and $tr.Body.id) { $teamId = [long]$tr.Body.id }
+      if ($teamId) {
+        $ir = Api-Call $seedS 'Post' "/teams/$teamId/items" @{ type = 'TASK'; title = $marker }
+        Check "N5 $Tag seed item created" ($ir.Status -lt 300)
+      }
+    }
+    Check "N5 $Tag seed team created" ($null -ne $teamId)
+    $jarHash0 = (Get-FileHash (Join-Path $Target 'app\iteration-board.jar') -Algorithm SHA256).Hash
+    $restoreHash0 = (Get-FileHash (Join-Path $Target 'restore.bat') -Algorithm SHA256).Hash
+    $cfgHash0 = (Get-FileHash (Join-Path $Target 'config\application.yml') -Algorithm SHA256).Hash
+    $ver0 = $null
+    if (Test-Path (Join-Path $Target 'version.txt')) { $ver0 = (Get-Content (Join-Path $Target 'version.txt') -Raw).Trim() }
+    $fly0 = Invoke-PsqlScalar $Target 'select version from flyway_schema_history where success order by installed_rank desc limit 1'
+    $failBat = New-FailingPatch $PatchZipPath (Join-Path $Base "patch rollback fail (1)\$Tag")
+    Check "N5 $Tag failing patch staged (jar tampered, sums restamped)" ($null -ne $failBat)
+    if ($failBat) {
+      $code = Run-BatAuto $failBat.FullName @($Target) "n5-$Tag-failing-patch.log" $failBat.Directory.FullName
+      Check "N5 $Tag tampered patch fails (exit != 0)" ($code -ne 0)
+      $bundle = Get-ChildItem (Join-Path $Target 'backup') -Directory -Filter 'upgrade-*' -ErrorAction SilentlyContinue | Sort-Object Name -Descending | Select-Object -First 1
+      Check "N5 $Tag rollback bundle recorded by the failed patch" ($null -ne $bundle)
+      $code = Run-BatAuto (Join-Path $Target 'rollback.bat') @('--yes', '--no-pause') "n5-$Tag-rollback.log" $Target
+      Check "N5 $Tag rollback.bat exit 0 after failed upgrade" ($code -eq 0)
+      $rlog = Get-Content (Join-Path $Evidence "n5-$Tag-rollback.log") -Raw
+      Check "N5 $Tag rollback log clean (no dump-not-found / parse errors)" ($rlog -notmatch 'db\.dump" not found' -and $rlog -notmatch 'was unexpected at this time')
+      Check "N5 $Tag jar restored to pre-upgrade bytes" (((Get-FileHash (Join-Path $Target 'app\iteration-board.jar') -Algorithm SHA256).Hash) -eq $jarHash0)
+      Check "N5 $Tag restore.bat restored to pre-upgrade bytes" (((Get-FileHash (Join-Path $Target 'restore.bat') -Algorithm SHA256).Hash) -eq $restoreHash0)
+      Check "N5 $Tag config untouched" (((Get-FileHash (Join-Path $Target 'config\application.yml') -Algorithm SHA256).Hash) -eq $cfgHash0)
+      if ($Legacy) {
+        Check "N5 $Tag version.txt absent again (legacy layout)" (-not (Test-Path (Join-Path $Target 'version.txt')))
+      } else {
+        Check "N5 $Tag version.txt back to pre-upgrade value" ((Test-Path (Join-Path $Target 'version.txt')) -and ((Get-Content (Join-Path $Target 'version.txt') -Raw).Trim() -eq $ver0))
+      }
+      $fly1 = Invoke-PsqlScalar $Target 'select version from flyway_schema_history where success order by installed_rank desc limit 1'
+      Check "N5 $Tag Flyway version unchanged by failed upgrade + rollback (was $fly0)" ($fly1 -eq $fly0)
+      if ($Legacy) { Check "N5 $Tag healthy after rollback (legacy)" (Wait-HealthLegacy) } else { Check "N5 $Tag healthy after rollback" (Wait-Health) }
+      $s2 = Api-Login "n5admin$Tag" 'N5Seed1234@'
+      Check "N5 $Tag seed admin can login after rollback" ($null -ne $s2)
+      if ($s2 -and $teamId) {
+        $items = Api-Call $s2 'Get' "/teams/$teamId/items?scope=all" $null
+        Check "N5 $Tag seeded item intact after rollback" ($items.Raw -match [regex]::Escape($marker))
+      }
+    }
+    Dump-Forensics "n5-$Tag-final" $Target
+    Uninstall-Quiet $Target
+  }
+  if (-not $Rc4Zip -or -not $PatchZip) { Write-Host '::warning::SKIP N5 rc4 (rc4 fixture / patch not provided)' } else {
+    Invoke-RollbackCase 'rc4' $Rc4Zip $PatchZip (Join-Path $Base 'rb-rc4\iteration-board-offline-1.1.0-rc4') $false 'NFRC'
+  }
+  if (-not $OldZip104 -or -not $Patch104) { Write-Host '::warning::SKIP N5 104 (1.0.4 fixture / patch not provided)' } else {
+    Invoke-RollbackCase '104' $OldZip104 $Patch104 (Join-Path $FixBase 'rb-104\iteration-board-offline-1.0.4') $true 'NFOD'
   }
 } catch {
   Write-Host "::error::NASTY FATAL: $($_.Exception.Message)"

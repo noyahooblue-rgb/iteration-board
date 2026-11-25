@@ -10,10 +10,15 @@ rem    <backup-dir>\upgrade-<yyyyMMdd-HHmmss>\
 rem      upgrade-info.txt   DbBackup / target / versions
 rem      files\             copies of the replaced program files
 rem  This script restores BOTH sides from the newest bundle
-rem  (or the named one): program files from files\, and the
-rem  database by calling restore.bat with the recorded
-rem  pre-upgrade database backup. restore.bat takes its own
-rem  safety backup first, so a rollback can itself be undone.
+rem  (or the named one): the database FIRST, by calling
+rem  restore.bat with the recorded pre-upgrade database
+rem  backup, then the program files from files\. The order
+rem  is load-bearing (root-cause ledger #14): restore.bat
+rem  must run while the CURRENT scripts are still in place -
+rem  restoring files first would replace it with the bundle's
+rem  old copy, which cannot resolve the recorded backup path.
+rem  restore.bat takes its own safety backup first, so a
+rem  rollback can itself be undone.
 rem ============================================================
 set "ROOT=%~dp0"
 if "%ROOT:~-1%"=="\" set "ROOT=%ROOT:~0,-1%"
@@ -89,7 +94,48 @@ if errorlevel 2 exit /b 0
 rem --- stop the application (keep PostgreSQL up for restore) ---
 net stop IterationBoardApp >nul 2>&1
 
+rem --- restore the database FIRST, via restore.bat ---------------
+rem (Ledger #14: see the header. IB_NO_APP_START keeps
+rem restore.bat from booting the still-NEW program files
+rem against the just-restored OLD database - its Flyway would
+rem migrate the old database straight back up before the
+rem program files are restored.)
+if "%DBBACKUP%"=="" goto :db_skipped
+call :log [INFO] Restoring the database from %DBBACKUP% ...
+net start IterationBoardPG >nul 2>&1
+sc query IterationBoardPG | findstr /C:"RUNNING" >nul 2>&1
+if errorlevel 1 goto :db_nopg
+set "IB_NO_APP_START=1"
+call "%ROOT%\restore.bat" "%DBBACKUP%" --yes --no-pause
+set "IBRC=%ERRORLEVEL%"
+set "IB_NO_APP_START="
+if not "%IBRC%"=="0" goto :db_fail
+goto :db_done
+:db_skipped
+echo [WARN] The bundle records no database backup - the database
+echo [WARN] is left as it is; only program files are rolled back.
+goto :db_done
+:db_nopg
+echo [ERROR] PostgreSQL could not be started, database restore is impossible.
+echo [ERROR] Nothing was changed - program files were not restored yet.
+call :ib_pause
+exit /b 1
+:db_fail
+echo [ERROR] Database restore failed - see the messages above.
+echo [ERROR] Program files were NOT restored, and restore.bat loads
+echo [ERROR] atomically after taking a safety backup, so the
+echo [ERROR] installation is not half-rolled-back. The application
+echo [ERROR] service is stopped; fix the problem and run
+echo [ERROR] rollback.bat again.
+call :ib_pause
+exit /b 1
+:db_done
+
 rem --- restore program files ------------------------------------
+rem restore.bat was told not to start the application; stop it
+rem once more defensively in case an older restore.bat in the
+rem target ignored the request and started it.
+net stop IterationBoardApp >nul 2>&1
 if not exist "%BUNDLE%\files" goto :files_done
 call :log [INFO] Restoring program files from the bundle ...
 robocopy "%BUNDLE%\files" "%ROOT%" /E /NFL /NDL /NJH /NJS /R:1 /W:1 >nul
@@ -102,37 +148,15 @@ rem new version and the version gate refuses later patches.
 if not exist "%BUNDLE%\files\version.txt" del "%ROOT%\version.txt" >nul 2>&1
 goto :files_done
 :files_fail
-call :log [ERROR] Program file restore failed.
+call :log [ERROR] Program file restore failed. The database was
+call :log [ERROR] already restored; fix the problem and run
+call :log [ERROR] rollback.bat again to finish the file restore.
 call :ib_pause
 exit /b 1
 :files_done
 
-rem --- restore the database via restore.bat ----------------------
-rem restore.bat starts PostgreSQL if needed through its own
-rem flow, takes a safety backup of the current state, restores
-rem the recorded backup and starts the application again.
-if "%DBBACKUP%"=="" (
-  echo [WARN] The bundle records no database backup - program files
-  echo [WARN] were restored, the database was left as it is.
-  net start IterationBoardApp >nul 2>&1
-  call :ib_pause
-  exit /b 0
-)
-call :log [INFO] Restoring the database from %DBBACKUP% ...
-net start IterationBoardPG >nul 2>&1
-sc query IterationBoardPG | findstr /C:"RUNNING" >nul 2>&1
-if errorlevel 1 (
-  echo [ERROR] PostgreSQL could not be started, database restore is impossible.
-  call :ib_pause
-  exit /b 1
-)
-call "%ROOT%\restore.bat" "%DBBACKUP%" --yes --no-pause
-if errorlevel 1 (
-  echo [ERROR] Database restore failed - see the messages above.
-  echo [ERROR] Program files were already rolled back.
-  call :ib_pause
-  exit /b 1
-)
+rem --- start the rolled-back application -------------------------
+net start IterationBoardApp >nul 2>&1
 call :log [INFO] Rollback complete: program files and database are back
 call :log [INFO] to the state recorded in %SEL%.
 call :ib_pause

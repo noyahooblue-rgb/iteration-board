@@ -7,12 +7,22 @@ rem  Usage: restore.bat [backup-folder-name] [--yes] [--no-pause]
 rem  Without a name argument, lists backup\<...>\ folders and asks.
 rem  WARNING: restore REPLACES the current database content.
 rem  A safety backup of the current state is taken first.
+rem  The public schema is reset before the dump is loaded and
+rem  the load runs in a single transaction, so restoring an
+rem  OLDER backup over a NEWER database (a rollback) cannot
+rem  half-apply (root-cause ledger #14).
+rem  IB_NO_APP_START=1 (set by rollback.bat): restore the
+rem  database only and leave the application service stopped;
+rem  the caller restores program files next and starts the
+rem  application itself.
 rem ============================================================
 set "ROOT=%~dp0"
 if "%ROOT:~-1%"=="\" set "ROOT=%ROOT:~0,-1%"
 set "SEL="
 set "YES=0"
 set "NOPAUSE=0"
+set "NOAPPSTART=0"
+if "%IB_NO_APP_START%"=="1" set "NOAPPSTART=1"
 :parse_args
 if "%~1"=="" goto :args_done
 if /i "%~1"=="--yes" set "YES=1"
@@ -117,15 +127,41 @@ if "%DBPWD%"=="" (
   exit /b 1
 )
 set "PGPASSWORD=%DBPWD%"
-"%ROOT%\runtime\pgsql\bin\pg_restore.exe" -h 127.0.0.1 -p 15432 -U postgres -d iteration_board --clean --if-exists "%SRC%\db.dump"
+rem Reset the public schema before loading the dump. A plain
+rem pg_restore --clean cannot cross versions: it only drops
+rem the objects the dump itself contains, so tables created by
+rem a NEWER version (the 1.1.0 feedback tables reference
+rem app_user, for example) survive the drop phase and make
+rem dropping the older copies fail - the restore then aborts
+rem with part of the dump already loaded. Dropping the whole
+rem schema first removes every version's objects at once;
+rem the dump then loads into an empty schema inside a single
+rem transaction, so the load is all-or-nothing. The safety
+rem backup above covers the empty-schema outcome. Migrations
+rem use only the public schema and no extensions, so the
+rem reset loses nothing the dump does not recreate.
+call :log [INFO] Resetting the database schema before the restore ...
+"%ROOT%\runtime\pgsql\bin\psql.exe" -h 127.0.0.1 -p 15432 -U postgres -d iteration_board -v ON_ERROR_STOP=1 -c "DROP SCHEMA public CASCADE; CREATE SCHEMA public;"
+set "IBRC=%ERRORLEVEL%"
+if not "%IBRC%"=="0" goto :schema_fail
+"%ROOT%\runtime\pgsql\bin\pg_restore.exe" -h 127.0.0.1 -p 15432 -U postgres -d iteration_board --single-transaction --exit-on-error "%SRC%\db.dump"
 set "IBRC=%ERRORLEVEL%"
 set "PGPASSWORD="
-if not "%IBRC%"=="0" (
-  echo [ERROR] pg_restore failed with code %IBRC%. The database may be inconsistent;
-  echo         restore the safety backup that was just created, or check logs.
-  call :ib_pause
-  exit /b 1
-)
+if not "%IBRC%"=="0" goto :restore_fail
+goto :restore_ok
+:schema_fail
+set "PGPASSWORD="
+echo [ERROR] Could not reset the database schema (psql code %IBRC%).
+echo [ERROR] Restore aborted before any data was loaded.
+call :ib_pause
+exit /b 1
+:restore_fail
+echo [ERROR] pg_restore failed with code %IBRC%. The load runs in a
+echo [ERROR] single transaction, so no partial data was loaded; restore
+echo [ERROR] the safety backup that was just created, or check logs.
+call :ib_pause
+exit /b 1
+:restore_ok
 if not exist "%SRC%\uploads" goto :uploads_done
 if not exist "%ROOT%\data\uploads" mkdir "%ROOT%\data\uploads"
 robocopy "%SRC%\uploads" "%ROOT%\data\uploads" /E /NFL /NDL /NJH /NJS >nul
@@ -134,6 +170,7 @@ call :log [ERROR] uploads restore failed.
 call :ib_pause
 exit /b 1
 :uploads_done
+if "%NOAPPSTART%"=="1" goto :app_start_skipped
 call :log [INFO] Starting application service ...
 net start IterationBoardApp >nul 2>&1
 sc query IterationBoardApp | findstr /C:"RUNNING" >nul 2>&1
@@ -142,6 +179,10 @@ if errorlevel 1 (
   call :ib_pause
   exit /b 1
 )
+goto :app_start_done
+:app_start_skipped
+call :log [INFO] Application service left stopped - IB_NO_APP_START was set by the caller.
+:app_start_done
 call :log [INFO] Restore complete: %SEL%
 call :ib_pause
 exit /b 0
