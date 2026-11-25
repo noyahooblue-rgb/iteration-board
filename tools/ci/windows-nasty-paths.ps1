@@ -176,7 +176,7 @@ function Invoke-PsqlScalar([string]$RootPath, [string]$Sql) {
     return ($out | Out-String).Trim()
   } finally { $env:PGPASSWORD = $null }
 }
-function Install-Fresh([string]$Zip, [string]$TargetDir, [string]$Tag = '', [scriptblock]$AfterExpand = $null) {
+function Install-Fresh([string]$Zip, [string]$TargetDir, [string]$Tag = '', [scriptblock]$AfterExpand = $null, [string[]]$InstallArgs = @('--no-pause')) {
   # 解包并把包内根目录改名/定位到 $TargetDir，再 install（--no-pause）。
   $parent = Split-Path $TargetDir -Parent
   New-Item -ItemType Directory -Force -Path $parent | Out-Null
@@ -193,7 +193,7 @@ function Install-Fresh([string]$Zip, [string]$TargetDir, [string]$Tag = '', [scr
   $answers = (@('Y') * 10) -join "`r`n"
   $logName = 'tmp-install.log'
   if ($Tag) { $logName = "install-$Tag.log" }
-  $code = Run-BatAuto (Join-Path $TargetDir 'install.bat') @('--no-pause') $logName $TargetDir $answers
+  $code = Run-BatAuto (Join-Path $TargetDir 'install.bat') $InstallArgs $logName $TargetDir $answers
   if ($Tag) { Dump-Forensics "install-$Tag" $TargetDir }
   return $code
 }
@@ -481,7 +481,14 @@ try {
     Dump-Forensics "$tag post-uninstall" $target
     $hook101 = $null
     if ($fx.V -eq '1.0.1') { $hook101 = { param($d) Patch-Legacy101Installer $d | Out-Null } }
-    $code = Install-Fresh $fx.Zip $target "n3-$($fx.V)" $hook101
+    # 1.0.1 的 install.bat 接口是 install.bat [port]：%~1 无条件
+    # 当端口用（默认 8080），不认 --no-pause——传 --no-pause 会
+    # 把字符串写进 config 的 server.port，应用永远起不来（终验
+    # 五跑实测）。按它自己的接口传 18080（与健康检查同口径）；
+    # 它的提问/暂停靠 Install-Fresh 喂的 stdin 应答处理。
+    $instArgs = @('--no-pause')
+    if ($fx.V -eq '1.0.1') { $instArgs = @('18080') }
+    $code = Install-Fresh $fx.Zip $target "n3-$($fx.V)" $hook101 $instArgs
     if ($fx.V -eq '1.0.1') { Check "$tag CI-side installer line fix applied (1.0.3 replica, evidence recorded)" (Test-Path (Join-Path $Evidence 'fixture-1.0.1-installer-fix.txt')) }
     Check "$tag fixture install exit 0" ($code -eq 0)
     if ($fx.V -eq '1.0.1') {
