@@ -493,7 +493,11 @@ try {
       # 世代装机唯一能让数据库运行的方式。被测对象仍是
       # 「1.0.1 安装态 + 1.0.1→1.1.0 补丁」，起库方式留痕于此。
       $pgCtl = Join-Path $target 'runtime\pgsql\bin\pg_ctl.exe'
-      & $pgCtl -D (Join-Path $target 'data\pgdata') -l (Join-Path $target 'logs\pg-fixture.log') -o '-p 15432' -w -t 60 start | Out-Null
+      # 注意：不能把 pg_ctl 的输出接管道（如 | Out-Null）——
+      # 它拉起的 postmaster 会继承管道写端，PowerShell 等管道
+      # EOF 就会无限挂住（终验四跑实测卡死于此）。直调即可，
+      # 输出进步骤日志。
+      & $pgCtl -D (Join-Path $target 'data\pgdata') -l (Join-Path $target 'logs\pg-fixture.log') -o '-p 15432' -w -t 60 start
       Check "$tag fixture PostgreSQL started via pg_ctl (the only way a 1.0.1-era install can run it)" ($LASTEXITCODE -eq 0)
     }
     Check "$tag fixture healthy" (Wait-HealthLegacy)
@@ -514,7 +518,7 @@ try {
     if ($fx.V -eq '1.0.1') {
       # pg_ctl 直起的 postmaster 不是服务，卸载前先停掉，
       # 否则它占着 data 目录卸载删不干净。
-      & (Join-Path $target 'runtime\pgsql\bin\pg_ctl.exe') -D (Join-Path $target 'data\pgdata') -m fast -w -t 60 stop | Out-Null
+      & (Join-Path $target 'runtime\pgsql\bin\pg_ctl.exe') -D (Join-Path $target 'data\pgdata') -m fast -w -t 60 stop
     }
     Uninstall-Quiet $target
   }
