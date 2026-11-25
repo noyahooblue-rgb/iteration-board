@@ -5,6 +5,9 @@
 # 1.1.1 工程项进行，本清单先冻结存量、守住增量。台账第 13 条后立规：此清单只许变短不许变长——
 # compare 检出清单外新差异即同步失败；清单内文件变一致时应删行。
 # 烧除计划：随 1.1.1「提交前扫描拦截」工程项逐项清零。
+# 修复轮 4（2026-11-25）：V1–V6 迁移 SQL 已逐字节对齐源仓、7 个脚本文件已在源仓侧
+# 完成注释归一化（去除内部单号），共 13 条自本清单移除并转入零差异强制集
+# （tools/sync-mandatory-identical.txt），今后这些文件两仓必须逐字节一致。
 backend/src/main/java/com/iterationboard/ai/AiFeatureService.java
 backend/src/main/java/com/iterationboard/ai/AiGateway.java
 backend/src/main/java/com/iterationboard/ai/AiProperties.java
@@ -61,12 +64,6 @@ backend/src/main/java/com/iterationboard/retention/RetentionPurgeService.java
 backend/src/main/java/com/iterationboard/team/TeamService.java
 backend/src/main/java/com/iterationboard/team/TeamSettings.java
 backend/src/main/resources/application.yml
-backend/src/main/resources/db/migration/V1__init.sql
-backend/src/main/resources/db/migration/V2__team_code_unique_checklist.sql
-backend/src/main/resources/db/migration/V3__m2_task_story_model.sql
-backend/src/main/resources/db/migration/V4__m3_collaboration.sql
-backend/src/main/resources/db/migration/V5__revision2_reports_idempotency.sql
-backend/src/main/resources/db/migration/V6__m4_ai_imports_integrations_audit.sql
 backend/src/test/java/com/iterationboard/M2IntegrationTest.java
 backend/src/test/java/com/iterationboard/M4AiProductionPathTest.java
 backend/src/test/java/com/iterationboard/Revision2IntegrationTest.java
@@ -87,11 +84,4 @@ frontend/src/views/ReportsView.vue
 mock-backend/src/index.ts
 mock-backend/src/seed.ts
 mock-backend/test/smoke.mjs
-packaging/build-package.sh
-packaging/windows/IterationBoardApp.xml
-packaging/windows/backup.bat
-packaging/windows/install.bat
 tools/ai-eval/ai_eval.py
-tools/check-bat.py
-tools/ci/extract-vc-dlls.sh
-tools/ci/windows-verify.ps1

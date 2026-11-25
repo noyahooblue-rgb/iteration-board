@@ -22,6 +22,22 @@ packaging/windows/apply-patch.bat 第 339 行的变量引用 %DBPWD% 改成了
       tools/sync-legacy-differences.txt 登记的历史脱敏差异集内；
       出现清单外的新差异 → 退出码 1（同步失败、不推送）。
       清单内文件若已变一致，会提示条目过期（不失败）。
+      零差异强制集（tools/sync-mandatory-identical.txt 的 glob 模式，
+      覆盖迁移 SQL、补丁/安装脚本等「可执行或需要被执行的文件」）：
+      命中文件必须在两仓都存在且逐字节一致，且不得同时出现在
+      历史差异清单里——任一不满足 → 退出码 1。强制集源于修复轮 4
+      裁定：已发布迁移文件连注释都必须冻结（Flyway 校验和覆盖全文，
+      注释差异曾使公开仓构建的应用对存量库拒绝启动）。
+  write-hashes <tree>
+      按强制集把 <tree> 内各文件的 sha256 写入该树
+      tools/sync-mandatory-hashes.txt（同步时以源仓为准生成，
+      文件本身随同步逐字节复制到公开仓）。
+  verify-hashes <tree>
+      校验 <tree> 内强制集文件与 tools/sync-mandatory-hashes.txt
+      登记的哈希逐一相符（缺失/多出/哈希不符 → 退出码 1）。
+      公开仓 CI 无法直访源仓，故在 bat-check 档跑此命令：登记表是
+      同步时由源仓生成、经 compare 把关后随仓发布的，CI 据此证明
+      公开仓强制集文件未偏离同步时的源仓状态。
   selftest
       内置用例：干净树通过；故意放入假口令 / REDACTED-MARKER 标记必须被
       scan 拦截并指出文件行号；compare 必须能检出清单外差异。
@@ -31,6 +47,7 @@ packaging/windows/apply-patch.bat 第 339 行的变量引用 %DBPWD% 改成了
 结构性跳过（不算字面量口令）：值以 % $ { \\ 开头、含 $( 的表达式、
 空值、true/false/null、__XXX__ 占位符、CHANGE_ME 类占位符。
 """
+import fnmatch
 import hashlib
 import pathlib
 import re
@@ -117,6 +134,103 @@ def sha256(p):
     return hashlib.sha256(p.read_bytes()).hexdigest()
 
 
+def load_mandatory_patterns(tree):
+    f = pathlib.Path(tree) / 'tools' / 'sync-mandatory-identical.txt'
+    pats = []
+    if f.exists():
+        for line in f.read_text(encoding='utf-8').splitlines():
+            line = line.strip()
+            if line and not line.startswith('#'):
+                pats.append(line)
+    return pats
+
+
+def mandatory_files(tree, patterns=None):
+    """返回 tree 内命中零差异强制集 glob 模式的相对路径集合。"""
+    tree = pathlib.Path(tree)
+    if patterns is None:
+        patterns = load_mandatory_patterns(tree)
+    out = set()
+    if not patterns:
+        return out
+    for p in sorted(tree.rglob('*')):
+        if not p.is_file():
+            continue
+        rel = p.relative_to(tree)
+        if EXCLUDE_DIRS & set(rel.parts):
+            continue
+        posix = rel.as_posix()
+        if any(fnmatch.fnmatch(posix, pat) for pat in patterns):
+            out.add(posix)
+    return out
+
+
+def mandatory_problems(src, dst):
+    """强制集校验：两仓命中文件必须都存在、逐字节一致、且不在历史差异清单。"""
+    patterns = load_mandatory_patterns(src) or load_mandatory_patterns(dst)
+    if not patterns:
+        return []
+    legacy = load_legacy(src)
+    src_m = mandatory_files(src, patterns)
+    dst_m = mandatory_files(dst, patterns)
+    problems = []
+    for rel in sorted(src_m | dst_m):
+        if rel in legacy:
+            problems.append(
+                f'{rel}: 在零差异强制集内却同时登记于历史差异清单'
+                f'（强制集文件必须逐字节一致，须先对齐并删清单条目）')
+        sp = pathlib.Path(src) / rel
+        dp = pathlib.Path(dst) / rel
+        if rel not in src_m:
+            problems.append(f'{rel}: 强制集文件仅公开仓有（源仓缺失）')
+        elif rel not in dst_m:
+            problems.append(f'{rel}: 强制集文件仅源仓有（公开仓缺失）')
+        elif sha256(sp) != sha256(dp):
+            problems.append(
+                f'{rel}: 零差异强制集文件两仓不一致'
+                f'（可执行/被执行文件必须逐字节一致，历史差异清单不豁免）')
+    return problems
+
+
+def hashes_path(tree):
+    return pathlib.Path(tree) / 'tools' / 'sync-mandatory-hashes.txt'
+
+
+def write_hashes(tree):
+    tree = pathlib.Path(tree)
+    lines = []
+    for rel in sorted(mandatory_files(tree)):
+        lines.append(f'{sha256(tree / rel)}  {rel}')
+    hashes_path(tree).write_text('\n'.join(lines) + '\n', encoding='utf-8')
+    return len(lines)
+
+
+def verify_hashes(tree):
+    tree = pathlib.Path(tree)
+    f = hashes_path(tree)
+    if not f.exists():
+        return ['tools/sync-mandatory-hashes.txt 缺失（须由同步时 write-hashes 生成）']
+    recorded = {}
+    for line in f.read_text(encoding='utf-8').splitlines():
+        line = line.strip()
+        if not line or line.startswith('#'):
+            continue
+        parts = line.split(None, 1)
+        if len(parts) == 2:
+            recorded[parts[1].strip()] = parts[0].strip()
+    actual = mandatory_files(tree)
+    problems = []
+    for rel in sorted(set(recorded) | set(actual)):
+        if rel not in recorded:
+            problems.append(f'{rel}: 强制集文件未登记于哈希表（须重新 write-hashes）')
+        elif rel not in actual:
+            problems.append(f'{rel}: 哈希表登记的文件在树内缺失')
+        elif recorded[rel] != sha256(tree / rel):
+            problems.append(
+                f'{rel}: 与哈希表登记不一致（公开仓强制集文件已偏离同步时的源仓状态）')
+    return problems
+
+
 def load_legacy(tree):
     f = pathlib.Path(tree) / 'tools' / 'sync-legacy-differences.txt'
     vals = set()
@@ -144,6 +258,7 @@ def compare(src, dst):
             stale.append(rel)
     only_src = sorted(set(src_files) - set(dst_files))
     only_dst = sorted(set(dst_files) - set(src_files))
+    problems.extend(mandatory_problems(src, dst))
     return problems, stale, only_src, only_dst
 
 
@@ -189,6 +304,34 @@ def selftest():
         (other / 'a.bat').write_text('rem changed\r\n', encoding='utf-8')
         probs, _, _, _ = compare(root, other)
         check('清单外差异被 compare 检出', any('a.bat' in x for x in probs))
+
+        # 零差异强制集：即使登记进历史差异清单，强制集文件不一致仍必须失败；
+        # write-hashes / verify-hashes 往返一致，被篡改必须检出。
+        # 用独立的同级双树（嵌套树会让 *.bat 之类模式跨树命中，失真）。
+        with tempfile.TemporaryDirectory() as td2:
+            mroot = pathlib.Path(td2) / 'src'
+            mother = pathlib.Path(td2) / 'dst'
+            for base in (mroot, mother):
+                (base / 'tools').mkdir(parents=True)
+                (base / 'tools' / 'sync-mandatory-identical.txt').write_text(
+                    '*.bat\n', encoding='utf-8')
+                (base / 'a.bat').write_text(
+                    'set "PGPASSWORD=%DBPWD%"\r\n', encoding='utf-8')
+            (mroot / 'tools' / 'sync-legacy-differences.txt').write_text(
+                'a.bat\n', encoding='utf-8')
+            (mother / 'a.bat').write_text('rem changed\r\n', encoding='utf-8')
+            probs, _, _, _ = compare(mroot, mother)
+            check('强制集文件不一致被检出（历史清单不豁免）',
+                  any('强制集' in x and 'a.bat' in x for x in probs))
+            (mother / 'a.bat').write_bytes((mroot / 'a.bat').read_bytes())
+            (mroot / 'tools' / 'sync-legacy-differences.txt').write_text(
+                '# empty\n', encoding='utf-8')
+            probs, _, _, _ = compare(mroot, mother)
+            check('强制集对齐后 compare 通过', probs == [])
+            write_hashes(mroot)
+            check('哈希表往返校验通过', verify_hashes(mroot) == [])
+            (mroot / 'a.bat').write_text('rem tampered\r\n', encoding='utf-8')
+            check('哈希表检出强制集文件被篡改', verify_hashes(mroot) != [])
     print('SELFTEST', 'ALL PASS' if ok else 'FAILED')
     return 0 if ok else 1
 
@@ -221,6 +364,19 @@ def main(argv):
             print(f'sync-guard compare: {len(probs)} 处清单外差异，同步失败')
             return 1
         print('sync-guard compare: 通过（差异均在历史清单内）')
+        return 0
+    if cmd == 'write-hashes' and len(argv) == 3:
+        n = write_hashes(argv[2])
+        print(f'sync-guard write-hashes: 已登记 {n} 个强制集文件哈希')
+        return 0
+    if cmd == 'verify-hashes' and len(argv) == 3:
+        probs = verify_hashes(argv[2])
+        for x in probs:
+            print('::error::' + x)
+        if probs:
+            print(f'sync-guard verify-hashes: {len(probs)} 处不一致，构建失败')
+            return 1
+        print('sync-guard verify-hashes: 通过（强制集文件与登记哈希全相符）')
         return 0
     if cmd == 'selftest':
         return selftest()

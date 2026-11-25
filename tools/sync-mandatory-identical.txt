@@ -1,0 +1,16 @@
+# 零差异强制集（修复轮 4，2026-11-25；Claude 裁定 yskamd8z + 723dqcfg 根治方向）
+# 「可执行或需要被执行的文件」：命中以下 glob 模式的文件，源仓与公开仓必须
+# 逐字节一致，且不得登记于历史差异清单（sync-legacy-differences.txt）。
+# 理由：已发布迁移的校验和覆盖全文（Flyway），注释差异即可使公开仓构建的
+# 应用对存量库拒绝启动；安装/补丁脚本是交付后实际在用户机器上执行的代码，
+# 两仓不一致等于被测产物 != 出厂产物（台账第 11/13 条同类）。
+# 配置文件（如 application.yml）存在环境口径的真实差异，不在此列，
+# 仍走历史差异清单冻结管理。
+backend/src/main/resources/db/migration/*.sql
+packaging/windows/*.bat
+packaging/windows/*.xml
+packaging/*.sh
+tools/ci/*.ps1
+tools/ci/*.sh
+tools/check-bat.py
+tools/sync-guard.py
