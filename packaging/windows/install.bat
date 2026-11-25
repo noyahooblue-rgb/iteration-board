@@ -140,6 +140,29 @@ call :log [INFO] VC++ runtime DLLs are bundled in the package - app-local, nothi
 rem --- 4. Generate random DB password, write config ----------
 set "CFG=%ROOT%\config\application.yml"
 set "DBPWD="
+rem Split-state guard: an initialized data directory (PG_VERSION
+rem present) whose install marker (.installed) is missing means
+rem the config was lost or replaced while the database survived.
+rem This script would generate a NEW random password below while
+rem step 5 skips initdb for the existing data directory - a
+rem guaranteed password mismatch that strands the install (the
+rem app and every backup then fail authentication). Refuse and
+rem say exactly how to recover instead of writing the mismatch.
+if not exist "%ROOT%\data\pgdata\PG_VERSION" goto :cfg_split_ok
+if exist "%ROOT%\config\.installed" goto :cfg_split_ok
+echo [ERROR] The data directory data\pgdata is already initialized,
+echo [ERROR] but the install marker config\.installed is missing.
+echo [ERROR] Installing here would write a new random database
+echo [ERROR] password while keeping the old database, and the two
+echo [ERROR] would never match. Nothing was changed. Either:
+echo [ERROR]   - restore the original config folder of this install
+echo [ERROR]     (it contains .installed and application.yml), or
+echo [ERROR]   - if the old data is NOT needed, delete the
+echo [ERROR]     data\pgdata folder and run install.bat again to
+echo [ERROR]     initialize a fresh, empty database.
+call :ib_pause
+exit /b 1
+:cfg_split_ok
 if exist "%ROOT%\config\.installed" (
   echo [INFO] Existing config detected - .installed marker present. Keeping current config and database.
   goto :config_done
@@ -249,8 +272,44 @@ if not errorlevel 1 (
 )
 sc query IterationBoardPG >nul 2>&1
 if errorlevel 1 goto :pg_register
+rem The service name is machine-wide unique: an existing
+rem registration may belong to ANOTHER install folder (a
+rem previous install whose folder was deleted without
+rem uninstalling). Reusing it blindly would start that other
+rem data directory under this install's name, and this install's
+rem own database would never answer - every later backup and
+rem patch then fails with a misleading password error. Verify
+rem the registered -D against this folder first; on mismatch
+rem (or when it cannot be determined) remove the stale
+rem registration and register this folder's data directory.
+set "IB_PGDIR="
+set "IB_PGCHK=2"
+set "IB_ROOTPG=%ROOT%"
+for /f "usebackq delims=" %%V in (`powershell -NoProfile -Command "$raw = $null; try { $raw = (Get-ItemProperty 'HKLM:\SYSTEM\CurrentControlSet\Services\IterationBoardPG' -ErrorAction Stop).ImagePath } catch {}; if (-not $raw) { Write-Output 'VERDICT:2'; exit 0 }; $exp = [Environment]::ExpandEnvironmentVariables($raw); $d = $null; if ($exp -match '-D\s+\x22([^\x22]+)\x22') { $d = $Matches[1] } elseif ($exp -match '-D\s+(\S+)') { $d = $Matches[1] }; if (-not $d) { Write-Output 'VERDICT:2'; exit 0 }; $reg = [IO.Path]::GetFullPath($d).TrimEnd('\'); Write-Output ('PGDIR:' + $reg); $tgt = [IO.Path]::GetFullPath((Join-Path $env:IB_ROOTPG 'data\pgdata')).TrimEnd('\'); if ($reg -ieq $tgt) { Write-Output 'VERDICT:0' } else { Write-Output 'VERDICT:1' }"`) do call :ib_pg_add "%%V"
+if "%IB_PGCHK%"=="0" goto :pg_reuse
+call :log [INFO] Removing a stale IterationBoardPG registration
+call :log [INFO] (registered data directory: %IB_PGDIR%).
+net stop IterationBoardPG >nul 2>&1
+sc delete IterationBoardPG >nul 2>&1
+set "IB_DELWAIT=0"
+:pg_del_wait
+sc query IterationBoardPG >nul 2>&1
+if errorlevel 1 goto :pg_register
+set /a IB_DELWAIT+=1
+if "%IB_DELWAIT%"=="15" goto :pg_del_stuck
+powershell -NoProfile -Command "Start-Sleep -Seconds 2"
+goto :pg_del_wait
+:pg_del_stuck
+call :log [ERROR] The stale IterationBoardPG registration could not
+call :log [ERROR] be removed (still present after 30 seconds). Close
+call :log [ERROR] the Services console and any window using it, then
+call :log [ERROR] run install.bat again.
+call :ib_pause
+exit /b 1
+:pg_reuse
 sc config IterationBoardPG start= %PG_START_TYPE% >nul 2>&1
-call :log [INFO] IterationBoardPG was already registered; start type set to %PG_START_TYPE%.
+call :log [INFO] IterationBoardPG was already registered for this
+call :log [INFO] data directory; start type set to %PG_START_TYPE%.
 goto :pg_reg_done
 :pg_register
 "%ROOT%\runtime\pgsql\bin\pg_ctl.exe" register -N IterationBoardPG -D "%ROOT%\data\pgdata" -S %PG_START_TYPE%
@@ -280,6 +339,34 @@ sc query IterationBoardApp >nul 2>&1
 if errorlevel 1 goto :appreg_done
 if exist "%ROOT%\app\IterationBoardApp.exe" "%ROOT%\app\IterationBoardApp.exe" stop >nul 2>&1
 if exist "%ROOT%\app\IterationBoardApp.exe" "%ROOT%\app\IterationBoardApp.exe" uninstall >nul 2>&1
+sc query IterationBoardApp >nul 2>&1
+if errorlevel 1 goto :appreg_done
+rem The registration survives but the wrapper exe of THIS
+rem folder could not remove it - the classic case is a leftover
+rem registration from another install folder whose exe was
+rem deleted with it (the pre-1.1.0 installers had exactly this
+rem blind spot, and the WinSW install below would now fail with
+rem "service already exists"). Remove the stale registration
+rem through the SCM directly and wait until it is gone.
+call :log [INFO] Removing a stale IterationBoardApp registration
+call :log [INFO] left over from a previous installation.
+net stop IterationBoardApp >nul 2>&1
+sc delete IterationBoardApp >nul 2>&1
+set "IB_DELWAIT=0"
+:app_del_wait
+sc query IterationBoardApp >nul 2>&1
+if errorlevel 1 goto :appreg_done
+set /a IB_DELWAIT+=1
+if "%IB_DELWAIT%"=="15" goto :app_del_stuck
+powershell -NoProfile -Command "Start-Sleep -Seconds 2"
+goto :app_del_wait
+:app_del_stuck
+echo [ERROR] The stale IterationBoardApp registration could not
+echo [ERROR] be removed (still present after 30 seconds). Close
+echo [ERROR] the Services console and any window using it, then
+echo [ERROR] run install.bat again.
+call :ib_pause
+exit /b 1
 :appreg_done
 copy /Y "%ROOT%\runtime\winsw\WinSW-x64.exe" "%ROOT%\app\IterationBoardApp.exe" >nul
 copy /Y "%ROOT%\service\IterationBoardApp.xml" "%ROOT%\app\IterationBoardApp.xml" >nul
@@ -441,6 +528,12 @@ call :log [ERROR] or was declined. Right-click the script and choose
 call :log [ERROR] Run as administrator instead.
 call :ib_pause
 exit /b 1
+
+:ib_pg_add
+set "IB_LINE=%~1"
+if "%IB_LINE:~0,8%"=="VERDICT:" set "IB_PGCHK=%IB_LINE:~8%"
+if "%IB_LINE:~0,6%"=="PGDIR:" set "IB_PGDIR=%IB_LINE:~6%"
+exit /b 0
 
 :ib_pause
 if defined IB_LOG echo [INFO] Log file: %IB_LOG%

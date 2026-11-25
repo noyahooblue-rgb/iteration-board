@@ -97,8 +97,46 @@ rem markers instead (see :detect_version).
 if not "%TARGET%x"=="x" goto :target_check
 call :detect_target
 if "%IB_DET_COUNT%"=="1" goto :target_detected
-call :log [INFO] No single installed location could be detected
-call :log [INFO] from the IterationBoardApp service registration.
+if "%IB_DET_COUNT%"=="0" goto :target_none
+goto :target_multi
+:target_none
+call :log [INFO] No IterationBoardApp service registration was
+call :log [INFO] found, so no installed location could be detected.
+set "TARGET=__IB_NONE__"
+set /p "TARGET=Type or drag the install folder path here, then press Enter: "
+set "TARGET=%TARGET:"=%"
+if "%TARGET%x"=="__IB_NONE__x" goto :target_missing
+goto :target_check
+:target_multi
+rem Two or more DISTINCT install roots came back from the
+rem service registration sources (Win32_Service vs registry
+rem disagree, e.g. a delete-pending leftover next to the live
+rem registration). Validate the install markers of each
+rem candidate: when exactly one candidate is a complete
+rem install folder, offer it as the suggested target - never
+rem adopt it silently; it goes through the same confirmation
+rem as a single detection (choice prompt, or the IB_AUTO /
+rem --yes contract). Otherwise fall back to manual input.
+call :log [WARN] The service registration reports %IB_DET_COUNT% different
+call :log [WARN] install locations. Candidates:
+call :log [WARN]   1: %IB_DET_1%
+call :log [WARN]   2: %IB_DET_2%
+set "IB_VALID_COUNT=0"
+set "IB_VALID_ROOT="
+call :det_valid "%IB_DET_1%"
+if "%IB_VALID%"=="1" set "IB_VALID_ROOT=%IB_DET_1%"
+if "%IB_VALID%"=="1" set /a IB_VALID_COUNT+=1
+call :det_valid "%IB_DET_2%"
+if "%IB_VALID%"=="1" set "IB_VALID_ROOT=%IB_DET_2%"
+if "%IB_VALID%"=="1" set /a IB_VALID_COUNT+=1
+if not "%IB_VALID_COUNT%"=="1" goto :target_multi_fail
+call :log [INFO] Only one candidate is a complete install folder:
+call :log [INFO]   %IB_VALID_ROOT%
+set "TARGET=%IB_VALID_ROOT%"
+goto :target_detected_body
+:target_multi_fail
+call :log [INFO] No single candidate could be confirmed as the
+call :log [INFO] install folder. Type the path manually.
 set "TARGET=__IB_NONE__"
 set /p "TARGET=Type or drag the install folder path here, then press Enter: "
 set "TARGET=%TARGET:"=%"
@@ -106,6 +144,7 @@ if "%TARGET%x"=="__IB_NONE__x" goto :target_missing
 goto :target_check
 :target_detected
 set "TARGET=%IB_DET_1%"
+:target_detected_body
 call :log [INFO] Detected install at: %TARGET%
 if "%YES%"=="1" goto :target_check
 choice /C YN /M "Upgrade this installation now"
@@ -214,6 +253,49 @@ rem before it is recorded - no reuse window on the patch path),
 rem uses the same folder layout backup.bat produces, and is
 rem registered in backup-status.json in the same agreed format.
 call :log [INFO] Backing up target database, uploads and config ...
+rem Before the PostgreSQL service is touched in any way, verify
+rem that the ONE machine-wide IterationBoardPG registration
+rem actually belongs to THIS install: pg_ctl registers the data
+rem directory (-D) in the service ImagePath. A leftover
+rem registration from another (meanwhile deleted) install would
+rem otherwise be started here and would answer pg_dump on
+rem 127.0.0.1:15432 with a different random password - the dump
+rem then fails with a misleading authentication error (1.1.0
+rem final-verification round, matrix N1/N3/N4). The check is
+rem fail-closed: when the registered data directory cannot be
+rem determined, the patch stops instead of trusting the port.
+set "IB_PGDIR="
+set "IB_PGCHK=2"
+set "IB_TARGET=%TARGET%"
+for /f "usebackq delims=" %%V in (`powershell -NoProfile -Command "$raw = $null; try { $raw = (Get-ItemProperty 'HKLM:\SYSTEM\CurrentControlSet\Services\IterationBoardPG' -ErrorAction Stop).ImagePath } catch {}; if (-not $raw) { Write-Output 'VERDICT:2'; exit 0 }; $exp = [Environment]::ExpandEnvironmentVariables($raw); $d = $null; if ($exp -match '-D\s+\x22([^\x22]+)\x22') { $d = $Matches[1] } elseif ($exp -match '-D\s+(\S+)') { $d = $Matches[1] }; if (-not $d) { Write-Output 'VERDICT:2'; exit 0 }; $reg = [IO.Path]::GetFullPath($d).TrimEnd('\'); Write-Output ('PGDIR:' + $reg); $tgt = [IO.Path]::GetFullPath((Join-Path $env:IB_TARGET 'data\pgdata')).TrimEnd('\'); if ($reg -ieq $tgt) { Write-Output 'VERDICT:0' } else { Write-Output 'VERDICT:1' }"`) do call :pg_add "%%V"
+if "%IB_PGCHK%"=="0" goto :bk_pgdir_ok
+if "%IB_PGCHK%"=="1" goto :bk_pgdir_wrong
+call :log [ERROR] The data directory of the registered
+call :log [ERROR] IterationBoardPG service could not be determined,
+call :log [ERROR] so it cannot be verified to belong to this install.
+call :log [ERROR] Patch aborted - nothing was changed. Reinstall
+call :log [ERROR] PostgreSQL service registration from the target
+call :log [ERROR] folder with install.bat, then run apply-patch.bat
+call :log [ERROR] again.
+call :ib_pause
+exit /b 1
+:bk_pgdir_wrong
+call :log [ERROR] The registered IterationBoardPG service points at
+call :log [ERROR] a DIFFERENT data directory:
+call :log [ERROR]   registered: %IB_PGDIR%
+set "IB_TGTPG=%TARGET%\data\pgdata"
+call :log [ERROR]   this install: %IB_TGTPG%
+call :log [ERROR] A leftover registration from another installation
+call :log [ERROR] would answer the backup dump with the wrong
+call :log [ERROR] database password. Patch aborted - nothing was
+call :log [ERROR] changed. Remove the stale service registration
+call :log [ERROR] (or reinstall from the target folder), then run
+call :log [ERROR] apply-patch.bat again.
+call :ib_pause
+exit /b 1
+:bk_pgdir_ok
+call :log [INFO] PostgreSQL service registration verified for this
+call :log [INFO] install (data directory: %IB_PGDIR%).
 rem PostgreSQL must be up for the dump. Both services are
 rem manual-start since 1.0.3, so start the PG service first
 rem when it is stopped; the app service is stopped later, in
@@ -242,7 +324,8 @@ call :ib_pause
 exit /b 1
 :bk_pg_up
 set "DBPWD="
-for /f "tokens=1,2" %%A in ('findstr /C:"password:" "%TARGET%\config\application.yml"') do set "DBPWD=%%B"
+set "IB_CFG=%TARGET%\config\application.yml"
+for /f "usebackq delims=" %%B in (`powershell -NoProfile -Command "$c = Get-Content $env:IB_CFG -ErrorAction SilentlyContinue; foreach ($l in $c) { if ($l -match '^\s*password:\s*(\S+)') { Write-Output $Matches[1]; break } }"`) do set "DBPWD=%%B"
 if not "%DBPWD%"=="" goto :bk_pwd_ok
 call :log [ERROR] Could not read the database password from
 call :log [ERROR] config\application.yml. Patch aborted,
@@ -260,6 +343,15 @@ set "PGPASSWORD="
 if "%IB_DUMP_RC%"=="0" goto :bk_dump_ok
 call :log [ERROR] pg_dump failed with code %IB_DUMP_RC%. Patch
 call :log [ERROR] aborted - nothing was changed.
+call :log [ERROR] Diagnosis: the PostgreSQL service registration was
+call :log [ERROR] verified above to point at THIS install, so the
+call :log [ERROR] instance answering on 127.0.0.1:15432 is this
+call :log [ERROR] install's database. A password rejection then means
+call :log [ERROR] the password inside the data directory and the one
+call :log [ERROR] in config\application.yml disagree - one of the two
+call :log [ERROR] was changed without the other (or the data directory
+call :log [ERROR] was replaced). Restore the matching pair before
+call :log [ERROR] retrying; do not keep retrying this patch.
 call :ib_pause
 exit /b 1
 :bk_dump_ok
@@ -437,6 +529,24 @@ call :log [ERROR] Run as administrator instead.
 call :ib_pause
 exit /b 1
 
+rem --- subroutine: marker validation for one candidate root ---
+rem Sets IB_VALID=1 when the candidate holds both install
+rem markers (app jar and config), 0 otherwise. The candidate
+rem travels as %~1 so no path variable is expanded inside a
+rem parenthesized block.
+:pg_add
+set "IB_LINE=%~1"
+if "%IB_LINE:~0,8%"=="VERDICT:" set "IB_PGCHK=%IB_LINE:~8%"
+if "%IB_LINE:~0,6%"=="PGDIR:" set "IB_PGDIR=%IB_LINE:~6%"
+exit /b 0
+
+:det_valid
+set "IB_VALID=0"
+if not exist "%~1\app\iteration-board.jar" exit /b 0
+if not exist "%~1\config\application.yml" exit /b 0
+set "IB_VALID=1"
+exit /b 0
+
 rem --- subroutine: detect the installed folder from the --------
 rem --- subroutine: record the patch-made backup in the
 rem target's data\backup-status.json, in the same agreed
@@ -448,24 +558,37 @@ rem backup.bat one. Inputs: IB_BK_RESULT, IB_BK_PATH.
 if not exist "%TARGET%\data" mkdir "%TARGET%\data"
 powershell -NoProfile -Command "$f = '%TARGET%\data\backup-status.json'; $now = (Get-Date).ToUniversalTime().ToString('yyyy-MM-ddTHH:mm:ssZ'); $prev = $null; if (Test-Path $f) { try { $prev = Get-Content $f -Raw | ConvertFrom-Json } catch {} }; $o = [ordered]@{}; $o.lastAttemptTime = $now; if ($env:IB_BK_RESULT -eq 'success') { $o.lastSuccessTime = $now } elseif ($prev -and $prev.lastSuccessTime) { $o.lastSuccessTime = $prev.lastSuccessTime } else { $o.lastSuccessTime = $null }; $o.lastResult = $env:IB_BK_RESULT; $o.success = ($env:IB_BK_RESULT -eq 'success'); if ($env:IB_BK_RESULT -eq 'success') { $o.lastBackupPath = $env:IB_BK_PATH } elseif ($prev -and $prev.lastBackupPath) { $o.lastBackupPath = $prev.lastBackupPath } else { $o.lastBackupPath = $null }; $o.lastAttemptAt = $o.lastAttemptTime; $o.lastSuccessAt = $o.lastSuccessTime; $o.result = $env:IB_BK_RESULT.ToUpper(); $o.detail = $o.lastResult; [IO.File]::WriteAllText($f, ($o | ConvertTo-Json -Compress), [Text.Encoding]::ASCII)"
 exit /b 0
-rem IterationBoardApp service registration (sc qc binary path,
-rem registry ImagePath as fallback). The service executable is
-rem <install>\app\IterationBoardApp.exe, so the install folder
-rem is two levels up. Distinct roots are counted in IB_DET_COUNT
-rem (IB_DET_1 / IB_DET_2 hold the first two). Paths travel via
-rem stdout of this PowerShell command only; nothing is judged
-rem inside cmd.
+rem IterationBoardApp service registration. Two authoritative
+rem sources are read WITHOUT parsing sc.exe text output (its
+rem field labels are localized with the OS language, so the old
+rem BINARY_PATH_NAME regex silently found nothing on e.g.
+rem Chinese Windows): Win32_Service PathName first, the
+rem registry ImagePath (environment variables expanded) as the
+rem second source. Each value is normalized (quotes stripped,
+rem cut at the .exe, GetFullPath) and the install folder is two
+rem levels up from <install>\app\IterationBoardApp.exe.
+rem Distinct roots are counted in IB_DET_COUNT (IB_DET_1 /
+rem IB_DET_2 hold the first two) and logged by the caller;
+rem disagreement between the two sources is a real anomaly
+rem (stale or delete-pending registration) and surfaces as a
+rem count of 2, never silently merged. Raw values travel via
+rem stdout lines prefixed RAW: and are only logged.
 :detect_target
 set "IB_DET_COUNT=0"
 set "IB_DET_1="
 set "IB_DET_2="
-for /f "usebackq delims=" %%D in (`powershell -NoProfile -Command "$roots = @(); $qc = sc.exe qc IterationBoardApp 2>$null | Out-String; if ($qc -match 'BINARY_PATH_NAME\s*:\s*(.+)') { $p = $Matches[1].Trim().Trim([char]34); if ($p -match '^(.+?\.exe)') { $p = $Matches[1] }; $roots += $p }; try { $reg = (Get-ItemProperty 'HKLM:\SYSTEM\CurrentControlSet\Services\IterationBoardApp' -ErrorAction Stop).ImagePath; if ($reg) { $r = $reg.Trim().Trim([char]34); if ($r -match '^(.+?\.exe)') { $r = $Matches[1] }; $roots += $r } } catch {}; $out = @(); foreach ($p in $roots) { $dir = Split-Path (Split-Path $p -Parent) -Parent; if ($dir -and ($out -notcontains $dir)) { $out += $dir } }; $out"`) do call :det_add "%%D"
+for /f "usebackq delims=" %%D in (`powershell -NoProfile -Command "$vals = @(); $svc = Get-CimInstance Win32_Service -Filter \x22Name='IterationBoardApp'\x22 -ErrorAction SilentlyContinue; if ($svc -and $svc.PathName) { $vals += $svc.PathName }; try { $reg = (Get-ItemProperty 'HKLM:\SYSTEM\CurrentControlSet\Services\IterationBoardApp' -ErrorAction Stop).ImagePath; if ($reg) { $vals += [Environment]::ExpandEnvironmentVariables($reg) } } catch {}; $out = @(); foreach ($v in $vals) { Write-Output ('RAW:' + $v); $p = $v.Trim().Trim([char]34); if ($p -match '^(.+?\.exe)') { $p = $Matches[1] }; try { $p = [IO.Path]::GetFullPath($p) } catch {}; $dir = Split-Path (Split-Path $p -Parent) -Parent; if ($dir -and ($out -notcontains $dir)) { $out += $dir } }; $out"`) do call :det_add "%%D"
 exit /b 0
 
 :det_add
+set "IB_LINE=%~1"
+if "%IB_LINE:~0,4%"=="RAW:" goto :det_raw
 if "%IB_DET_COUNT%"=="0" set "IB_DET_1=%~1"
 if "%IB_DET_COUNT%"=="1" set "IB_DET_2=%~1"
 set /a IB_DET_COUNT+=1
+exit /b 0
+:det_raw
+call :log [INFO] Service registration value: %IB_LINE:~4%
 exit /b 0
 
 rem --- subroutine: detect the target install's version --------
