@@ -73,14 +73,19 @@ rem because pre-1.1.0 targets have no rollback.bat in the
 rem bundle). Run the working copy from the install's own tmp
 rem folder instead (tmp\ is runtime scratch, never part of a
 rem bundle); IB_RB_ROOT pins the real install root and
-rem IB_RB_LOG the log file location.
+rem IB_RB_LOG the log file location. The copy source is
+rem %ROOT%\rollback.bat rather than %~f0: scripted invocations
+rem (cmd /c with several quoted arguments) can leave %0
+rem pointing at the last argument instead of this file, while
+rem this script by construction always lives in the install
+rem root.
 if "%IB_RB_REEXEC%"=="1" goto :rb_reexec_done
 set "IB_RB_REEXEC=1"
 set "IB_RB_ROOT=%ROOT%"
 set "IB_RB_LOG=%IB_LOG%"
 if not exist "%ROOT%\tmp" mkdir "%ROOT%\tmp"
 set "IB_RB_SELF=%ROOT%\tmp\ib-rollback-runner.bat"
-copy /Y "%~f0" "%IB_RB_SELF%" >nul 2>&1
+copy /Y "%ROOT%\rollback.bat" "%IB_RB_SELF%" >nul 2>&1
 if errorlevel 1 goto :rb_stage_failed
 call "%IB_RB_SELF%" %IB_ARGS%
 set "IBRC=%ERRORLEVEL%"

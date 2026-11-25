@@ -484,6 +484,18 @@ try {
     $code = Install-Fresh $fx.Zip $target "n3-$($fx.V)" $hook101
     if ($fx.V -eq '1.0.1') { Check "$tag CI-side installer line fix applied (1.0.3 replica, evidence recorded)" (Test-Path (Join-Path $Evidence 'fixture-1.0.1-installer-fix.txt')) }
     Check "$tag fixture install exit 0" ($code -eq 0)
+    if ($fx.V -eq '1.0.1') {
+      # 1.0.1 世代的 PostgreSQL 服务是 WinSW 包装：postgres 拒绝
+      # 以 LocalSystem 的管理员令牌运行，服务永远起不来（1.0.4
+      # 安装脚本注释明载，现场定论 pf79946u）——服务起不来正是
+      # 该世代安装态的现实。按 1.0.1 安装器自己初始化数据库时
+      # 用的同一办法（pg_ctl 直起）把夹具数据库拉起来：这是该
+      # 世代装机唯一能让数据库运行的方式。被测对象仍是
+      # 「1.0.1 安装态 + 1.0.1→1.1.0 补丁」，起库方式留痕于此。
+      $pgCtl = Join-Path $target 'runtime\pgsql\bin\pg_ctl.exe'
+      & $pgCtl -D (Join-Path $target 'data\pgdata') -l (Join-Path $target 'logs\pg-fixture.log') -o '-p 15432' -w -t 60 start | Out-Null
+      Check "$tag fixture PostgreSQL started via pg_ctl (the only way a 1.0.1-era install can run it)" ($LASTEXITCODE -eq 0)
+    }
     Check "$tag fixture healthy" (Wait-HealthLegacy)
     $patchHome = Join-Path $Base "patch fixture (1)"
     New-Item -ItemType Directory -Force -Path $patchHome | Out-Null
@@ -498,6 +510,11 @@ try {
       Check "$tag healthy after upgrade" (Wait-Health)
       Check "$tag /meta version 1.1.0" ((Get-MetaVersion) -eq '1.1.0')
       Dump-Forensics "$tag postpatch" $target
+    }
+    if ($fx.V -eq '1.0.1') {
+      # pg_ctl 直起的 postmaster 不是服务，卸载前先停掉，
+      # 否则它占着 data 目录卸载删不干净。
+      & (Join-Path $target 'runtime\pgsql\bin\pg_ctl.exe') -D (Join-Path $target 'data\pgdata') -m fast -w -t 60 stop | Out-Null
     }
     Uninstall-Quiet $target
   }

@@ -314,9 +314,26 @@ set "IB_PGWAIT=0"
 sc query IterationBoardPG | findstr /C:"RUNNING" >nul 2>&1
 if not errorlevel 1 goto :bk_pg_up
 set /a IB_PGWAIT+=1
-if "%IB_PGWAIT%"=="15" goto :bk_pg_missing
+if "%IB_PGWAIT%"=="15" goto :bk_pg_check_live
 powershell -NoProfile -Command "Start-Sleep -Seconds 2"
 goto :bk_pg_wait
+:bk_pg_check_live
+rem The service is stopped, but this install's database may
+rem still be up: 1.0.1-era installs register PostgreSQL via
+rem WinSW, whose service can never start postgres (admin
+rem token refusal - see the 1.0.4 installer notes), so on
+rem such installs the database runs via pg_ctl instead.
+rem Registration ownership was verified above and the dump
+rem below still authenticates, so an answering port is safe
+rem to continue with; if nothing answers, abort as before.
+call :pg_live
+if errorlevel 1 goto :bk_pg_missing
+call :log [INFO] The PostgreSQL service is stopped, but this
+call :log [INFO] install's database is already answering on
+call :log [INFO] 127.0.0.1:15432 (started outside the service,
+call :log [INFO] e.g. a 1.0.1-era install running PostgreSQL
+call :log [INFO] via pg_ctl). Continuing with that database.
+goto :bk_pg_up
 :bk_pg_missing
 call :log [ERROR] The PostgreSQL service (IterationBoardPG) is
 call :log [ERROR] not running and could not be started, so no
@@ -443,6 +460,11 @@ rem --- step 4: restart + health check -------------------------------
 call :log [INFO] Starting services - database migration runs automatically ...
 net start IterationBoardPG >nul 2>&1
 sc query IterationBoardPG | findstr /C:"RUNNING" >nul 2>&1
+rem A stopped service is not fatal by itself when the
+rem database is already answering (1.0.1-era installs run
+rem PostgreSQL via pg_ctl because their WinSW service can
+rem never start it); :pg_live decides.
+if errorlevel 1 call :pg_live
 if errorlevel 1 (
   echo [ERROR] PostgreSQL failed to start after the patch.
   goto :failed
@@ -551,6 +573,14 @@ set "IB_LINE=%~1"
 if "%IB_LINE:~0,8%"=="VERDICT:" set "IB_PGCHK=%IB_LINE:~8%"
 if "%IB_LINE:~0,6%"=="PGDIR:" set "IB_PGDIR=%IB_LINE:~6%"
 exit /b 0
+
+rem --- subroutine: :pg_live -----------------------------------
+rem Succeeds (errorlevel 0) when the target install's
+rem PostgreSQL answers on 127.0.0.1:15432, probed with the
+rem target's own pg_isready.
+:pg_live
+"%TARGET%\runtime\pgsql\bin\pg_isready.exe" -h 127.0.0.1 -p 15432 -t 5 >nul 2>&1
+exit /b %ERRORLEVEL%
 
 :det_valid
 set "IB_VALID=0"
