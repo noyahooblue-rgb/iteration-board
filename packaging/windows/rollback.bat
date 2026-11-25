@@ -59,6 +59,39 @@ net session >nul 2>&1
 if errorlevel 1 goto :ib_elevate
 cd /d "%~dp0"
 
+rem --- re-exec a working copy from the install tmp folder ------
+rem The file restore below robocopies the bundle over this very
+rem folder, including rollback.bat itself whenever the
+rem pre-upgrade install already had one (rc4 and later). cmd
+rem reads batch files by byte offset while they run, so
+rem overwriting the running script with the bundle's different
+rem version corrupts its own remaining lines - the rollback
+rem then dies silently right after the copy, before starting
+rem the application or logging completion (1.1.0 final
+rem verification, N5 rc4 case; the 1.0.4 case was unaffected
+rem because pre-1.1.0 targets have no rollback.bat in the
+rem bundle). Run the working copy from the install's own tmp
+rem folder instead (tmp\ is runtime scratch, never part of a
+rem bundle); IB_RB_ROOT pins the real install root and
+rem IB_RB_LOG the log file location.
+if "%IB_RB_REEXEC%"=="1" goto :rb_reexec_done
+set "IB_RB_REEXEC=1"
+set "IB_RB_ROOT=%ROOT%"
+set "IB_RB_LOG=%IB_LOG%"
+if not exist "%ROOT%\tmp" mkdir "%ROOT%\tmp"
+set "IB_RB_SELF=%ROOT%\tmp\ib-rollback-runner.bat"
+copy /Y "%~f0" "%IB_RB_SELF%" >nul 2>&1
+if errorlevel 1 goto :rb_stage_failed
+call "%IB_RB_SELF%" %IB_ARGS%
+set "IBRC=%ERRORLEVEL%"
+exit /b %IBRC%
+:rb_stage_failed
+call :log [WARN] Could not stage a working copy in tmp - running in place.
+:rb_reexec_done
+if defined IB_RB_ROOT set "ROOT=%IB_RB_ROOT%"
+if defined IB_RB_LOG set "IB_LOG=%IB_RB_LOG%"
+cd /d "%ROOT%"
+
 rem --- resolve the backup directory (config backup.dir, 1.1.0) -
 set "BKROOT=%ROOT%\backup"
 for /f "usebackq delims=" %%V in (`powershell -NoProfile -Command "$c = Get-Content '%ROOT%\config\application.yml' -Raw -ErrorAction SilentlyContinue; if ($c -match '(?ms)^backup:[ \t]*\r?\n[ \t]+dir:[ \t]*\x22([^\x22]*)\x22') { $Matches[1] } elseif ($c -match '(?m)^[ \t]+dir:[ \t]*(\S+)[ \t]*$') { $Matches[1] }"`) do set "BKROOT=%%V"

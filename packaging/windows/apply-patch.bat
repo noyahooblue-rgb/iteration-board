@@ -256,7 +256,11 @@ call :log [INFO] Backing up target database, uploads and config ...
 rem Before the PostgreSQL service is touched in any way, verify
 rem that the ONE machine-wide IterationBoardPG registration
 rem actually belongs to THIS install: pg_ctl registers the data
-rem directory (-D) in the service ImagePath. A leftover
+rem directory (-D) in the service ImagePath; the 1.0.1
+rem generation registered PostgreSQL through WinSW instead,
+rem whose ImagePath carries no -D - there the probe falls back
+rem to the <arguments> of the service XML sitting next to the
+rem registered exe. A leftover
 rem registration from another (meanwhile deleted) install would
 rem otherwise be started here and would answer pg_dump on
 rem 127.0.0.1:15432 with a different random password - the dump
@@ -267,7 +271,7 @@ rem determined, the patch stops instead of trusting the port.
 set "IB_PGDIR="
 set "IB_PGCHK=2"
 set "IB_TARGET=%TARGET%"
-for /f "usebackq delims=" %%V in (`powershell -NoProfile -Command "$raw = $null; try { $raw = (Get-ItemProperty 'HKLM:\SYSTEM\CurrentControlSet\Services\IterationBoardPG' -ErrorAction Stop).ImagePath } catch {}; if (-not $raw) { Write-Output 'VERDICT:2'; exit 0 }; $exp = [Environment]::ExpandEnvironmentVariables($raw); $d = $null; if ($exp -match '-D\s+\x22([^\x22]+)\x22') { $d = $Matches[1] } elseif ($exp -match '-D\s+(\S+)') { $d = $Matches[1] }; if (-not $d) { Write-Output 'VERDICT:2'; exit 0 }; $reg = [IO.Path]::GetFullPath($d).TrimEnd('\'); Write-Output ('PGDIR:' + $reg); $tgt = [IO.Path]::GetFullPath((Join-Path $env:IB_TARGET 'data\pgdata')).TrimEnd('\'); if ($reg -ieq $tgt) { Write-Output 'VERDICT:0' } else { Write-Output 'VERDICT:1' }"`) do call :pg_add "%%V"
+for /f "usebackq delims=" %%V in (`powershell -NoProfile -Command "$raw = $null; try { $raw = (Get-ItemProperty 'HKLM:\SYSTEM\CurrentControlSet\Services\IterationBoardPG' -ErrorAction Stop).ImagePath } catch {}; if (-not $raw) { Write-Output 'VERDICT:2'; exit 0 }; $exp = [Environment]::ExpandEnvironmentVariables($raw); $d = $null; if ($exp -match '-D\s+\x22([^\x22]+)\x22') { $d = $Matches[1] } elseif ($exp -match '-D\s+(\S+)') { $d = $Matches[1] }; if (-not $d) { $exe = $exp.Trim().Trim([char]34); if ($exe -match '^(.+?\.exe)') { $exe = $Matches[1] }; $xml = [IO.Path]::ChangeExtension($exe, '.xml'); if (Test-Path $xml) { $c = [IO.File]::ReadAllText($xml); if ($c -match '-D\s+\x22([^\x22]+)\x22') { $d = $Matches[1] } elseif ($c -match '-D\s+(\S+)') { $d = $Matches[1] } } }; if (-not $d) { Write-Output 'VERDICT:2'; exit 0 }; $d = [Environment]::ExpandEnvironmentVariables($d); $reg = [IO.Path]::GetFullPath($d).TrimEnd('\'); Write-Output ('PGDIR:' + $reg); $tgt = [IO.Path]::GetFullPath((Join-Path $env:IB_TARGET 'data\pgdata')).TrimEnd('\'); if ($reg -ieq $tgt) { Write-Output 'VERDICT:0' } else { Write-Output 'VERDICT:1' }"`) do call :pg_add "%%V"
 if "%IB_PGCHK%"=="0" goto :bk_pgdir_ok
 if "%IB_PGCHK%"=="1" goto :bk_pgdir_wrong
 call :log [ERROR] The data directory of the registered
