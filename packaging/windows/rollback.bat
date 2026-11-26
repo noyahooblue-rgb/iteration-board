@@ -76,13 +76,23 @@ rem bundle); IB_RB_ROOT pins the real install root and
 rem IB_RB_LOG the log file location. The exit code travels
 rem back through a result file (tmp\ib-rollback-result.txt):
 rem the runner writes 1 on entry and 0 only when the rollback
-rem completes, and the first instance exits with the file's
-rem value when it exists. Nested cmd /c + call layers in
-rem scripted invocations proved able to return a nonzero
-rem process code even when the rollback ran to completion
-rem and logged it (1.1.0 final verification, N5 rc4 case,
-rem three consecutive runs, every state assertion green);
-rem the written result is the trustworthy contract. The copy source is
+rem completes, and the first instance exits with the value in
+rem the file. Two cmd parser facts shape this contract
+rem (root-cause ledger #14, Kiro final review of round 5):
+rem the first instance resumes reading THIS file by byte
+rem offset when the call returns - by which time the runner's
+rem robocopy may have replaced it with the bundle's older
+rem copy, so the lines after a separate call line may never
+rem run at all (offset already past the old file's end) or
+rem may run the old file's mid-section. The call and the
+rem exit therefore share ONE line, which cmd parses
+rem completely before executing any of it. And the result
+rem writes put the redirection first (>file echo 1): in
+rem "echo 1>file" the 1> redirects handle 1 instead of
+rem writing the digit, the file receives the echo-state
+rem text, and a failed rollback could then exit 0. A
+rem missing or unreadable result file exits 1 - no proof
+rem of completion, no success. The copy source is
 rem %ROOT%\rollback.bat rather than %~f0: scripted invocations
 rem (cmd /c with several quoted arguments) can leave %0
 rem pointing at the last argument instead of this file, while
@@ -98,15 +108,14 @@ copy /Y "%ROOT%\rollback.bat" "%IB_RB_SELF%" >nul 2>&1
 if errorlevel 1 goto :rb_stage_failed
 set "IB_RB_RESULT=%ROOT%\tmp\ib-rollback-result.txt"
 if exist "%IB_RB_RESULT%" del "%IB_RB_RESULT%" >nul 2>&1
-call "%IB_RB_SELF%" %IB_ARGS%
-set "IBRC=%ERRORLEVEL%"
-if exist "%IB_RB_RESULT%" for /f "usebackq delims=" %%R in (`powershell -NoProfile -Command "Get-Content $env:IB_RB_RESULT -First 1"`) do set "IBRC=%%R"
-exit /b %IBRC%
+call "%IB_RB_SELF%" %IB_ARGS% & (for /f "usebackq delims=" %%R in ("%IB_RB_RESULT%") do exit /b %%R) & exit /b 1
 :rb_stage_failed
 call :log [WARN] Could not stage a working copy in tmp - running in place.
 :rb_reexec_done
 if defined IB_RB_ROOT set "IB_RB_RESULT=%IB_RB_ROOT%\tmp\ib-rollback-result.txt"
-if defined IB_RB_RESULT echo 1>"%IB_RB_RESULT%"
+if not defined IB_RB_RESULT goto :rb_result_written
+>"%IB_RB_RESULT%" echo 1
+:rb_result_written
 if defined IB_RB_ROOT set "ROOT=%IB_RB_ROOT%"
 if defined IB_RB_LOG set "IB_LOG=%IB_RB_LOG%"
 cd /d "%ROOT%"
@@ -173,12 +182,22 @@ echo [ERROR] Nothing was changed - program files were not restored yet.
 call :ib_pause
 exit /b 1
 :db_fail
+set "SAFETY="
+for /f "usebackq delims=" %%D in (`powershell -NoProfile -Command "Get-ChildItem '%BKROOT%' -Directory -ErrorAction SilentlyContinue | Where-Object { $_.Name -notlike 'upgrade-*' } | Sort-Object Name | Select-Object -Last 1 | ForEach-Object { $_.Name }"`) do set "SAFETY=%%D"
 echo [ERROR] Database restore failed - see the messages above.
-echo [ERROR] Program files were NOT restored, and restore.bat loads
-echo [ERROR] atomically after taking a safety backup, so the
-echo [ERROR] installation is not half-rolled-back. The application
-echo [ERROR] service is stopped; fix the problem and run
-echo [ERROR] rollback.bat again.
+echo [ERROR] Program files were NOT restored.
+echo [ERROR] IMPORTANT: restore.bat resets the database schema
+echo [ERROR] BEFORE loading the backup, so if the load step is
+echo [ERROR] what failed, the database is now EMPTY. Do NOT start
+echo [ERROR] the application - on an empty database it would
+echo [ERROR] build a fresh, empty new-version schema, and the
+echo [ERROR] old data would look lost. It is not lost: before
+echo [ERROR] restoring, restore.bat took a safety backup of the
+echo [ERROR] database as it was just before this rollback.
+if defined SAFETY echo [ERROR] The safety backup folder is: "%BKROOT%\%SAFETY%"
+echo [ERROR] To recover: fix the problem above, then either run
+echo [ERROR] rollback.bat again, or run restore.bat and choose
+echo [ERROR] that safety backup.
 call :ib_pause
 exit /b 1
 :db_done
@@ -209,7 +228,9 @@ exit /b 1
 
 rem --- start the rolled-back application -------------------------
 net start IterationBoardApp >nul 2>&1
-if defined IB_RB_RESULT echo 0>"%IB_RB_RESULT%"
+if not defined IB_RB_RESULT goto :rb_result0_written
+>"%IB_RB_RESULT%" echo 0
+:rb_result0_written
 call :log [INFO] Rollback complete: program files and database are back
 call :log [INFO] to the state recorded in %SEL%.
 call :ib_pause

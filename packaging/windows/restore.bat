@@ -115,6 +115,26 @@ if errorlevel 1 (
   call :ib_pause
   exit /b 1
 )
+rem backup.bat records every run in data\backup-status.json,
+rem and a SKIPPED run exits 0 by design - when PostgreSQL is
+rem stopped, the scheduled-task contract forbids an error
+rem code there. The exit code above therefore cannot prove
+rem the safety backup exists: require this run's recorded
+rem result to be success before the schema reset below
+rem (root-cause ledger #14).
+powershell -NoProfile -Command "try { $o = Get-Content '%ROOT%\data\backup-status.json' -Raw -ErrorAction Stop | ConvertFrom-Json; if ($o.lastResult -eq 'success') { exit 0 } } catch { }; exit 1"
+if errorlevel 1 goto :safety_fail
+goto :safety_ok
+:safety_fail
+echo [ERROR] The safety backup did not complete - it was
+echo [ERROR] skipped or failed; see logs\backup.log in the
+echo [ERROR] install folder. Restore aborted BEFORE any data
+echo [ERROR] was changed: a restore without a safety backup
+echo [ERROR] could leave the database empty with no way back,
+echo [ERROR] so restore.bat refuses to continue.
+call :ib_pause
+exit /b 1
+:safety_ok
 
 call :log [INFO] Stopping application service ...
 net stop IterationBoardApp >nul 2>&1
@@ -157,8 +177,10 @@ call :ib_pause
 exit /b 1
 :restore_fail
 echo [ERROR] pg_restore failed with code %IBRC%. The load runs in a
-echo [ERROR] single transaction, so no partial data was loaded; restore
-echo [ERROR] the safety backup that was just created, or check logs.
+echo [ERROR] single transaction, so no partial data was loaded - but
+echo [ERROR] the schema was already reset, so the database is EMPTY
+echo [ERROR] until the safety backup that was just created is
+echo [ERROR] restored. Do not start the application before that.
 call :ib_pause
 exit /b 1
 :restore_ok

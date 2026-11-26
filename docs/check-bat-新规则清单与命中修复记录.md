@@ -18,6 +18,8 @@
 | R7 setp-file-read | `set /p VAR=<文件` 用重定向读文件内容 | 精确检查。LF-only 文件上 set /p 会读过第一行、把换行读进变量值，后续 `if "%VAR%"==` 比较变成跨行命令直接语法错误；读文件首行一律用 PowerShell Get-Content -First 1 的 for /f 写法（upgrade.bat 既有范式） |
 | R9 sums-encoding | 内嵌 PowerShell 用 Get-Content 读 SHA256SUMS.txt 而未显式 `-Encoding UTF8` | 精确检查（同行含 SHA256SUMS 与 Get-Content 且无 -Encoding UTF8 即报）。该文件由打包机以 UTF-8（无 BOM）生成，Windows PowerShell 5.1 默认按 ANSI 代码页解码，中文文件名（docs\\用户手册.md、docs\\部署手册.md、补丁说明.txt）必然乱码、补丁自校验误报缺失中止；同机自产自读文件（默认编码自洽）不在此列 |
 | R8 input-bare-compare | 控制台输入变量（set /p 提示读入的 VAR）出现在裸 `if "%VAR%"==` / `=="%VAR%"` 比较里 | 按文件收集 set /p 提示读入的变量名后逐行比对；哨兵形式 `"%VAR%x"=="x"` 不命中（值后紧跟的不是闭合引号）。用户键入/拖拽的路径可带尾随反斜杠，反斜杠紧贴闭合引号会被 cmd 解析器误读，比较行报「was unexpected at this time」 |
+| R10 echo-digit-redirect | `echo <数字>>` 形态（数字紧贴 `>`） | 精确检查。`echo 1>"file"` 的 `1>` 是句柄重定向：echo 无参数，文件里写进的是 ECHO 状态文本；`0>` 只清空文件。写数字一律重定向在前：`>"file" echo 1`（台账第 14 条⑧） |
+| R11 self-copy-call | 脚本把自身拷到别处（copy 源为脚本自身文件名、目标为 %变量%）再 call 该变量时，call 行不含 `exit /b` | 近似规则：以 copy 行登记的副本变量为 call 目标变量。cmd 在 call 返回后按字节偏移续读原文件，原文件可能已被副本执行期间的动作覆盖成另一版本；call 与退出同行（整行预解析）才安全（台账第 14 条⑧） |
 
 豁免机制：行尾或上方 4 行内注释块中出现 `rem IB-CHECK-EXEMPT <规则号>` 即豁免该行该规则；每条豁免必须在本记录与重检清单里写理由。
 
@@ -58,3 +60,11 @@
 - **负控**：对修复前版本（git HEAD 原文件）跑扩展后 check-bat，恰命中上述 5 条（R7×1、R8×4），不多不少；修复后 `packaging/windows` 12 文件 **0 命中**。
 - 同轮另修（非 check-bat 域，记此备查）：apply-patch 目标校验写死 1.1.0 布局（要求 version.txt）致 1.0.4/1.0.1 真实老安装被拒——校验改双标记（jar + config），版本识别改 `:detect_version` 三路（version.txt 首行 / 老布局指纹：1.0.4 = `runtime\pgsql\bin\msvcp140.dll` 在且 `runtime\vc_redist.x64.exe` 不在，1.0.1 反之；老 jar 的 MANIFEST 与 pom.properties 均为 0.1.0-SNAPSHOT，无可用版本字符串，此为实测依据）；rollback bundle 的 version.txt 拷贝改条件拷贝。矩阵侧修 Run-BatAuto 的 cmd 启动引号、N1 夹具改 rc4 全量包、Install-Fresh 向 stdin 喂 Y 答复老版本 choice 提问、N1 新增 manual 方式专测手动分支。Run-BatAuto 引号一波两折，如实记：第一版修复把整行作单个参数外包一层引号，复跑（run 45377864212 / 45378969080）实测仍失败——PowerShell 对原生命令的单个字符串参数二次加引号，连程序路径都被拆断（`'""C:\ibnasty\patch' is not recognized`），且矩阵步骤 45 分钟超时被中途终止；最终改为经 Process API 以 ProcessStartInfo.Arguments 原样串启动 cmd.exe（不经 PowerShell 参数层），矩阵步骤超时同步放宽到 90 分钟。详见 `docs/脚本重检清单-1.1.0.md` §7。
 - **R9 追加（同轮第三批，run 45389317819 暴露）**：矩阵引号修复后补丁首次真正跑通校验步，8 次补丁运行（N1×7 + N3-1.0.4）全部倒在 SHA256SUMS 自校验——三处 Get-Content 未指定编码，中文文件名乱码误报缺失（见 R9 行）。修复：apply-patch.bat 三处（校验 / rollback bundle 收集 / 拷入复验，行 186/222/265）统一加 `-Encoding UTF8`。负控：修复前文件跑新规恰 R9×3，修复后 12 文件 0 命中。同轮另两修：手动分支空输入（EOF 直接回车）在哨兵比较处仍报解析错——两处提示点改「预置标记值 `__IB_NONE__` + 哨兵后缀比较」，使 strip 与比较的展开永不为空值；矩阵 N3 夹具安装目录去掉空格（`fixture-<版本>`）——1.0.1 老 install.bat 自身在带空格路径下、choice 答复后仍有潜伏解析错（老版本脚本的历史局限，产品口径本就要求安装路径无空格；N3 的被测对象是补丁而非老安装器）。附带观察（未触发、未修，留档）：migrate-import 读 manifest.json 同为跨机文件，若迁移源/目标机默认编码不同且路径含中文有同类风险，后续版本可一并显式 UTF8。
+
+## 六、修复轮 6 追加（2026-11-26，Kiro 终检阻塞项驱动）
+
+背景：修复轮 5 给 rollback.bat 建的「结果文件退出码契约」被 Kiro 终检读码 + 字节偏移核算证明不成立（台账第 14 条⑧改写）：写结果的两行 `echo 1>"…"` / `echo 0>"…"` 是句柄重定向而非写数字；第一实例的 call 与退出分行书写，call 返回后续读的是已被覆回旧版的原文件。遂追加 R10/R11 两条规则（`tools/check-bat.py`）：
+
+- **R10 命中（修复前）**：`rollback.bat:109`（副本进入写 1）、`rollback.bat:212`（完成写 0），共 2 条。修复：两处改重定向在前写法 `>"%IB_RB_RESULT%" echo 1/0`（if defined 守卫改 goto 结构）。
+- **R11 命中（修复前）**：`rollback.bat:101`（`call "%IB_RB_SELF%" %IB_ARGS%` 与退出分行），共 1 条。修复：call 与退出合并为同一行 `call "%IB_RB_SELF%" %IB_ARGS% & (for /f … do exit /b %%R) & exit /b 1`，整行在执行前已被 cmd 完整解析；结果文件缺失/读不出时退出 1，不再回退 ERRORLEVEL。
+- **负控**：对修复前版本（修复轮 5 终版 rollback.bat）跑新规，恰命中 R10×2 + R11×1，不多不少；修复后 `packaging/windows` 12 文件 **0 命中**。运行级负控由矩阵 N5F 承担（回滚失败用例：旧写法退出码为 0、结果文件内容为 ECHO 状态文本，两条断言均能拦住）。

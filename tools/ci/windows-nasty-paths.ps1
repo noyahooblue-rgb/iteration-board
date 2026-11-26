@@ -22,6 +22,13 @@
 #   - N5 新增回滚完整性证明：rc4 / 1.0.4 两条路径构造「升级失败
 #     -> 回滚」，断言程序文件、version.txt、数据库全部回到升级前
 #     状态；N4 链在回滚后追加一次重打补丁，验证前滚路径完好。
+# 修复轮 6 口径（Kiro 终检阻塞项，台账第 14 条⑧改写）：
+#   - N5F 新增回滚失败用例：rc4 成功升级后把 bundle 记录的
+#     DbBackup 改指到不存在的路径再跑 rollback，断言非 0 退出、
+#     程序文件逐字节未动、tmp\ib-rollback-result.txt 内容恰为
+#     一行 "1" 并归档进证据；顺带以「停 PG 服务单跑 restore」
+#     断言 restore 的安全备份状态门（备份被 SKIP 时必须拒绝
+#     执行，修复轮 6 非阻塞项 A）。
 # 用法（档 3 windows-verify 之后或手动）：
 #   pwsh -File tools/ci/windows-nasty-paths.ps1 -FullZip C:\ibdl\iteration-board-offline-1.1.0.zip `
 #     [-Rc4Zip C:\ibdl\iteration-board-offline-1.1.0-rc4.zip -PatchZip C:\ibdl\iteration-board-patch-1.1.0-rc4-to-1.1.0.zip] `
@@ -832,6 +839,87 @@ try {
   }
   if (-not $OldZip104 -or -not $Patch104) { Write-Host '::warning::SKIP N5 104 (1.0.4 fixture / patch not provided)' } else {
     Invoke-RollbackCase '104' $OldZip104 $Patch104 (Join-Path $FixBase 'rb-104\iteration-board-offline-1.0.4') $true 'NFOD'
+  }
+
+  # ---------- N5F: 回滚失败用例（修复轮 6，Kiro 终检阻塞项） ----------
+  # 修复轮 5 的回滚退出码契约有两处被 cmd 解析架空（台账第 14
+  # 条⑧改写）：结果文件写数字用的是 echo <数字>>（句柄重定向，
+  # 文件里写进的是 ECHO 状态文本，失败路径 exit /b 读回该文本
+  # 按 0 返回）；第一实例在 call 之后按字节偏移续读已被覆回旧
+  # 版的原文件。本用例构造确定的回滚失败：成功升级后把 bundle
+  # 记录的 DbBackup 改指到不存在的路径，restore 必然失败，
+  # rollback 必须非 0 退出、程序文件分毫不动、结果文件内容
+  # 恰为一行 "1"。旧写法下退出码会是 0、结果文件内容会是
+  # ECHO 状态文本，两条断言都能拦住。
+  function Invoke-RollbackFailCase([string]$FixtureZip, [string]$PatchZipPath, [string]$Target) {
+    Uninstall-Quiet $Target
+    $code = Install-Fresh $FixtureZip $Target 'n5fail'
+    Check 'N5F fixture install exit 0' ($code -eq 0)
+    Check 'N5F fixture healthy' (Wait-Health)
+    $stageDir = Join-Path $Base 'patch rollback failcase'
+    New-Item -ItemType Directory -Force -Path $stageDir | Out-Null
+    Expand-Archive -Path $PatchZipPath -DestinationPath $stageDir -Force
+    $patchBat = Get-ChildItem $stageDir -Recurse -Filter 'apply-patch.bat' | Select-Object -First 1
+    Check 'N5F apply-patch.bat found' ($null -ne $patchBat)
+    if ($patchBat) {
+      $code = Run-BatAuto $patchBat.FullName @($Target) 'n5fail-patch.log' $patchBat.Directory.FullName
+      Check 'N5F upgrade patch exit 0' ($code -eq 0)
+      Check 'N5F healthy after upgrade' (Wait-Health)
+      $bundle = Get-ChildItem (Join-Path $Target 'backup') -Directory -Filter 'upgrade-*' -ErrorAction SilentlyContinue | Sort-Object Name -Descending | Select-Object -First 1
+      Check 'N5F rollback bundle recorded' ($null -ne $bundle)
+      if ($bundle) {
+        $infoPath = Join-Path $bundle.FullName 'upgrade-info.txt'
+        $info = Get-Content $infoPath
+        $dbLine = $info | Where-Object { $_ -like 'DbBackup=*' } | Select-Object -First 1
+        Check 'N5F bundle records a DbBackup' ($null -ne $dbLine)
+        $realBackup = ($dbLine -replace '^DbBackup=', '')
+        $jarHash1 = (Get-FileHash (Join-Path $Target 'app\iteration-board.jar') -Algorithm SHA256).Hash
+        $restoreHash1 = (Get-FileHash (Join-Path $Target 'restore.bat') -Algorithm SHA256).Hash
+        $info = $info | ForEach-Object { if ($_ -like 'DbBackup=*') { 'DbBackup=C:\ibnasty\missing-db-backup' } else { $_ } }
+        Set-Content -Path $infoPath -Value $info -Encoding ASCII
+        $code = Run-BatAuto (Join-Path $Target 'rollback.bat') @('--yes', '--no-pause') 'n5fail-rollback.log' $Target
+        Check 'N5F rollback with unreachable DbBackup exits non-zero' ($code -ne 0)
+        Note-Result "N5F rollback exit code was $code"
+        $rlog = Get-Content (Join-Path $Evidence 'n5fail-rollback.log') -Raw
+        Check 'N5F rollback log carries the empty-database warning' ($rlog -match 'Do NOT start' -and $rlog -match 'EMPTY')
+        Check 'N5F jar untouched by the failed rollback' (((Get-FileHash (Join-Path $Target 'app\iteration-board.jar') -Algorithm SHA256).Hash) -eq $jarHash1)
+        Check 'N5F restore.bat untouched by the failed rollback' (((Get-FileHash (Join-Path $Target 'restore.bat') -Algorithm SHA256).Hash) -eq $restoreHash1)
+        Check 'N5F version.txt still 1.1.0' (((Get-Content (Join-Path $Target 'version.txt') -Raw).Trim()) -eq '1.1.0')
+        $resFile = Join-Path $Target 'tmp\ib-rollback-result.txt'
+        Check 'N5F rollback result file exists' (Test-Path $resFile)
+        if (Test-Path $resFile) {
+          Copy-Item $resFile (Join-Path $Evidence 'n5fail-ib-rollback-result.txt') -Force
+          $resText = (Get-Content $resFile -Raw).Trim()
+          Check 'N5F rollback result file content is exactly "1"' ($resText -eq '1')
+          Note-Result "N5F rollback result file content was: [$resText]"
+        }
+        # 修复 A 探针：停掉 PG 服务后单跑 restore（指向真实
+        # 备份）：安全备份必然被 SKIP（backup.bat 退出 0），
+        # restore 必须凭 data\backup-status.json 的本次结果
+        # 拒绝执行，且数据库分毫不动。旧写法只看退出码会放行，
+        # 随后在 DROP SCHEMA 步才失败——拒绝文案断言能区分。
+        & sc.exe stop IterationBoardPG 2>$null | Out-Null
+        for ($i = 0; $i -lt 30; $i++) {
+          $q = (& sc.exe query IterationBoardPG 2>$null | Out-String)
+          if ($q -match 'STOPPED') { break }
+          Start-Sleep -Seconds 1
+        }
+        $code = Run-BatAuto (Join-Path $Target 'restore.bat') @($realBackup, '--yes', '--no-pause') 'n5fail-restore-nopg.log' $Target
+        Check 'N5F restore with PG stopped refuses (exit != 0)' ($code -ne 0)
+        $slog = Get-Content (Join-Path $Evidence 'n5fail-restore-nopg.log') -Raw
+        Check 'N5F restore refusal names the safety backup' ($slog -match 'safety backup did not complete')
+        & sc.exe start IterationBoardPG 2>$null | Out-Null
+        & sc.exe start IterationBoardApp 2>$null | Out-Null
+        Check 'N5F healthy after the restore refusal' (Wait-Health)
+        $flyF = Invoke-PsqlScalar $Target 'select version from flyway_schema_history where success order by installed_rank desc limit 1'
+        Check 'N5F Flyway still at V11 (database untouched)' ($flyF -eq '11')
+      }
+    }
+    Dump-Forensics 'n5fail-final' $Target
+    Uninstall-Quiet $Target
+  }
+  if (-not $Rc4Zip -or -not $PatchZip) { Write-Host '::warning::SKIP N5F (rc4 fixture / patch not provided)' } else {
+    Invoke-RollbackFailCase $Rc4Zip $PatchZip (Join-Path $Base 'rb-fail\iteration-board-offline-1.1.0-rc4')
   }
 } catch {
   Write-Host "::error::NASTY FATAL: $($_.Exception.Message)"

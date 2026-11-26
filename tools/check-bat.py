@@ -91,6 +91,30 @@ packaging/windows 下的 .bat，发现以下已知坑即报错（退出码 1）�
                         只有跨平台生成的 UTF-8 文件必须显式
                         指定编码。
 
+  R10 echo-digit-redirect echo <数字>> 形态：echo 1>"file" 里
+                        的 1> 是句柄重定向而非写数字——echo 此时
+                        无参数，文件里写进的是 ECHO 状态文本
+                        （ECHO is off. / ECHO 处于关闭状态。），
+                        0> 则只把文件清空（修复轮 5 的 rollback
+                        结果文件契约被此坑架空：失败路径读回的
+                        「退出码」是这段文本，exit /b 收到非数
+                        字参数按 0 返回，数据库恢复失败的回滚
+                        会报成功）。写数字一律重定向在前：
+                        >"file" echo 1。
+  R11 self-copy-call    脚本把自身拷到别处再 call 副本时（copy
+                        源为脚本自身文件名、目标为 %变量%），
+                        call 必须与退出写在同一行：cmd 在 call
+                        返回后按字节偏移续读原文件，而副本执行
+                        期间原文件可能已被覆盖成另一版本——续
+                        读要么越过文件末尾直接落空、要么执行旧
+                        文件的中段（修复轮 5 的 rollback 第一
+                        实例实测：rc4 路径的绿灯纯属续读偏移恰
+                        好越过旧文件末尾的巧合，结果文件读取行
+                        根本没执行）。整行在执行前已被 cmd 完
+                        整解析，同行写法不受覆盖影响。近似判
+                        定：以 copy 行登记的副本变量为 call 的
+                        目标变量。
+
 豁免：行尾或上一行加注释 rem IB-CHECK-EXEMPT <规则号> 可豁免
 该行该规则（命令本身不能带尾随注释时用上一行形式），必须在
 重检清单里逐条写理由。
@@ -252,6 +276,15 @@ def check_file_v2(path: Path):
         _m = re.search(r"(?i)\bset\s+/p\s+\"?([A-Za-z_][A-Za-z0-9_]*)", _l)
         if _m and not re.search(r"(?i)\bset\s+/p\s+[A-Za-z_][A-Za-z0-9_]*\s*=<", _l):
             input_vars.add(_m.group(1).upper())
+    # variables holding a staged copy of this very script (R11):
+    # a copy line whose source ends with this file's own name and
+    # whose target is a %VAR%.
+    self_vars = set()
+    _own = re.escape(path.name)
+    for _l in lines:
+        _m = re.search(r'(?i)\bcopy\s+(?:/[a-z]+\s+)?"[^"]*\\' + _own + r'"\s+"%([A-Za-z_][A-Za-z0-9_]*)%"', _l)
+        if _m:
+            self_vars.add(_m.group(1).upper())
     depth = 0
     prev_lines = []
     for lineno, line in enumerate(lines, 1):
@@ -299,6 +332,16 @@ def check_file_v2(path: Path):
         if "SHA256SUMS" in line.upper() and re.search(r"(?i)Get-Content", line) and not re.search(r"(?i)Get-Content\s+-Encoding\s+UTF8", line) and not exempt(line, "R9", prev_line):
             findings.append((lineno, "R9",
                              "Get-Content reads SHA256SUMS.txt without -Encoding UTF8; the file is generated as UTF-8 (no BOM) and Windows PowerShell 5.1 decodes with the ANSI code page by default, garbling the non-ASCII file names inside"))
+        # R10: echo <digit>> handle redirect instead of a digit write
+        if re.search(r"(?i)\becho\s+\d+>", line) and not exempt(line, "R10", prev_line):
+            findings.append((lineno, "R10",
+                             "echo <digit>> redirects a numbered handle instead of writing the digit (the target receives the echo-state text, and exit /b on that text returns 0); put the redirection first: >file echo <digit>"))
+        # R11: call of the staged self-copy must share its line with the exit
+        for var in self_vars:
+            if re.search(r'(?i)\bcall\s+"%' + var + r'%"', line) and "exit /b" not in line.lower() and not exempt(line, "R11", prev_line):
+                findings.append((lineno, "R11",
+                                 f"call to the staged self-copy %{var}% does not share one line with the exit; after the call, cmd resumes reading the original file by byte offset, and the copy's run may have overwritten it with another version"))
+                break
         # R6: unquoted path-variable token (approximation, see docstring)
         stripped = line.strip()
         if not re.match(r"(?i)set\s", stripped) and not exempt(line, "R6", prev_line):
