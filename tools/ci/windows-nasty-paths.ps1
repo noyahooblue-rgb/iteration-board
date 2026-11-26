@@ -884,7 +884,13 @@ try {
         Check 'N5F rollback log carries the empty-database warning' ($rlog -match 'Do NOT start' -and $rlog -match 'EMPTY')
         Check 'N5F jar untouched by the failed rollback' (((Get-FileHash (Join-Path $Target 'app\iteration-board.jar') -Algorithm SHA256).Hash) -eq $jarHash1)
         Check 'N5F restore.bat untouched by the failed rollback' (((Get-FileHash (Join-Path $Target 'restore.bat') -Algorithm SHA256).Hash) -eq $restoreHash1)
-        Check 'N5F version.txt still 1.1.0' (((Get-Content (Join-Path $Target 'version.txt') -Raw).Trim()) -eq '1.1.0')
+        # version.txt 按首行读（与 verify 层 P1 同口径）：-Raw 整串
+        # Trim 不去 UTF-8 BOM，首跑实测严格 -eq 误报；首行读法对
+        # BOM/行尾不敏感且仍是精确相等。原始字节留痕进证据备查。
+        $vtPath = Join-Path $Target 'version.txt'
+        $vtHex = (([IO.File]::ReadAllBytes($vtPath) | Select-Object -First 16 | ForEach-Object { $_.ToString('X2') }) -join ' ')
+        Note "N5F version.txt first bytes: $vtHex"
+        Check 'N5F version.txt still 1.1.0' (((Get-Content $vtPath) | Select-Object -First 1) -eq '1.1.0')
         $resFile = Join-Path $Target 'tmp\ib-rollback-result.txt'
         Check 'N5F rollback result file exists' (Test-Path $resFile)
         if (Test-Path $resFile) {

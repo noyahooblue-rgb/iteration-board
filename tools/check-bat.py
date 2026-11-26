@@ -103,17 +103,19 @@ packaging/windows 下的 .bat，发现以下已知坑即报错（退出码 1）�
                         >"file" echo 1。
   R11 self-copy-call    脚本把自身拷到别处再 call 副本时（copy
                         源为脚本自身文件名、目标为 %变量%），
-                        call 必须与退出写在同一行：cmd 在 call
-                        返回后按字节偏移续读原文件，而副本执行
-                        期间原文件可能已被覆盖成另一版本——续
-                        读要么越过文件末尾直接落空、要么执行旧
-                        文件的中段（修复轮 5 的 rollback 第一
-                        实例实测：rc4 路径的绿灯纯属续读偏移恰
-                        好越过旧文件末尾的巧合，结果文件读取行
-                        根本没执行）。整行在执行前已被 cmd 完
-                        整解析，同行写法不受覆盖影响。近似判
-                        定：以 copy 行登记的副本变量为 call 的
-                        目标变量。
+                        call 必须独占一行、且下一个有效行是
+                        goto 落点行：cmd 在 call 返回后按字节偏
+                        移续读原文件，而副本执行期间原文件可能
+                        已被覆盖成另一版本——单行 goto 的偏移若
+                        越过新文件末尾，进程继承副本实例的退出
+                        码（与结果文件同值）；文件未被覆盖时
+                        goto 跳到文件尾部落点块显式读结果文件。
+                        同行用 & 串联后续分段（曾拟作修法）经
+                        修复轮 6 真机微复现证伪：被调脚本返回
+                        后同行分段根本不执行，第一实例以退出
+                        码 0 静默结束（结果文件为 1 时亦然）。
+                        近似判定：以 copy 行登记的副本变量为
+                        call 的目标变量，并校验 goto 标签存在。
 
 豁免：行尾或上一行加注释 rem IB-CHECK-EXEMPT <规则号> 可豁免
 该行该规则（命令本身不能带尾随注释时用上一行形式），必须在
@@ -336,11 +338,30 @@ def check_file_v2(path: Path):
         if re.search(r"(?i)\becho\s+\d+>", line) and not exempt(line, "R10", prev_line):
             findings.append((lineno, "R10",
                              "echo <digit>> redirects a numbered handle instead of writing the digit (the target receives the echo-state text, and exit /b on that text returns 0); put the redirection first: >file echo <digit>"))
-        # R11: call of the staged self-copy must share its line with the exit
+        # R11: a call of the staged self-copy must stand alone on its
+        # line (segments chained with & after a batch call are not
+        # executed once the called batch returns - round-6 micro
+        # reproduction on a real Windows runner) and be followed
+        # immediately by a goto to an existing landing-pad label.
         for var in self_vars:
-            if re.search(r'(?i)\bcall\s+"%' + var + r'%"', line) and "exit /b" not in line.lower() and not exempt(line, "R11", prev_line):
-                findings.append((lineno, "R11",
-                                 f"call to the staged self-copy %{var}% does not share one line with the exit; after the call, cmd resumes reading the original file by byte offset, and the copy's run may have overwritten it with another version"))
+            _m11 = re.search(r'(?i)\bcall\s+"%' + var + r'%"', line)
+            if _m11 and not exempt(line, "R11", prev_line):
+                if "&" in line[_m11.end():]:
+                    findings.append((lineno, "R11",
+                                     "segments chained with & after a call of the staged self-copy are not executed once the called batch returns (measured: first instance exited 0 although the result file held 1); the call must stand alone, followed by a goto landing-pad line"))
+                else:
+                    _nxt = ""
+                    for _nl in lines[lineno:]:
+                        if _nl.strip() and not is_comment(_nl):
+                            _nxt = _nl.strip()
+                            break
+                    _gm = re.match(r'(?i)goto\s+:([A-Za-z_][A-Za-z0-9_]*)', _nxt)
+                    if not _gm:
+                        findings.append((lineno, "R11",
+                                         "call of the staged self-copy is not followed by a goto landing-pad line; after the call, cmd resumes reading this file by byte offset, and the copy's run may have overwritten it with another version"))
+                    elif not any(re.match(r'\s*:' + _gm.group(1) + r'\b', _l, re.I) for _l in lines):
+                        findings.append((lineno, "R11",
+                                         f"goto landing-pad label :{_gm.group(1)} does not exist in this file"))
                 break
         # R6: unquoted path-variable token (approximation, see docstring)
         stripped = line.strip()

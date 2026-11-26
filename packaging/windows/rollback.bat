@@ -77,16 +77,25 @@ rem IB_RB_LOG the log file location. The exit code travels
 rem back through a result file (tmp\ib-rollback-result.txt):
 rem the runner writes 1 on entry and 0 only when the rollback
 rem completes, and the first instance exits with the value in
-rem the file. Two cmd parser facts shape this contract
-rem (root-cause ledger #14, Kiro final review of round 5):
-rem the first instance resumes reading THIS file by byte
+rem the file. Three cmd parser facts shape this contract
+rem (root-cause ledger #14; Kiro final review of round 5 and
+rem the round-6 micro-reproduction on a real Windows runner):
+rem (1) the first instance resumes reading THIS file by byte
 rem offset when the call returns - by which time the runner's
 rem robocopy may have replaced it with the bundle's older
-rem copy, so the lines after a separate call line may never
-rem run at all (offset already past the old file's end) or
-rem may run the old file's mid-section. The call and the
-rem exit therefore share ONE line, which cmd parses
-rem completely before executing any of it. And the result
+rem copy. What follows the call is therefore a single goto
+rem line: if the offset already sits past the replaced
+rem file's end, the batch ends at EOF and the process
+rem inherits the runner's own exit code (the same value the
+rem result file holds); if the file is intact or
+rem byte-identical, the goto lands on the :rb_finish block
+rem at the end of this file, which reads the result file
+rem explicitly. (2) Segments chained after a call on the
+rem SAME line with & are NOT executed once the called batch
+rem returns - measured on a real runner: the first instance
+rem ended with exit code 0 and no further output although
+rem the result file held 1. Never put the read/exit on the
+rem call line. (3) The result
 rem writes put the redirection first (>file echo 1): in
 rem "echo 1>file" the 1> redirects handle 1 instead of
 rem writing the digit, the file receives the echo-state
@@ -108,7 +117,8 @@ copy /Y "%ROOT%\rollback.bat" "%IB_RB_SELF%" >nul 2>&1
 if errorlevel 1 goto :rb_stage_failed
 set "IB_RB_RESULT=%ROOT%\tmp\ib-rollback-result.txt"
 if exist "%IB_RB_RESULT%" del "%IB_RB_RESULT%" >nul 2>&1
-call "%IB_RB_SELF%" %IB_ARGS% & (for /f "usebackq delims=" %%R in ("%IB_RB_RESULT%") do exit /b %%R) & exit /b 1
+call "%IB_RB_SELF%" %IB_ARGS%
+goto :rb_finish
 :rb_stage_failed
 call :log [WARN] Could not stage a working copy in tmp - running in place.
 :rb_reexec_done
@@ -269,3 +279,14 @@ rem --- subroutine: write a line to console AND the script log ---
 echo %*
 if defined IB_LOG echo %*>>"%IB_LOG%"
 exit /b 0
+rem --- first-instance landing pad ------------------------------
+rem Reached ONLY by the goto right after the re-exec call above
+rem (the runner instance exits inside the body and never falls
+rem this far; the goto :eof guard keeps it that way). Exits
+rem with the value the runner left in the result file; a
+rem missing or unreadable file keeps the default 1.
+goto :eof
+:rb_finish
+set "IB_RB_EXIT=1"
+if exist "%IB_RB_RESULT%" for /f "usebackq delims=" %%R in ("%IB_RB_RESULT%") do set "IB_RB_EXIT=%%R"
+exit /b %IB_RB_EXIT%
