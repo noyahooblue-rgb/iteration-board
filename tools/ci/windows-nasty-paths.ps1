@@ -875,6 +875,7 @@ try {
         $realBackup = ($dbLine -replace '^DbBackup=', '')
         $jarHash1 = (Get-FileHash (Join-Path $Target 'app\iteration-board.jar') -Algorithm SHA256).Hash
         $restoreHash1 = (Get-FileHash (Join-Path $Target 'restore.bat') -Algorithm SHA256).Hash
+        Note "N5F version.txt exists after upgrade patch: $(Test-Path (Join-Path $Target 'version.txt'))"
         $info = $info | ForEach-Object { if ($_ -like 'DbBackup=*') { 'DbBackup=C:\ibnasty\missing-db-backup' } else { $_ } }
         Set-Content -Path $infoPath -Value $info -Encoding ASCII
         $code = Run-BatAuto (Join-Path $Target 'rollback.bat') @('--yes', '--no-pause') 'n5fail-rollback.log' $Target
@@ -884,13 +885,17 @@ try {
         Check 'N5F rollback log carries the empty-database warning' ($rlog -match 'Do NOT start' -and $rlog -match 'EMPTY')
         Check 'N5F jar untouched by the failed rollback' (((Get-FileHash (Join-Path $Target 'app\iteration-board.jar') -Algorithm SHA256).Hash) -eq $jarHash1)
         Check 'N5F restore.bat untouched by the failed rollback' (((Get-FileHash (Join-Path $Target 'restore.bat') -Algorithm SHA256).Hash) -eq $restoreHash1)
-        # version.txt 按首行读（与 verify 层 P1 同口径）：-Raw 整串
-        # Trim 不去 UTF-8 BOM，首跑实测严格 -eq 误报；首行读法对
-        # BOM/行尾不敏感且仍是精确相等。原始字节留痕进证据备查。
+        # version.txt 断言（防御式：文件缺失也不抛错）：首跑 -Raw
+        # Trim 口径 FAIL、二跑 ReadAllBytes 在文件缺失时抛错中断
+        # 脚本——先留存在性与首行内容 NOTE 钉死事实，再做精确相等
+        # 断言（首行读法与 verify 层 P1 同口径，对 BOM/行尾不敏感）。
         $vtPath = Join-Path $Target 'version.txt'
-        $vtHex = (([IO.File]::ReadAllBytes($vtPath) | Select-Object -First 16 | ForEach-Object { $_.ToString('X2') }) -join ' ')
-        Note "N5F version.txt first bytes: $vtHex"
-        Check 'N5F version.txt still 1.1.0' (((Get-Content $vtPath) | Select-Object -First 1) -eq '1.1.0')
+        $vtExists = Test-Path $vtPath
+        Note "N5F version.txt exists after failed rollback: $vtExists"
+        $vtFirst = $null
+        if ($vtExists) { $vtFirst = (Get-Content $vtPath -ErrorAction SilentlyContinue | Select-Object -First 1) }
+        Note "N5F version.txt first line: [$vtFirst]"
+        Check 'N5F version.txt still 1.1.0' ($vtFirst -eq '1.1.0')
         $resFile = Join-Path $Target 'tmp\ib-rollback-result.txt'
         Check 'N5F rollback result file exists' (Test-Path $resFile)
         if (Test-Path $resFile) {
