@@ -73,7 +73,16 @@ rem because pre-1.1.0 targets have no rollback.bat in the
 rem bundle). Run the working copy from the install's own tmp
 rem folder instead (tmp\ is runtime scratch, never part of a
 rem bundle); IB_RB_ROOT pins the real install root and
-rem IB_RB_LOG the log file location. The copy source is
+rem IB_RB_LOG the log file location. The exit code travels
+rem back through a result file (tmp\ib-rollback-result.txt):
+rem the runner writes 1 on entry and 0 only when the rollback
+rem completes, and the first instance exits with the file's
+rem value when it exists. Nested cmd /c + call layers in
+rem scripted invocations proved able to return a nonzero
+rem process code even when the rollback ran to completion
+rem and logged it (1.1.0 final verification, N5 rc4 case,
+rem three consecutive runs, every state assertion green);
+rem the written result is the trustworthy contract. The copy source is
 rem %ROOT%\rollback.bat rather than %~f0: scripted invocations
 rem (cmd /c with several quoted arguments) can leave %0
 rem pointing at the last argument instead of this file, while
@@ -87,12 +96,17 @@ if not exist "%ROOT%\tmp" mkdir "%ROOT%\tmp"
 set "IB_RB_SELF=%ROOT%\tmp\ib-rollback-runner.bat"
 copy /Y "%ROOT%\rollback.bat" "%IB_RB_SELF%" >nul 2>&1
 if errorlevel 1 goto :rb_stage_failed
+set "IB_RB_RESULT=%ROOT%\tmp\ib-rollback-result.txt"
+if exist "%IB_RB_RESULT%" del "%IB_RB_RESULT%" >nul 2>&1
 call "%IB_RB_SELF%" %IB_ARGS%
 set "IBRC=%ERRORLEVEL%"
+if exist "%IB_RB_RESULT%" for /f "usebackq delims=" %%R in (`powershell -NoProfile -Command "Get-Content $env:IB_RB_RESULT -First 1"`) do set "IBRC=%%R"
 exit /b %IBRC%
 :rb_stage_failed
 call :log [WARN] Could not stage a working copy in tmp - running in place.
 :rb_reexec_done
+if defined IB_RB_ROOT set "IB_RB_RESULT=%IB_RB_ROOT%\tmp\ib-rollback-result.txt"
+if defined IB_RB_RESULT echo 1>"%IB_RB_RESULT%"
 if defined IB_RB_ROOT set "ROOT=%IB_RB_ROOT%"
 if defined IB_RB_LOG set "IB_LOG=%IB_RB_LOG%"
 cd /d "%ROOT%"
@@ -195,6 +209,7 @@ exit /b 1
 
 rem --- start the rolled-back application -------------------------
 net start IterationBoardApp >nul 2>&1
+if defined IB_RB_RESULT echo 0>"%IB_RB_RESULT%"
 call :log [INFO] Rollback complete: program files and database are back
 call :log [INFO] to the state recorded in %SEL%.
 call :ib_pause

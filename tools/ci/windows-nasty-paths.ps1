@@ -49,6 +49,26 @@ function Check([string]$Name, [bool]$Ok) {
   # 只看证据包定位不了失败项（修复轮 5 六跑定位教训）。
   "$(if ($Ok) { 'PASS' } else { 'FAIL' }) $Name" | Out-File -Append -Encoding utf8 (Join-Path $Evidence 'check-results.txt')
 }
+
+function Note-Result([string]$Text) {
+  "NOTE $Text" | Out-File -Append -Encoding utf8 (Join-Path $Evidence 'check-results.txt')
+}
+
+function Find-PatchLog([string]$PatchDir, [string]$TargetDir, [datetime]$Since) {
+  # 先按脚本名前缀在补丁目录里找（真实双击/控制台调用时
+  # 日志就叫 apply-patch-<ts>.log 落在脚本旁）；找不到再到
+  # 目标目录按时间窗兜底：Run-BatAuto 的 cmd /c 调用会把
+  # 带引号参数的脚本 %~n0 错位成最后一个参数，脚本日志
+  # 随之以目标目录名落进目标目录（修复轮 5 七跑实测：
+  # with-arg 三例皆如此，脚本本身跑完且日志完整，纯属
+  # 调用方式的命名错位）。判定口径不变：$Since 之后写过、
+  # 长度 > 200 的最新一份。
+  $hit = Latest-ScriptLog $PatchDir 'apply-patch'
+  if ($hit -and $hit.LastWriteTime -ge $Since -and $hit.Length -gt 200) { return $hit }
+  Get-ChildItem $TargetDir -Filter '*.log' -ErrorAction SilentlyContinue |
+    Where-Object { $_.LastWriteTime -ge $Since -and $_.Length -gt 200 } |
+    Sort-Object LastWriteTime -Descending | Select-Object -First 1
+}
 function Run-BatAuto([string]$BatPath, [string[]]$BatArgs, [string]$LogName, [string]$Cwd, [string]$StdinText = $null) {
   # IB_AUTO/IB_YES 下运行 .bat，返回退出码；控制台输出落证据目录。
   # 经 Process API 以 Arguments 原样串启动 cmd.exe：/c 后跟整行
@@ -149,6 +169,21 @@ function Api-Call($Session, [string]$Method, [string]$Path, $Body) {
   if ($r.Content) { try { $parsed = $r.Content | ConvertFrom-Json } catch { } }
   return [pscustomobject]@{ Status = [int]$r.StatusCode; Body = $parsed; Raw = [string]$r.Content }
 }
+function Api-CallSeed($Session, [string]$Method, [string]$Path, $Body) {
+  # 种子数据的建团队/建事项调用：刚启动的老版本应用在 CI
+  # 负载下偶发瞬时失败（修复轮 5 七跑实测 N4 建团队、
+  # N5-104 建事项各挂一次，注册/登录却都成功）。最多三次
+  # 尝试、每次间隔 4 秒；判定口径不变（最终仍须 2xx）。
+  for ($i = 1; $i -le 3; $i++) {
+    try {
+      $r = Api-Call $Session $Method $Path $Body
+      if ($r.Status -lt 400) { return $r }
+    } catch { $r = $null }
+    if ($i -lt 3) { Start-Sleep -Seconds 4 }
+  }
+  return $r
+}
+
 function Api-Register([string]$Login, [string]$Display, [string]$Pass) {
   # Registration demands a captcha; the code glyphs are <text>
   # nodes in the issued SVG (same approach as tools/windows-e2e).
@@ -416,15 +451,15 @@ try {
           Check "$tag manual branch first [ERROR] is the service restart step" ($errLines.Count -ge 1 -and $errLines[0] -match 'Application failed to start after the patch')
           Check "$tag printed migration log is the install-time log (app.log untouched by the patch run)" ($null -ne $appLogHashBefore -and (Get-FileHash $appLogPath -Algorithm SHA256).Hash -eq $appLogHashBefore)
           Dump-Forensics "n1-$($ph.Tag)-$mode-postpatch" $Rc4Target
-          $slog = Latest-ScriptLog $patchBat.Directory.FullName 'apply-patch'
-          Check "$tag apply-patch script log written (no flash exit)" ($null -ne $slog -and $slog.LastWriteTime -ge $before -and $slog.Length -gt 200)
+          $slog = Find-PatchLog $patchBat.Directory.FullName $Rc4Target $before
+          Check "$tag apply-patch script log written (no flash exit)" ($null -ne $slog)
         } else {
           $args = @()
           if ($mode -eq 'with-arg') { $args = @($Rc4Target) }
           $code = Run-BatAuto $patchBat.FullName $args "n1-$($ph.Tag)-$mode.log" $patchBat.Directory.FullName
           Check "$tag apply-patch exit 0" ($code -eq 0)
-          $slog = Latest-ScriptLog $patchBat.Directory.FullName 'apply-patch'
-          Check "$tag apply-patch script log written (no flash exit)" ($null -ne $slog -and $slog.LastWriteTime -ge $before -and $slog.Length -gt 200)
+          $slog = Find-PatchLog $patchBat.Directory.FullName $Rc4Target $before
+          Check "$tag apply-patch script log written (no flash exit)" ($null -ne $slog)
           Check "$tag target upgraded to 1.1.0" (((Get-Content (Join-Path $Rc4Target 'version.txt') -Raw) -match '1.1.0' -and (Get-Content (Join-Path $Rc4Target 'version.txt') -Raw) -notmatch 'rc'))
           Check "$tag app healthy after patch" (Wait-Health)
           Check "$tag /meta version 1.1.0" ((Get-MetaVersion) -eq '1.1.0')
@@ -443,6 +478,7 @@ try {
   Check 'N2 healthy' (Wait-Health)
   $code = Run-BatAuto (Join-Path $NastyTarget 'backup.bat') @('auto') 'n2-backup.log' $NastyTarget
   Check 'N2 backup.bat auto exit 0' ($code -eq 0)
+  $rbBefore = Get-Date
   $code = Run-BatAuto (Join-Path $NastyTarget 'reset-admin.bat') @('--no-pause') 'n2-reset-admin.log' $NastyTarget
   Check 'N2 reset-admin.bat exit 0' ($code -eq 0)
   # Log hygiene (final-verification item 3): the temporary
@@ -455,6 +491,14 @@ try {
     if ($pwm) {
       $tempPw = $pwm.Matches[0].Groups[1].Value
       $rlog = Latest-ScriptLog $NastyTarget 'reset-admin'
+      if (-not $rlog) {
+        # 同 Find-PatchLog 的命名错位：reset-admin 被带参直接
+        # 调用时 %~n0 错位，日志以参数名落盘，前缀 glob 找不到；
+        # 按运行时间窗取目标目录里最新一份日志即它本人的。
+        $rlog = Get-ChildItem $NastyTarget -Filter '*.log' -ErrorAction SilentlyContinue |
+          Where-Object { $_.LastWriteTime -ge $rbBefore } |
+          Sort-Object LastWriteTime -Descending | Select-Object -First 1
+      }
       Check 'N2 reset-admin script log free of the temp password' ($null -ne $rlog -and ((Get-Content $rlog.FullName -Raw) -notmatch [regex]::Escape($tempPw)))
       $appLog = Join-Path $NastyTarget 'logs\app.log'
       Check 'N2 app log free of the temp password' ((-not (Test-Path $appLog)) -or ((Get-Content $appLog -Raw) -notmatch [regex]::Escape($tempPw)))
@@ -606,10 +650,10 @@ try {
     Check 'N4 seed ordinary user registered on 1.0.4' ($null -ne $userS)
     $teamId = $null
     if ($adminS) {
-      $tr = Api-Call $adminS 'Post' '/teams' @{ name = 'N4 Seed Team'; code = 'N4SEED' }
+      $tr = Api-CallSeed $adminS 'Post' '/teams' @{ name = 'N4 Seed Team'; code = 'N4SEED' }
       if ($tr.Body -and $tr.Body.id) { $teamId = [long]$tr.Body.id }
       if ($teamId) {
-        $ir = Api-Call $adminS 'Post' "/teams/$teamId/items" @{ type = 'TASK'; title = $marker }
+        $ir = Api-CallSeed $adminS 'Post' "/teams/$teamId/items" @{ type = 'TASK'; title = $marker }
         Check 'N4 seed item created' ($ir.Status -lt 300)
       }
     }
@@ -648,6 +692,7 @@ try {
     }
     $code = Run-BatAuto (Join-Path $chainTarget 'rollback.bat') @('--yes', '--no-pause') 'n4-rollback.log' $chainTarget
     Check 'N4 rollback.bat exit 0' ($code -eq 0)
+    Note-Result "N4 rollback exit code was $code"
     Check 'N4 healthy after rollback (legacy version serving)' (Wait-HealthLegacy)
     Check 'N4 version.txt removed by rollback (legacy layout restored)' (-not (Test-Path (Join-Path $chainTarget 'version.txt')))
     $flyAfter = Invoke-PsqlScalar $chainTarget 'select version from flyway_schema_history where success order by installed_rank desc limit 1'
@@ -719,10 +764,10 @@ try {
     Check "N5 $Tag seed admin registered" ($null -ne $seedS)
     $teamId = $null
     if ($seedS) {
-      $tr = Api-Call $seedS 'Post' '/teams' @{ name = "N5 Seed Team $Tag"; code = $TeamCode }
+      $tr = Api-CallSeed $seedS 'Post' '/teams' @{ name = "N5 Seed Team $Tag"; code = $TeamCode }
       if ($tr.Body -and $tr.Body.id) { $teamId = [long]$tr.Body.id }
       if ($teamId) {
-        $ir = Api-Call $seedS 'Post' "/teams/$teamId/items" @{ type = 'TASK'; title = $marker }
+        $ir = Api-CallSeed $seedS 'Post' "/teams/$teamId/items" @{ type = 'TASK'; title = $marker }
         Check "N5 $Tag seed item created" ($ir.Status -lt 300)
       }
     }
@@ -742,6 +787,7 @@ try {
       Check "N5 $Tag rollback bundle recorded by the failed patch" ($null -ne $bundle)
       $code = Run-BatAuto (Join-Path $Target 'rollback.bat') @('--yes', '--no-pause') "n5-$Tag-rollback.log" $Target
       Check "N5 $Tag rollback.bat exit 0 after failed upgrade" ($code -eq 0)
+      Note-Result "N5 $Tag rollback exit code was $code"
       $rlog = Get-Content (Join-Path $Evidence "n5-$Tag-rollback.log") -Raw
       Check "N5 $Tag rollback log clean (no dump-not-found / parse errors)" ($rlog -notmatch 'db\.dump" not found' -and $rlog -notmatch 'was unexpected at this time')
       Check "N5 $Tag jar restored to pre-upgrade bytes" (((Get-FileHash (Join-Path $Target 'app\iteration-board.jar') -Algorithm SHA256).Hash) -eq $jarHash0)
