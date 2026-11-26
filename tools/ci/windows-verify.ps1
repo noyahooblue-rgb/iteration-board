@@ -76,6 +76,8 @@ function Check([string]$Name, $Ok) {
     Write-Host "  FAIL  $Name"
     $script:Failures += $Name
   }
+  # 判定结果同时落进证据目录（同 windows-nasty-paths.ps1 的口径）。
+  "$(if ($Ok) { 'PASS' } else { 'FAIL' }) $Name" | Out-File -Append -Encoding utf8 (Join-Path $Evidence 'check-results.txt')
 }
 
 function Phase([string]$Name) {

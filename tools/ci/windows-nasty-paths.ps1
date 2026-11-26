@@ -45,6 +45,9 @@ New-Item -ItemType Directory -Force -Path $Evidence | Out-Null
 
 function Check([string]$Name, [bool]$Ok) {
   if ($Ok) { Write-Host "PASS $Name" } else { Write-Host "::error::FAIL $Name"; $script:Failures += $Name }
+  # 判定结果同时落进证据目录：步骤日志不在 artifact 里，
+  # 只看证据包定位不了失败项（修复轮 5 六跑定位教训）。
+  "$(if ($Ok) { 'PASS' } else { 'FAIL' }) $Name" | Out-File -Append -Encoding utf8 (Join-Path $Evidence 'check-results.txt')
 }
 function Run-BatAuto([string]$BatPath, [string[]]$BatArgs, [string]$LogName, [string]$Cwd, [string]$StdinText = $null) {
   # IB_AUTO/IB_YES 下运行 .bat，返回退出码；控制台输出落证据目录。
