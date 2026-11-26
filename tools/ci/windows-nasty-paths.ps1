@@ -662,10 +662,10 @@ try {
     Check 'N4 seed ordinary user registered on 1.0.4' ($null -ne $userS)
     $teamId = $null
     if ($adminS) {
-      $tr = Api-CallSeed $adminS 'Post' '/teams' @{ name = 'N4 Seed Team'; code = 'N4SEED' }
+      $tr = Api-CallSeed $adminS 'Post' '/teams' @{ name = 'N4 Seed Team'; code = 'NSEED' }
       if ($tr.Body -and $tr.Body.id) { $teamId = [long]$tr.Body.id }
       if ($teamId) {
-        $ir = Api-CallSeed $adminS 'Post' "/teams/$teamId/items" @{ type = 'TASK'; title = $marker }
+        $ir = Api-CallSeed $adminS 'Post' "/teams/$teamId/items" @{ type = 'DEFECT'; title = $marker }
         Check 'N4 seed item created' ($ir.Status -lt 300)
       }
     }
@@ -779,7 +779,11 @@ try {
       $tr = Api-CallSeed $seedS 'Post' '/teams' @{ name = "N5 Seed Team $Tag"; code = $TeamCode }
       if ($tr.Body -and $tr.Body.id) { $teamId = [long]$tr.Body.id }
       if ($teamId) {
-        $ir = Api-CallSeed $seedS 'Post' "/teams/$teamId/items" @{ type = 'TASK'; title = $marker }
+        # 事项类型用 DEFECT：1.0.4 世代 TASK/STORY 仅 PO 可建
+        # （403「只有 PO 可以创建任务」），建团队者是 LEADER
+        # 非 PO；DEFECT 两世代都不设门控。种子只需一条可
+        # 持久、可列出的事项验存续，不挑类型。
+        $ir = Api-CallSeed $seedS 'Post' "/teams/$teamId/items" @{ type = 'DEFECT'; title = $marker }
         Check "N5 $Tag seed item created" ($ir.Status -lt 300)
       }
     }
