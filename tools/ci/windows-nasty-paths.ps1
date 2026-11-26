@@ -65,9 +65,15 @@ function Find-PatchLog([string]$PatchDir, [string]$TargetDir, [datetime]$Since) 
   # 长度 > 200 的最新一份。
   $hit = Latest-ScriptLog $PatchDir 'apply-patch'
   if ($hit -and $hit.LastWriteTime -ge $Since -and $hit.Length -gt 200) { return $hit }
-  Get-ChildItem $TargetDir -Filter '*.log' -ErrorAction SilentlyContinue |
-    Where-Object { $_.LastWriteTime -ge $Since -and $_.Length -gt 200 } |
-    Sort-Object LastWriteTime -Descending | Select-Object -First 1
+  # 错位时的实际落点是目标目录的父目录（%~dp0 取的是参数
+  # 路径的目录部分）；目标目录本身也一并扫。
+  foreach ($d in @($TargetDir, (Split-Path $TargetDir -Parent))) {
+    $hit = Get-ChildItem $d -Filter '*.log' -ErrorAction SilentlyContinue |
+      Where-Object { $_.LastWriteTime -ge $Since -and $_.Length -gt 200 } |
+      Sort-Object LastWriteTime -Descending | Select-Object -First 1
+    if ($hit) { return $hit }
+  }
+  return $null
 }
 function Run-BatAuto([string]$BatPath, [string[]]$BatArgs, [string]$LogName, [string]$Cwd, [string]$StdinText = $null) {
   # IB_AUTO/IB_YES 下运行 .bat，返回退出码；控制台输出落证据目录。
@@ -180,6 +186,12 @@ function Api-CallSeed($Session, [string]$Method, [string]$Path, $Body) {
       if ($r.Status -lt 400) { return $r }
     } catch { $r = $null }
     if ($i -lt 3) { Start-Sleep -Seconds 4 }
+  }
+  if ($null -eq $r) {
+    Note-Result "seed $Method $Path failed after 3 attempts (transport error / timeout)"
+  } else {
+    $snip = ([string]$r.Raw); if ($snip.Length -gt 300) { $snip = $snip.Substring(0, 300) }
+    Note-Result "seed $Method $Path failed after 3 attempts: status $($r.Status) body $snip"
   }
   return $r
 }
